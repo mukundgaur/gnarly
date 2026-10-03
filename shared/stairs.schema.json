@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly stair zones",
+  "description": "Stairwells are separate zones from the floor map that detected them. Each stair zone has its own world map, a prev pointer to the floor below, a next pointer to the floor above, and a floorIndex hashmap from stair id plus direction to the floor that exit lands on.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "stairs", "floorIndex", "connections"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "stairs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/stairZone" }
+    },
+    "floorIndex": {
+      "type": "array",
+      "description": "Hash map entries. Key is stairId plus direction (up or down). Value is the floor you are on after taking that stair.",
+      "items": { "$ref": "#/$defs/floorIndexEntry" }
+    },
+    "connections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/connection" }
+    },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "floorPointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["floorId", "zoneId", "story"],
+      "properties": {
+        "floorId": { "type": "string", "minLength": 1 },
+        "zoneId": { "type": "string", "minLength": 1 },
+        "story": { "type": "integer" }
+      }
+    },
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "stairZone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "zoneId", "position", "scanned"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "zoneId": { "type": "string", "minLength": 1 },
+        "roomPlanIdentifier": { "type": ["string", "null"] },
+        "detectedOnFloorId": { "type": ["string", "null"] },
+        "detectedOnZoneId": { "type": ["string", "null"] },
+        "position": { "$ref": "#/$defs/vec3" },
+        "prev": {
+          "description": "Floor below this stair.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/floorPointer" }]
+        },
+        "next": {
+          "description": "Floor above this stair.",
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/floorPointer" }]
+        },
+        "scanned": {
+          "type": "boolean",
+          "description": "True after the stair zone has its own ARWorldMap scan."
+        },
+        "landingBelow": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/vec3" }] },
+        "landingAbove": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/vec3" }] }
+      }
+    },
+    "floorIndexEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stairId", "direction", "floorId", "zoneId", "story"],
+      "properties": {
+        "stairId": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["up", "down"] },
+        "floorId": { "type": "string", "minLength": 1 },
+        "zoneId": { "type": "string", "minLength": 1 },
+        "story": { "type": "integer" }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromZoneId", "fromFloorId", "fromNodeId", "toZoneId", "kind"],
+      "properties": {
+        "fromZoneId": { "type": "string", "minLength": 1 },
+        "fromFloorId": { "type": "string", "minLength": 1 },
+        "fromNodeId": { "type": "string", "minLength": 1 },
+        "toZoneId": { "type": "string", "minLength": 1 },
+        "toFloorId": { "type": ["string", "null"] },
+        "kind": { "enum": ["floor-to-stairs", "stairs-to-floor"] }
+      }
+    }
+  }
+}

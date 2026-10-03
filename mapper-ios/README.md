@@ -22,7 +22,13 @@ Target a LiDAR-capable iPhone running iOS 17 or later. Before testing, record th
 4. Stand at the Unity cube test point and tap **Mark test anchor** (optional if you already recorded a node).
 5. Export and share the package.
 
-Do not restart the AR session between scanning, recording nodes, and exporting.
+Do not restart the AR session between scanning, recording nodes, and exporting one map. A stairwell is a different map: finish the floor, then start a stair scan, which resets tracking so the stair zone gets its own `ARWorldMap`.
+
+## Stairs
+
+RoomPlan’s stair object becomes a separate zone. The floor graph keeps that object as a portal node. `prev` is the floor below and `next` is the floor above. Export writes `zone-connections.json`, which the navigator’s multi-zone A* already follows: the floor node links to `landing-below` or `landing-above` in the stair zone.
+
+Tap **Stairs** after the floor scan. That starts a new world map for the stairwell. On the other floor, pick the same stair zone and mark that floor as above or below before exporting. Upload each zone; the stair links upload with the package.
 
 ## Export checklist
 
@@ -32,6 +38,7 @@ Do not restart the AR session between scanning, recording nodes, and exporting.
 - `scan-features.json` validates against [../shared/scan-features.schema.json](../shared/scan-features.schema.json).
 - `building.json` validates against [../shared/building.schema.json](../shared/building.schema.json).
 - If two or more nodes were recorded, `route.json` validates against [../shared/route.schema.json](../shared/route.schema.json).
+- If a stair was detected or linked, `stairs.json` validates against [../shared/stairs.schema.json](../shared/stairs.schema.json).
 - The anchor, route, and graph use the same `zoneId` as the world map.
 - Share the generated package directory; do not commit real capture artifacts.
 
@@ -41,10 +48,8 @@ Uploading from the mapper publishes raw `scan.json`, normalized `scan-features.j
 
 A zone is one scan with its own ARWorldMap. Scan each floor area as one zone and each staircase as its own zone (for example `floor-1`, `stairs-a`, `floor-2`). The Unity navigator plans A* across zones using `zone-connections.json` ([schema](../shared/zone-connections.schema.json), [example](../shared/examples/zone-connections.example.json)). Each connection links two nodes that are physically next to each other in different zones, and has A* weight 1.
 
-Still to do in the mapper:
+RoomPlan’s `stairs` object is the stair mapping. Finish the floor scan, export it, then tap **Stairs** and scan the stairwell as its own zone. The mapper writes `zone-connections.json`: the floor’s stair node links to `landing-below` or `landing-above` in the stair zone. `prev` is the floor below and `next` is the floor above. Uploading a package also uploads that file to `buildings/{buildingId}/{versionId}/zone-connections.json`, which the navigator already uses for multi-zone A*.
 
-- At every place where zones meet, record a labeled node in **both** scans. For example, in `floor-1` add a node labeled `Stairs bottom` beside the staircase, and in `stairs-a` add `Landing bottom` at the same spot. Labels become stable node IDs (`stairs-bottom`, `landing-bottom`); RoomPlan-derived IDs such as `stairs-1a2b3c4d` change on every scan.
-- Export or author `zone-connections.json` that links those IDs. Until the mapper generates it, write it by hand.
-- Firebase stores only one `building.json` per version (`buildings/{buildingId}/{versionId}/building.json`), and the navigator requires its `zoneId` to match the zone being downloaded. A building with several zones therefore needs per-zone graphs in Firebase before every zone downloads. Also upload `zone-connections.json` to `buildings/{buildingId}/{versionId}/zone-connections.json`; the navigator downloads it when present.
+Doors and other non-stair portals can still be added by editing the JSON before **Publish zone connections**. Firebase still needs each zone uploaded under the same version, with that zone’s own `building.json`.
 
 `building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

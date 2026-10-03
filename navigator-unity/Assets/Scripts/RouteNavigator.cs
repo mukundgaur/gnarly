@@ -39,6 +39,10 @@ public class RouteNavigator : MonoBehaviour
 
     public bool IsActive => route != null;
     public bool HasArrived { get; private set; }
+    public string TargetWaypointId =>
+        route?.waypoints == null || route.waypoints.Length == 0
+            ? null
+            : route.waypoints[Mathf.Clamp(targetIndex, 0, route.waypoints.Length - 1)].id;
     public string StatusMessage { get; private set; } = "";
 
     public void Begin(Route route, Transform sessionSpace, Camera arCamera)
