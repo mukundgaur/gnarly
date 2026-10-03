@@ -77,8 +77,24 @@ enum BuildingGraphBuilder {
             )
         }
 
+        for section in room.sections where section.label != .unidentified {
+            let id = uniqueID(preferred: "section-\(section.label.rawValue)", used: &usedIDs)
+            nodes.append(
+                BuildingNode(
+                    id: id,
+                    floor: floorID,
+                    type: GraphNodeType.hallway.rawValue,
+                    position: [section.center.x, section.center.y, section.center.z],
+                    source: "roomplan-hint",
+                    label: section.label.rawValue,
+                    roomPlanIdentifier: nil
+                )
+            )
+        }
+
+        var edges = RoomPlanVisibilityGraph.edges(nodes: nodes, room: room)
+
         let recordedNodes = nodes.filter { $0.source == "recorded" }
-        var edges: [BuildingEdge] = []
         if recordedNodes.count >= 2 {
             for index in 0 ..< (recordedNodes.count - 1) {
                 let from = recordedNodes[index]
@@ -104,7 +120,7 @@ enum BuildingGraphBuilder {
             floors: [floor],
             nodes: nodes,
             edges: edges,
-            notes: "Recorded nodes are walk order in this zone. RoomPlan doors, openings, and stairs are unconnected hints — confirm labels and add remaining edges before routing."
+            notes: "Primary nodes are RoomPlan doors, openings, stairs, and sections. Visibility edges skip walls except at portals. Optional recorded taps add entrance/destination labels."
         )
     }
 
@@ -118,7 +134,7 @@ enum BuildingGraphBuilder {
             heightReference: graph.heightReference,
             waypoints: waypoints.map { RouteDocument.Waypoint(id: $0.id, position: $0.position) },
             capturedAt: graph.capturedAt,
-            notes: "Walk order recorded in the mapper. Replace with an A* path once building.json edges are confirmed."
+            notes: "Fallback walk-order path. Unity prefers A* over visibility edges in building.json / scan-features.json."
         )
     }
 

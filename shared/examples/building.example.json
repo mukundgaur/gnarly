@@ -17,7 +17,8 @@
   "edges": [
     { "from": "entrance", "to": "hallway-2", "kind": "hallway", "meters": 6.0, "source": "recorded" },
     { "from": "hallway-2", "to": "stairs-bottom", "kind": "hallway", "meters": 2.8, "source": "recorded" },
+    { "from": "hallway-2", "to": "door-abcd1234", "kind": "hallway", "meters": 3.6, "source": "visibility" },
     { "from": "stairs-bottom", "to": "room-204", "kind": "hallway", "meters": 4.0, "source": "recorded" }
   ],
-  "notes": "Illustrative graph only. RoomPlan hint nodes are unconnected until confirmed."
+  "notes": "Illustrative graph. RoomPlan portals get visibility edges; recorded taps label entrance and destination."
 }

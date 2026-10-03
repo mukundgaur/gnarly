@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Unity.Collections;
 using Unity.XR.CoreUtils;
@@ -16,7 +17,7 @@ using UnityEngine.InputSystem.UI;
 
 /// <summary>
 /// Loads the mapper's ARWorldMap, waits for ARKit to relocalize, then places the test cube
-/// and, if route.json is present, starts route guidance.
+/// and routes with A* over the RoomPlan visibility graph (scan-features.json / building.json).
 /// </summary>
 public class RelocalizationController : MonoBehaviour
 {
@@ -26,6 +27,7 @@ public class RelocalizationController : MonoBehaviour
     [SerializeField] XROrigin origin;
     [SerializeField] RouteNavigator navigator;
     [SerializeField] string zoneId = "zone-a";
+    [SerializeField] string floorId = "ground";
     [SerializeField] float cubeSize = 0.2f;
     [Tooltip("Debug only: skip the world map so coordinates are relative to where the app starts.")]
     [SerializeField] bool skipWorldMap;
@@ -33,9 +35,12 @@ public class RelocalizationController : MonoBehaviour
     State state = State.WaitingForSession;
     bool sawRelocalizing;
     TestAnchor anchor;
-    Route route;
+    Route fallbackRoute;
+    Pathfinding.Graph navigationGraph;
     GameObject cube;
     Text statusText;
+    RectTransform destinationPanel;
+    readonly List<GameObject> destinationButtons = new List<GameObject>();
 #if UNITY_IOS && !UNITY_EDITOR
     ARWorldMap? appliedWorldMap;
 #endif
@@ -104,7 +109,20 @@ public class RelocalizationController : MonoBehaviour
         {
             anchor = TestAnchor.Parse(File.ReadAllText(Path.Combine(PackageDirectory, "test-anchor.json")), zoneId);
             var routePath = Path.Combine(PackageDirectory, "route.json");
-            route = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), zoneId) : null;
+            fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), zoneId) : null;
+
+            Pathfinding.ScanFeatures scan = null;
+            Pathfinding.BuildingDocument building = null;
+            var scanPath = Path.Combine(PackageDirectory, "scan-features.json");
+            if (File.Exists(scanPath))
+                scan = Pathfinding.ParseScan(File.ReadAllText(scanPath));
+            var buildingPath = Path.Combine(PackageDirectory, "building.json");
+            if (File.Exists(buildingPath))
+                building = Pathfinding.ParseBuilding(File.ReadAllText(buildingPath));
+            navigationGraph = scan != null || building != null
+                ? Pathfinding.Build(scan, building, floorId)
+                : null;
+
             if (!skipWorldMap)
                 ApplyWorldMap(File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin")));
             sawRelocalizing = false;
@@ -157,10 +175,25 @@ public class RelocalizationController : MonoBehaviour
     {
         PlaceCube();
         state = State.Located;
-        if (route != null && navigator != null)
-            navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        if (navigationGraph != null && navigationGraph.Nodes.Count >= 2)
+        {
+            var destinations = navigationGraph.Destinations();
+            if (destinations.Count == 1)
+                RouteTo(destinations[0].id);
+            else if (destinations.Count > 1)
+            {
+                ShowDestinations(destinations);
+                SetStatus("Located. Choose a destination.");
+            }
+            else if (fallbackRoute != null && navigator != null)
+                navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
+            else
+                SetStatus("Located (graph has no destination nodes)");
+        }
+        else if (fallbackRoute != null && navigator != null)
+            navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
         else
-            SetStatus(route == null ? "Located (no route.json)" : "Located");
+            SetStatus(fallbackRoute == null ? "Located (no graph or route.json)" : "Located");
     }
 
     void PlaceCube()
@@ -179,11 +212,72 @@ public class RelocalizationController : MonoBehaviour
         Debug.Log($"[Gnarly] Placed cube at session-space {cube.transform.localPosition}.");
     }
 
+    Vector3 CameraArkitPosition()
+    {
+        var session = origin.TrackablesParent.InverseTransformPoint(origin.Camera.transform.position);
+        return new Vector3(session.x, session.y, -session.z);
+    }
+
+    void RouteTo(string goalId)
+    {
+        if (navigationGraph == null || navigator == null) return;
+        var startId = navigationGraph.NearestNodeId(CameraArkitPosition());
+        if (startId == null)
+        {
+            SetStatus("Located, but the graph has no nodes.");
+            return;
+        }
+
+        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
+        if (path == null || path.Count < 2)
+        {
+            SetStatus($"No A* path from {startId} to {goalId}. Look around or pick another destination.");
+            return;
+        }
+
+        var route = Pathfinding.ToRoute(navigationGraph, path, zoneId);
+        navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        ClearDestinationButtons();
+        if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
+        SetStatus(navigator.StatusMessage);
+        Debug.Log($"[Gnarly] A* {string.Join(" -> ", path)}");
+    }
+
+    void ShowDestinations(List<Pathfinding.Node> destinations)
+    {
+        if (destinationPanel == null) return;
+        ClearDestinationButtons();
+        destinationPanel.gameObject.SetActive(true);
+        for (var i = 0; i < destinations.Count; i++)
+        {
+            var node = destinations[i];
+            var button = CreateRect($"Dest-{node.id}", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(16, -100 - i * 100), new Vector2(-16, -20 - i * 100));
+            button.gameObject.AddComponent<Image>().color = new Color(1, 1, 1, 0.9f);
+            var captured = node.id;
+            button.gameObject.AddComponent<Button>().onClick.AddListener(() => RouteTo(captured));
+            var label = CreateRect("Label", button, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
+            label.font = statusText.font;
+            label.fontSize = 36;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = Color.black;
+            label.text = string.IsNullOrEmpty(node.label) ? node.id : node.label;
+            destinationButtons.Add(button.gameObject);
+        }
+    }
+
+    void ClearDestinationButtons()
+    {
+        foreach (var button in destinationButtons) Destroy(button);
+        destinationButtons.Clear();
+    }
+
     public void Retry()
     {
         if (cube != null) Destroy(cube);
         cube = null;
         if (navigator != null) navigator.Clear();
+        ClearDestinationButtons();
+        if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
         session.Reset();
         SetStatus("Restarting…");
@@ -230,6 +324,9 @@ public class RelocalizationController : MonoBehaviour
         label.alignment = TextAnchor.MiddleCenter;
         label.color = Color.black;
         label.text = "Retry";
+
+        destinationPanel = CreateRect("DestinationPanel", canvasObject.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(40, 280), new Vector2(-40, 900));
+        destinationPanel.gameObject.SetActive(false);
 
         if (FindAnyObjectByType<EventSystem>() == null)
         {

@@ -28,16 +28,17 @@ Copy the mapper's files into `Assets/StreamingAssets/zone-a/` before building. T
 | --- | --- | --- |
 | `worldmap-zone-a.bin` | Yes | Applied to ARKit for relocalization |
 | `test-anchor.json` | Yes | Position of the test cube ([schema](../shared/test-anchor.schema.json)) |
-| `route.json` | No | Waypoints for path guidance ([schema](../shared/route.schema.json)) |
+| `scan-features.json` | No | RoomPlan walls/doors used to build the visibility graph |
+| `building.json` | No | Graph nodes/edges plus destination labels ([schema](../shared/building.schema.json)) |
+| `route.json` | No | Fallback polyline if A* has no destination ([schema](../shared/route.schema.json)) |
 
-The mapper exports `route.json` when at least two graph nodes are recorded (see [../mapper-ios/README.md](../mapper-ios/README.md)); you can still hand-write one from [../shared/examples/route.example.json](../shared/examples/route.example.json) to test.
+The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
 
 ## Behavior
 
 1. **Starting camera…** until ARKit tracks.
 2. **Locating…** after the world map is applied, until ARKit reports it has relocalized.
-3. The cube appears at the test anchor. With a route, a pulsing path is drawn on the floor from the user through the remaining waypoints, with a pillar at the destination. When the next waypoint is off-screen, an edge arrow with "Turn left/right/around" points toward it. The status shows the remaining distance, then "You have arrived".
-4. If tracking is lost, the path is hidden until tracking recovers. **Retry** resets the session and reapplies the map.
+3. The cube appears at the test anchor. Unity builds a visibility graph from RoomPlan doors/openings/stairs, runs A* from the nearest node to the chosen destination, and draws that path. If tracking is lost, the path is hidden until tracking recovers. **Retry** resets the session and reapplies the map.
 
 ARKit positions are converted to Unity by negating Z (right-handed to left-handed).
 
@@ -45,6 +46,6 @@ ARKit positions are converted to Unity by negating Z (right-handed to left-hande
 
 - `Assets/Scripts/RelocalizationController.cs`: session flow, map loading, cube placement, status UI. `skipWorldMap` is a debug toggle that skips relocalization so route coordinates are relative to where the app starts.
 - `Assets/Scripts/RouteNavigator.cs`: path ribbon, waypoint markers, off-screen turn arrow.
-- `Assets/Scripts/TestAnchor.cs`, `Assets/Scripts/Route.cs`: JSON contracts.
+- `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections and A*.
 
 Commit `Assets/`, `Packages/`, and `ProjectSettings/` only.
