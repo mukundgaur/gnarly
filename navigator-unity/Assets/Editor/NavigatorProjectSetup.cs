@@ -3,6 +3,7 @@ using System.Linq;
 using Unity.XR.CoreUtils;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEditor.XR.ARKit;
 using UnityEditor.XR.Management;
@@ -35,6 +36,7 @@ public static class NavigatorProjectSetup
         ConfigureRenderers();
         CreateScene();
         EnsureStreamingAssetsFolder();
+        CopyFirebaseConfig();
         AssetDatabase.SaveAssets();
         Debug.Log("[Gnarly] Navigator project configured. Switch the build profile to iOS before building.");
     }
@@ -192,5 +194,48 @@ public static class NavigatorProjectSetup
     {
         Directory.CreateDirectory("Assets/StreamingAssets/zone-a");
         AssetDatabase.Refresh();
+    }
+
+    [MenuItem("Gnarly/Copy Firebase Config")]
+    public static void CopyFirebaseConfig()
+    {
+        Directory.CreateDirectory("Assets/StreamingAssets");
+        var destination = Path.GetFullPath("Assets/StreamingAssets/GoogleService-Info.plist");
+        if (File.Exists(destination))
+        {
+            Debug.Log($"[Gnarly] Keeping existing Firebase config at {destination}.");
+            return;
+        }
+
+        var source = Path.GetFullPath("FirebaseConfig/GoogleService-Info.plist");
+        if (!File.Exists(source))
+        {
+            Debug.LogWarning(
+                "[Gnarly] Firebase config was not found. Register the navigator's bundle ID in Firebase, " +
+                "then place its GoogleService-Info.plist in navigator-unity/FirebaseConfig or " +
+                "Assets/StreamingAssets before building.");
+            return;
+        }
+
+        File.Copy(source, destination, false);
+        AssetDatabase.ImportAsset("Assets/StreamingAssets/GoogleService-Info.plist");
+        Debug.Log($"[Gnarly] Copied Firebase config to {destination}. This local file is ignored by Git.");
+    }
+}
+
+public sealed class NavigatorFirebaseBuildValidator : IPreprocessBuildWithReport
+{
+    public int callbackOrder => 0;
+
+    public void OnPreprocessBuild(BuildReport report)
+    {
+        if (report.summary.platform != BuildTarget.iOS) return;
+        NavigatorProjectSetup.CopyFirebaseConfig();
+        if (!File.Exists("Assets/StreamingAssets/GoogleService-Info.plist"))
+            throw new BuildFailedException(
+                "Firebase configuration is missing. Add the navigator app's GoogleService-Info.plist to " +
+                "navigator-unity/FirebaseConfig or navigator-unity/Assets/StreamingAssets, then build again.");
+        if (!FirebaseNavigationPackageRepository.TryLoadConfig(out _, out var error))
+            throw new BuildFailedException(error);
     }
 }

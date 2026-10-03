@@ -41,8 +41,12 @@ Do not assume a Swift-saved `ARWorldMap` can be applied directly by Unity. Test 
 
 ## Not part of this task
 
-No Firebase, destination search, routing, RoomPlan parsing, minimap, two-floor behavior, or visual polish. Record tested versions, bridge approach, and any blockers in [integration-notes.md](integration-notes.md).
+The original cube proof excluded Firebase, destination search, routing, RoomPlan parsing, minimap, two-floor behavior, and visual polish. Firebase package delivery and route guidance were added later as described below. Record tested versions, bridge approach, and any blockers in [integration-notes.md](integration-notes.md).
 
 ## Added: route guidance
 
 Path display has been started ahead of the cube proof. The Unity app reads an optional `route.json` ([schema](../shared/route.schema.json)) and draws a floor path through its waypoints, with an edge arrow when the next waypoint is off-screen. The mapper records walk-order nodes and exports `route.json` plus `building.json` (see [../mapper-ios/README.md](../mapper-ios/README.md)). Path finding (A*/graph routing) is still out of scope on the Unity side; the drawn route is the recorded waypoint order.
+
+## Added: Firebase package delivery
+
+The navigator signs in with Firebase email/password, reads a building's active version from Firestore, and downloads `building.json` plus the selected zone's ARWorldMap from Cloud Storage. It validates deterministic Storage paths and caches only complete packages under `Application.persistentDataPath`, allowing a previously downloaded building to run offline. See [../navigator-unity/README.md](../navigator-unity/README.md).

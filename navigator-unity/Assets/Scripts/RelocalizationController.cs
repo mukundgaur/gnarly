@@ -21,11 +21,13 @@ using UnityEngine.InputSystem.UI;
 /// </summary>
 public class RelocalizationController : MonoBehaviour
 {
-    enum State { WaitingForSession, Locating, Located, TrackingLost, Failed }
+    enum State { WaitingForPackage, WaitingForSession, Locating, Located, TrackingLost, Failed }
 
     [SerializeField] ARSession session;
     [SerializeField] XROrigin origin;
     [SerializeField] RouteNavigator navigator;
+    [SerializeField] FirebaseNavigationPackageLoader packageLoader;
+    [SerializeField] string buildingId = "";
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] string floorId = "ground";
     [SerializeField] float cubeSize = 0.2f;
@@ -34,7 +36,8 @@ public class RelocalizationController : MonoBehaviour
     [Tooltip("Debug only: skip the world map so coordinates are relative to where the app starts.")]
     [SerializeField] bool skipWorldMap;
 
-    State state = State.WaitingForSession;
+    State state = State.WaitingForPackage;
+    string packageDirectory;
     bool sawRelocalizing;
     string lastTrackingSnapshot;
     float normalTrackingStartedAt = -1f;
@@ -49,22 +52,31 @@ public class RelocalizationController : MonoBehaviour
     ARWorldMap? appliedWorldMap;
 #endif
 
-    string PackageDirectory => Path.Combine(Application.streamingAssetsPath, zoneId);
+    string PackageDirectory => packageDirectory ?? Path.Combine(Application.streamingAssetsPath, zoneId);
 
     void Awake()
     {
         if (session == null) session = FindAnyObjectByType<ARSession>();
         if (origin == null) origin = FindAnyObjectByType<XROrigin>();
         if (navigator == null) navigator = GetComponent<RouteNavigator>();
+        if (packageLoader == null) packageLoader = GetComponent<FirebaseNavigationPackageLoader>();
+        if (packageLoader == null) packageLoader = gameObject.AddComponent<FirebaseNavigationPackageLoader>();
         BuildUi();
     }
 
-    void Start() => SetStatus("Starting camera…");
+    void Start()
+    {
+        SetStatus("Preparing Firebase navigation package…");
+        packageLoader.Begin(buildingId, zoneId, OnPackageReady, SetStatus);
+    }
 
     void Update()
     {
         switch (state)
         {
+            case State.WaitingForPackage:
+                break;
+
             case State.WaitingForSession:
                 if (ARSession.state == ARSessionState.Unsupported)
                     Fail("This device does not support ARKit.");
@@ -127,7 +139,10 @@ public class RelocalizationController : MonoBehaviour
     {
         try
         {
-            anchor = TestAnchor.Parse(File.ReadAllText(Path.Combine(PackageDirectory, "test-anchor.json")), zoneId);
+            var anchorPath = Path.Combine(PackageDirectory, "test-anchor.json");
+            anchor = File.Exists(anchorPath)
+                ? TestAnchor.Parse(File.ReadAllText(anchorPath), zoneId)
+                : null;
             var routePath = Path.Combine(PackageDirectory, "route.json");
             fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), zoneId) : null;
 
@@ -196,7 +211,7 @@ public class RelocalizationController : MonoBehaviour
 
     void OnLocated()
     {
-        PlaceCube();
+        if (anchor != null) PlaceCube();
         state = State.Located;
         if (navigationGraph != null && navigationGraph.Nodes.Count >= 2)
         {
@@ -304,6 +319,17 @@ public class RelocalizationController : MonoBehaviour
         state = State.WaitingForSession;
         session.Reset();
         SetStatus("Restarting…");
+    }
+
+    void OnPackageReady(DownloadedNavigationPackage package)
+    {
+        buildingId = package.BuildingId;
+        zoneId = package.ZoneId;
+        packageDirectory = package.DirectoryPath;
+        state = State.WaitingForSession;
+        var source = package.IsOfflineCache ? "offline cache" : "Firebase";
+        SetStatus($"Loaded version {package.VersionId} from {source}. Starting camera…");
+        Debug.Log($"[Gnarly] Navigation package ready at {packageDirectory}.");
     }
 
     void Fail(string message)
