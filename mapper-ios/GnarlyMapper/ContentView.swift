@@ -2,9 +2,11 @@ import SwiftUI
 import RoomPlan
 
 struct ContentView: View {
+    @EnvironmentObject private var authSession: FirebaseAuthSession
     @StateObject private var mapper = MapperViewModel()
     @State private var zoneID = "zone-a"
     @State private var floorID = "ground"
+    @State private var showsFirebaseConnection = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -48,6 +50,16 @@ struct ContentView: View {
                 }
                 .font(.subheadline)
 
+                Button {
+                    showsFirebaseConnection = true
+                } label: {
+                    Label(
+                        authSession.isAuthenticated ? "Firebase connected" : "Connect Firebase",
+                        systemImage: authSession.isAuthenticated ? "checkmark.icloud" : "icloud.slash"
+                    )
+                }
+                .buttonStyle(.bordered)
+
                 if let exportURL = mapper.exportURL {
                     ShareLink(item: exportURL) {
                         Label("Share package", systemImage: "square.and.arrow.up")
@@ -70,9 +82,13 @@ struct ContentView: View {
         } message: {
             Text(mapper.errorMessage)
         }
+        .sheet(isPresented: $showsFirebaseConnection) {
+            FirebaseConnectionView(authSession: authSession)
+        }
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(FirebaseAuthSession())
 }

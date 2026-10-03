@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // For a team or production deployment, replace the UID check with a custom admin claim.
+    function isAdmin() {
+      return signedIn() && request.auth.uid == "WwvbXcl5hpQgdl8KO79JwcThYJd2";
+    }
+
+    match /buildings/{buildingId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+
+      match /versions/{versionId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isAdmin();
+
+        match /{nestedDocument=**} {
+          allow read: if signedIn();
+          allow create, update, delete: if isAdmin();
+        }
+      }
+    }
+  }
+}

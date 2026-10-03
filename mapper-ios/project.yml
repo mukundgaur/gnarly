@@ -4,12 +4,25 @@ options:
   deploymentTarget:
     # RoomCaptureView(frame:arSession:) requires iOS 17.
     iOS: "17.0"
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: 12.19.2
 targets:
   GnarlyMapper:
     type: application
     platform: iOS
     sources:
       - path: GnarlyMapper
+    dependencies:
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseStorage
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gnarly.mapper
@@ -20,3 +33,21 @@ targets:
     entitlements:
       path: GnarlyMapper/GnarlyMapper.entitlements
       properties: {}
+  GnarlyMapperTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: GnarlyMapperTests
+    dependencies:
+      - target: GnarlyMapper
+      - package: Firebase
+        product: FirebaseFirestore
+schemes:
+  GnarlyMapper:
+    build:
+      targets:
+        GnarlyMapper: all
+        GnarlyMapperTests: [test]
+    test:
+      targets:
+        - GnarlyMapperTests

@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Keep this UID in sync with firestore.rules.
+    function isAdmin() {
+      return signedIn() && request.auth.uid == "WwvbXcl5hpQgdl8KO79JwcThYJd2";
+    }
+
+    match /buildings/{buildingId}/{versionId}/{assetPath=**} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
