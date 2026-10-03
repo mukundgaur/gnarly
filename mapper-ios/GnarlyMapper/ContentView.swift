@@ -40,6 +40,16 @@ struct ContentView: View {
             .frame(maxWidth: 500)
             .padding(.horizontal, 16)
             .padding(.top, 10)
+
+            if !mapper.scanPlan.shapes.isEmpty {
+                HStack {
+                    Spacer(minLength: 0)
+                    ScanMinimapCard(plan: mapper.scanPlan)
+                }
+                .frame(maxWidth: 500)
+                .padding(.horizontal, 16)
+                .padding(.top, 66)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
@@ -94,17 +104,6 @@ struct ContentView: View {
                         CaptureActionLabel(title: "Export", systemImage: "square.and.arrow.down", highlighted: false)
                     }
                         .disabled(!mapper.canExport)
-
-                    Button {
-                        let id = stairID.isEmpty ? (mapper.detectedStairs.first?.id ?? "") : stairID
-                        stairID = id
-                        floorZoneID = mapper.isStairScan ? floorZoneID : zoneID
-                        mapper.beginStairScan(stairID: id)
-                        if !id.isEmpty { zoneID = id }
-                    } label: {
-                        CaptureActionLabel(title: "Stairs", systemImage: "figure.stairs", highlighted: mapper.isStairScan)
-                    }
-                        .disabled(mapper.isScanning || (stairID.isEmpty && mapper.detectedStairs.isEmpty && mapper.catalog.stairs.isEmpty))
                 }
             }
             .frame(maxWidth: 500)

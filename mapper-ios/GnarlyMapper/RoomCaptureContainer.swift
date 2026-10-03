@@ -31,6 +31,12 @@ struct RoomCaptureContainer: UIViewRepresentable {
             self.mapper = mapper
         }
 
+        func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+            Task { @MainActor in
+                mapper.noteRoomUpdate(room)
+            }
+        }
+
         func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
             Task { @MainActor in
                 mapper.didFinishCapture(data: data, error: error)
