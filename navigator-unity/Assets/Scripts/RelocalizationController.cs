@@ -42,6 +42,7 @@ public class RelocalizationController : MonoBehaviour
     [Tooltip("Enable after Firebase is configured. Disabled uses the packaged local scan so ARKit can relocalize immediately.")]
     [SerializeField] bool useFirebasePackages = true;
     [SerializeField] IndoorMapOverlay indoorMap;
+    [SerializeField] LidarPulseView lidarView;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] string floorId = "ground";
     [SerializeField] float cubeSize = 0.2f;
@@ -111,6 +112,8 @@ public class RelocalizationController : MonoBehaviour
         if (packageLoader == null) packageLoader = gameObject.AddComponent<FirebaseNavigationPackageLoader>();
         if (indoorMap == null) indoorMap = GetComponent<IndoorMapOverlay>();
         if (indoorMap == null) indoorMap = gameObject.AddComponent<IndoorMapOverlay>();
+        if (lidarView == null) lidarView = GetComponent<LidarPulseView>();
+        if (lidarView == null) lidarView = gameObject.AddComponent<LidarPulseView>();
         BuildUi();
     }
 
@@ -330,6 +333,7 @@ public class RelocalizationController : MonoBehaviour
     {
         if (anchor != null) PlaceCube();
         state = State.Located;
+        lidarView?.ClearPoints();
         // Construct the map UI only after ARKit has accepted the saved world map. Creating a
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
@@ -494,6 +498,7 @@ public class RelocalizationController : MonoBehaviour
         cube = null;
         if (navigator != null) navigator.Clear();
         indoorMap?.Clear();
+        lidarView?.ClearPoints();
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;

@@ -146,7 +146,7 @@ public static class NavigatorProjectSetup
 
         new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
 
-        var navigatorObject = new GameObject("Navigator", typeof(RouteNavigator), typeof(RelocalizationController));
+        var navigatorObject = new GameObject("Navigator", typeof(RouteNavigator), typeof(RelocalizationController), typeof(LidarPulseView));
         var controller = new SerializedObject(navigatorObject.GetComponent<RelocalizationController>());
         controller.FindProperty("session").objectReferenceValue = session;
         controller.FindProperty("origin").objectReferenceValue = origin;

@@ -85,6 +85,7 @@ ARKit positions are converted to Unity by negating Z (right-handed to left-hande
 - `Assets/Scripts/FirebaseNavigationPackageRepository.cs`: Firebase email/password authentication, Firestore metadata reads, Storage downloads, path validation, and atomic offline cache.
 - `Assets/Scripts/FirebaseNavigationPackageLoader.cs`: login/building/zone UI and offline-package selection.
 - `Assets/Scripts/RouteNavigator.cs`: path ribbon, waypoint markers, off-screen turn arrow.
+- `Assets/Scripts/LidarPulseView.cs`: **LiDAR** button (bottom left). Turns on ARKit scene depth via an `AROcclusionManager` with occlusion disabled, accumulates a 5 cm voxel point cloud in session space, and draws it as dark green dots (`Assets/Resources/GnarlyLidarPoints.shader`) that brighten as a pulse sweeps out from the user every 1.6 s. Unlike feature points, LiDAR depth works in the dark. The cloud is cleared on relocalization and **Reset map**.
 - `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections, multi-zone graph merging, and A*.
 
 Commit `Assets/`, `Packages/`, and `ProjectSettings/` only.
