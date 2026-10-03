@@ -54,7 +54,7 @@ Build check: `npm run build`.
 
 ## Drop-to-walk view
 
-In the building explorer, drag **Drop to walk** onto any visible floor. The viewer switches to that floor and places the camera at eye height. Drag inside the scene to look around, use WASD or the arrow keys to move, and hold Shift to move faster. The on-screen direction pad provides the same movement controls on touch devices. Choose **Exit** to return to the orbiting overview; the person marker remains at the last walk position and can be dragged somewhere else.
+In the building explorer, drag **Drop to walk** onto any visible floor. The viewer switches to that floor and places the camera at eye height. Drag inside the scene to look around, use W/S or the up/down arrows to move, and use A/D or the left/right arrows to turn in place. Hold Shift to move faster. The on-screen direction pad provides the same movement and turning controls on touch devices. Choose **Exit** to return to the orbiting overview; the person marker remains at the last walk position and can be dragged somewhere else.
 
 Walk mode stays inside the selected floor boundary. When `scan-features.json` is available, movement is also stopped by scanned walls and can cross them only through a captured door or opening. On graph-only packages, the generated floor bounds are used because wall geometry is not available.
 

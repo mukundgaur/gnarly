@@ -326,14 +326,14 @@ function WalkCamera({ location, graph, scan, onMove }: {
   }, [camera, gl, graph, location.floorId]);
 
   useFrame((_, delta) => {
-    camera.rotation.set(pitch.current, yaw.current, 0);
     const forward = Number(keys.current.has('KeyW') || keys.current.has('ArrowUp')) - Number(keys.current.has('KeyS') || keys.current.has('ArrowDown'));
-    const sideways = Number(keys.current.has('KeyD') || keys.current.has('ArrowRight')) - Number(keys.current.has('KeyA') || keys.current.has('ArrowLeft'));
-    if (!forward && !sideways) return;
-    const length = Math.hypot(forward, sideways);
+    const turn = Number(keys.current.has('KeyA') || keys.current.has('ArrowLeft')) - Number(keys.current.has('KeyD') || keys.current.has('ArrowRight'));
+    if (turn) yaw.current += turn * 1.85 * Math.min(delta, .05);
+    camera.rotation.set(pitch.current, yaw.current, 0);
+    if (!forward) return;
     const speed = (keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') ? 3.7 : 1.9) * Math.min(delta, .05);
-    const dx = ((-Math.sin(yaw.current) * forward) + (Math.cos(yaw.current) * sideways)) / length * speed;
-    const dz = ((-Math.cos(yaw.current) * forward) + (-Math.sin(yaw.current) * sideways)) / length * speed;
+    const dx = -Math.sin(yaw.current) * forward * speed;
+    const dz = -Math.cos(yaw.current) * forward * speed;
     const current = feet.current.toArray() as [number, number, number];
     let next: [number, number, number] = [current[0] + dx, current[1], current[2] + dz];
     if (!canWalkBetween(current, next, location.floorId, graph, scan)) {
