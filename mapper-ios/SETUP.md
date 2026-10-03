@@ -5,7 +5,7 @@ This project is defined with [XcodeGen](https://github.com/yonaskolb/XcodeGen) s
 ## Prerequisites
 
 - Xcode 15+ on macOS
-- A LiDAR-capable iPhone running iOS 16+
+- A LiDAR-capable iPhone running iOS 17+
 - XcodeGen (`brew install xcodegen`), or create an equivalent SwiftUI iOS app manually using the settings in `project.yml`
 
 ## Generate and run

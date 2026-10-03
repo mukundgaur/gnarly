@@ -1,0 +1,304 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */; };
+		8102E37CD7E2FCC3E27760B6 /* POCPackageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */; };
+		8C6F595ECF77D1D4E37826D6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */; };
+		94921150B67B0E6EE3FB799C /* MapperViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8347DA1557345E040D2FA42 /* MapperViewModel.swift */; };
+		F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0127B0AED13A0DCD415DE987 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GnarlyMapper.entitlements; sourceTree = "<group>"; };
+		1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = POCPackageExporter.swift; sourceTree = "<group>"; };
+		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnarlyMapperApp.swift; sourceTree = "<group>"; };
+		99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureContainer.swift; sourceTree = "<group>"; };
+		D8347DA1557345E040D2FA42 /* MapperViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapperViewModel.swift; sourceTree = "<group>"; };
+		E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		33AFAE1E87B2D4FCE30428B9 = {
+			isa = PBXGroup;
+			children = (
+				4F1387E5B38DEC0928289847 /* GnarlyMapper */,
+				6075F2D54919E497773B8B27 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4F1387E5B38DEC0928289847 /* GnarlyMapper */ = {
+			isa = PBXGroup;
+			children = (
+				E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */,
+				07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */,
+				63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */,
+				0127B0AED13A0DCD415DE987 /* Info.plist */,
+				D8347DA1557345E040D2FA42 /* MapperViewModel.swift */,
+				1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */,
+				99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */,
+			);
+			path = GnarlyMapper;
+			sourceTree = "<group>";
+		};
+		6075F2D54919E497773B8B27 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4055DB21B650F77F86CC0387 /* GnarlyMapper.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0106C645E108D0FA124A3102 /* GnarlyMapper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4337097E1E2DF5E28444C374 /* Build configuration list for PBXNativeTarget "GnarlyMapper" */;
+			buildPhases = (
+				96F4A866A3E8667E2FDF097D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GnarlyMapper;
+			packageProductDependencies = (
+			);
+			productName = GnarlyMapper;
+			productReference = 4055DB21B650F77F86CC0387 /* GnarlyMapper.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		245915831862D85D562015E6 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+			};
+			buildConfigurationList = 5CC4943C8789A91871AF823A /* Build configuration list for PBXProject "GnarlyMapper" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 33AFAE1E87B2D4FCE30428B9;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6075F2D54919E497773B8B27 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0106C645E108D0FA124A3102 /* GnarlyMapper */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		96F4A866A3E8667E2FDF097D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8C6F595ECF77D1D4E37826D6 /* ContentView.swift in Sources */,
+				F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */,
+				94921150B67B0E6EE3FB799C /* MapperViewModel.swift in Sources */,
+				8102E37CD7E2FCC3E27760B6 /* POCPackageExporter.swift in Sources */,
+				0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		831B04DF3A6BCCB69D23D7A6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		94AFC42979660FE9440416EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = X2TL847865;
+				INFOPLIST_FILE = GnarlyMapper/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.gnarly.mapper;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		95E7EE48A5FA2EB0277D8221 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		EFBAE5C58E3693B8CAC24A09 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = X2TL847865;
+				INFOPLIST_FILE = GnarlyMapper/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.gnarly.mapper;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4337097E1E2DF5E28444C374 /* Build configuration list for PBXNativeTarget "GnarlyMapper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EFBAE5C58E3693B8CAC24A09 /* Debug */,
+				94AFC42979660FE9440416EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5CC4943C8789A91871AF823A /* Build configuration list for PBXProject "GnarlyMapper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				95E7EE48A5FA2EB0277D8221 /* Debug */,
+				831B04DF3A6BCCB69D23D7A6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 245915831862D85D562015E6 /* Project object */;
+}
