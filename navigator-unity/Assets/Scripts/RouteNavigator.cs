@@ -33,6 +33,7 @@ public class RouteNavigator : MonoBehaviour
 
     RectTransform canvasRect;
     RectTransform arrow;
+    RectTransform arrowBackdrop;
     RectTransform arrowLabelRect;
     Text arrowLabel;
 
@@ -177,6 +178,7 @@ public class RouteNavigator : MonoBehaviour
         var edgePosition = direction * scale;
 
         arrow.anchoredPosition = edgePosition;
+        arrowBackdrop.anchoredPosition = edgePosition;
         arrow.localEulerAngles = new Vector3(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
         arrowLabelRect.anchoredPosition = edgePosition - direction * 170f;
 
@@ -191,6 +193,7 @@ public class RouteNavigator : MonoBehaviour
     void SetArrowActive(bool active)
     {
         if (arrow != null) arrow.gameObject.SetActive(active);
+        if (arrowBackdrop != null) arrowBackdrop.gameObject.SetActive(active);
         if (arrowLabelRect != null) arrowLabelRect.gameObject.SetActive(active);
     }
 
@@ -248,6 +251,11 @@ public class RouteNavigator : MonoBehaviour
         scaler.referenceResolution = new Vector2(1170, 2532);
         canvasRect = (RectTransform)canvasObject.transform;
 
+        arrowBackdrop = new GameObject("TurnArrowBackdrop", typeof(RectTransform)).GetComponent<RectTransform>();
+        arrowBackdrop.SetParent(canvasRect, false);
+        arrowBackdrop.sizeDelta = new Vector2(220, 220);
+        arrowBackdrop.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.08f, 0.12f, 0.86f);
+
         arrow = new GameObject("TurnArrow", typeof(RectTransform)).GetComponent<RectTransform>();
         arrow.SetParent(canvasRect, false);
         arrow.sizeDelta = new Vector2(180, 180);
@@ -255,6 +263,7 @@ public class RouteNavigator : MonoBehaviour
         arrowImage.sprite = CreateArrowSprite();
         arrowImage.color = pathColor;
         arrowImage.raycastTarget = false;
+        arrow.gameObject.AddComponent<Outline>().effectColor = new Color(0f, 0f, 0f, 0.75f);
 
         arrowLabelRect = new GameObject("TurnLabel", typeof(RectTransform)).GetComponent<RectTransform>();
         arrowLabelRect.SetParent(canvasRect, false);

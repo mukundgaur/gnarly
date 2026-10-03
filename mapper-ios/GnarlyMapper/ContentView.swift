@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var mapper = MapperViewModel()
     @State private var zoneID = "zone-a"
     @State private var floorID = "ground"
+    @State private var buildingID = "main-building"
     @State private var showsFirebaseConnection = false
 
     var body: some View {
@@ -13,17 +14,53 @@ struct ContentView: View {
             RoomCaptureContainer(mapper: mapper)
                 .ignoresSafeArea()
 
-            Text(mapper.statusText)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(2)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(.top, 12)
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.cyan)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("GNARLY MAPPER")
+                            .font(.caption2.weight(.heavy))
+                            .tracking(1.2)
+                            .foregroundStyle(.secondary)
+                        Text(mapper.statusText)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(spacing: 1) {
+                        Text("\(mapper.recordedNodeCount)")
+                            .font(.headline.monospacedDigit())
+                        Text("POINTS")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
+                    Label("PATH CAPTURE", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(.cyan)
+                    Spacer()
+                    Text("\(mapper.recordedNodeCount) points")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Building", text: $buildingID)
                     TextField("Zone", text: $zoneID)
                     TextField("Floor", text: $floorID)
                 }
@@ -34,21 +71,40 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     Button("Finish") { mapper.finishRoom() }
                         .buttonStyle(.borderedProminent)
+                        .tint(.cyan)
                         .disabled(!mapper.isScanning)
 
-                    Button("Drop node") { mapper.dropManualNode() }
+                    Button {
+                        mapper.dropManualNode()
+                    } label: {
+                        Label("Drop", systemImage: "plus.circle")
+                    }
                         .buttonStyle(.bordered)
                         .disabled(!mapper.canDropManualNode)
 
-                    Button("Set cube") { mapper.markTestAnchor() }
+                    Button {
+                        mapper.markTestAnchor()
+                    } label: {
+                        Label("Cube", systemImage: "cube")
+                    }
                         .buttonStyle(.bordered)
                         .disabled(!mapper.canMarkAnchor)
 
                     Button("Export") { mapper.exportPackage(zoneID: zoneID, floorID: floorID) }
                         .buttonStyle(.borderedProminent)
+                        .tint(.mint)
                         .disabled(!mapper.canExport)
                 }
                 .font(.subheadline)
+
+                Button {
+                    mapper.uploadPackage(buildingID: buildingID, zoneID: zoneID, floorID: floorID)
+                } label: {
+                    Label(mapper.isUploading ? "Uploading…" : "Upload to Firebase", systemImage: "icloud.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .disabled(!mapper.canExport || !authSession.isAuthenticated || mapper.isUploading)
 
                 Button {
                     showsFirebaseConnection = true
@@ -66,7 +122,7 @@ struct ContentView: View {
                     }
                     .font(.subheadline)
                 } else {
-                    Text("Walked points save automatically; use Drop node only for a deliberate extra point.")
+                    Text("Walked points save every 0.75 m. Use Drop for a deliberate extra point.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

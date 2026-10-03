@@ -1,4 +1,5 @@
 import ARKit
+import FirebaseAuth
 import Foundation
 import RoomPlan
 
@@ -8,6 +9,7 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var isScanning = false
     @Published private(set) var exportURL: URL?
     @Published private(set) var recordedNodes: [RecordedGraphNode] = []
+    @Published private(set) var isUploading = false
     @Published var showsError = false
     @Published private(set) var errorMessage = ""
 
@@ -29,6 +31,10 @@ final class MapperViewModel: ObservableObject {
 
     var canExport: Bool {
         capturedRoom != nil && (testAnchor != nil || !recordedNodes.isEmpty)
+    }
+
+    var recordedNodeCount: Int {
+        recordedNodes.count
     }
 
     func configure(captureView: RoomCaptureView) {
@@ -155,6 +161,40 @@ final class MapperViewModel: ObservableObject {
                     self.showError("Package export failed: \(error.localizedDescription)")
                 }
             }
+        }
+    }
+
+    func uploadPackage(buildingID rawBuildingID: String, zoneID rawZoneID: String, floorID rawFloorID: String) {
+        guard let packageURL = exportURL else { showError("Export the scan before uploading it."); return }
+        guard Auth.auth().currentUser != nil else { showError("Connect Firebase and sign in before uploading."); return }
+        let buildingID = rawBuildingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let zoneID = rawZoneID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let floorID = rawFloorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !buildingID.isEmpty, !zoneID.isEmpty, !floorID.isEmpty else { showError("Building, zone, and floor IDs are required."); return }
+
+        isUploading = true
+        Task {
+            do {
+                let repository = try FirebaseDataRepository()
+                let versionID = "v-\(Int(Date().timeIntervalSince1970))"
+                let buildingJSON = packageURL.appendingPathComponent("building.json")
+                let worldMap = packageURL.appendingPathComponent("worldmap-\(zoneID).bin")
+                guard FileManager.default.fileExists(atPath: buildingJSON.path), FileManager.default.fileExists(atPath: worldMap.path) else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                do {
+                    try await repository.createBuilding(Building(id: buildingID, name: buildingID, activeVersion: nil, status: .draft, createdAt: nil, updatedAt: nil))
+                } catch FirebaseDataError.documentAlreadyExists { }
+                try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .draft, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: nil), buildingId: buildingID)
+                try await repository.saveFloor(Floor(id: floorID, name: floorID, story: 0, elevation: 0), buildingId: buildingID, versionId: versionID)
+                try await repository.saveZone(Zone(id: zoneID, name: zoneID, floorId: floorID, worldMapPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
+                try await repository.uploadBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID)
+                try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
+                try await repository.updateBuilding(Building(id: buildingID, name: buildingID, activeVersion: versionID, status: .active, createdAt: nil, updatedAt: nil))
+                statusText = "Uploaded \(buildingID)/\(versionID). Navigator can download it now."
+            } catch { showError("Firebase upload failed: \(error.localizedDescription)") }
+            isUploading = false
         }
     }
 

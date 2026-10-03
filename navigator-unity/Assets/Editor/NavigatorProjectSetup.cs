@@ -232,9 +232,12 @@ public sealed class NavigatorFirebaseBuildValidator : IPreprocessBuildWithReport
         if (report.summary.platform != BuildTarget.iOS) return;
         NavigatorProjectSetup.CopyFirebaseConfig();
         if (!File.Exists("Assets/StreamingAssets/GoogleService-Info.plist"))
-            throw new BuildFailedException(
-                "Firebase configuration is missing. Add the navigator app's GoogleService-Info.plist to " +
-                "navigator-unity/FirebaseConfig or navigator-unity/Assets/StreamingAssets, then build again.");
+        {
+            Debug.LogWarning(
+                "[Gnarly] Firebase configuration is missing. Building with the packaged local scan; " +
+                "Firebase package loading remains unavailable until GoogleService-Info.plist is added.");
+            return;
+        }
         if (!FirebaseNavigationPackageRepository.TryLoadConfig(out _, out var error))
             throw new BuildFailedException(error);
     }

@@ -28,6 +28,9 @@ public class RelocalizationController : MonoBehaviour
     [SerializeField] RouteNavigator navigator;
     [SerializeField] FirebaseNavigationPackageLoader packageLoader;
     [SerializeField] string buildingId = "";
+    [Tooltip("Enable after Firebase is configured. Disabled uses the packaged local scan so ARKit can relocalize immediately.")]
+    [SerializeField] bool useFirebasePackages;
+    [SerializeField] IndoorMapOverlay indoorMap;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] string floorId = "ground";
     [SerializeField] float cubeSize = 0.2f;
@@ -36,7 +39,7 @@ public class RelocalizationController : MonoBehaviour
     [Tooltip("Debug only: skip the world map so coordinates are relative to where the app starts.")]
     [SerializeField] bool skipWorldMap;
 
-    State state = State.WaitingForPackage;
+    State state = State.WaitingForSession;
     string packageDirectory;
     bool sawRelocalizing;
     string lastTrackingSnapshot;
@@ -44,8 +47,12 @@ public class RelocalizationController : MonoBehaviour
     TestAnchor anchor;
     Route fallbackRoute;
     Pathfinding.Graph navigationGraph;
+    Pathfinding.ScanFeatures loadedScan;
     GameObject cube;
     Text statusText;
+    Text statusEyebrow;
+    Image statusIndicator;
+    Image retryBackground;
     RectTransform destinationPanel;
     readonly List<GameObject> destinationButtons = new List<GameObject>();
 #if UNITY_IOS && !UNITY_EDITOR
@@ -61,13 +68,23 @@ public class RelocalizationController : MonoBehaviour
         if (navigator == null) navigator = GetComponent<RouteNavigator>();
         if (packageLoader == null) packageLoader = GetComponent<FirebaseNavigationPackageLoader>();
         if (packageLoader == null) packageLoader = gameObject.AddComponent<FirebaseNavigationPackageLoader>();
+        if (indoorMap == null) indoorMap = GetComponent<IndoorMapOverlay>();
+        if (indoorMap == null) indoorMap = gameObject.AddComponent<IndoorMapOverlay>();
         BuildUi();
     }
 
     void Start()
     {
-        SetStatus("Preparing Firebase navigation package…");
-        packageLoader.Begin(buildingId, zoneId, OnPackageReady, SetStatus);
+        if (useFirebasePackages)
+        {
+            SetStatus("Preparing Firebase navigation package…");
+            packageLoader.Begin(buildingId, zoneId, OnPackageReady, SetStatus);
+            state = State.WaitingForPackage;
+            return;
+        }
+
+        packageDirectory = Path.Combine(Application.streamingAssetsPath, zoneId);
+        SetStatus("Using packaged navigation map. Starting camera…");
     }
 
     void Update()
@@ -157,6 +174,7 @@ public class RelocalizationController : MonoBehaviour
             navigationGraph = scan != null || building != null
                 ? Pathfinding.Build(scan, building, floorId)
                 : null;
+            loadedScan = scan;
 
             if (!skipWorldMap)
                 ApplyWorldMap(File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin")));
@@ -213,6 +231,10 @@ public class RelocalizationController : MonoBehaviour
     {
         if (anchor != null) PlaceCube();
         state = State.Located;
+        // Construct the map UI only after ARKit has accepted the saved world map. Creating a
+        // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
+        indoorMap?.Configure(loadedScan, navigationGraph, origin.TrackablesParent, origin.Camera);
+        indoorMap?.SetAppleModelPath(Path.Combine(PackageDirectory, "structure.usdz"));
         if (navigationGraph != null && navigationGraph.Nodes.Count >= 2)
         {
             var destinations = navigationGraph.Destinations();
@@ -224,12 +246,18 @@ public class RelocalizationController : MonoBehaviour
                 SetStatus("Located. Choose a destination.");
             }
             else if (fallbackRoute != null && navigator != null)
+            {
                 navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
+                indoorMap?.SetRoute(fallbackRoute);
+            }
             else
                 SetStatus("Located (graph has no destination nodes)");
         }
         else if (fallbackRoute != null && navigator != null)
+        {
             navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
+            indoorMap?.SetRoute(fallbackRoute);
+        }
         else
             SetStatus(fallbackRoute == null ? "Located (no graph or route.json)" : "Located");
     }
@@ -275,6 +303,7 @@ public class RelocalizationController : MonoBehaviour
 
         var route = Pathfinding.ToRoute(navigationGraph, path, zoneId);
         navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        indoorMap?.SetRoute(route);
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         SetStatus(navigator.StatusMessage);
@@ -289,15 +318,16 @@ public class RelocalizationController : MonoBehaviour
         for (var i = 0; i < destinations.Count; i++)
         {
             var node = destinations[i];
-            var button = CreateRect($"Dest-{node.id}", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(16, -100 - i * 100), new Vector2(-16, -20 - i * 100));
-            button.gameObject.AddComponent<Image>().color = new Color(1, 1, 1, 0.9f);
+            var button = CreateRect($"Dest-{node.id}", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(18, -148 - i * 102), new Vector2(-18, -54 - i * 102));
+            button.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.31f, 0.4f, 0.96f);
             var captured = node.id;
             button.gameObject.AddComponent<Button>().onClick.AddListener(() => RouteTo(captured));
             var label = CreateRect("Label", button, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
             label.font = statusText.font;
-            label.fontSize = 36;
+            label.fontSize = 32;
+            label.fontStyle = FontStyle.Bold;
             label.alignment = TextAnchor.MiddleCenter;
-            label.color = Color.black;
+            label.color = Color.white;
             label.text = string.IsNullOrEmpty(node.label) ? node.id : node.label;
             destinationButtons.Add(button.gameObject);
         }
@@ -314,6 +344,7 @@ public class RelocalizationController : MonoBehaviour
         if (cube != null) Destroy(cube);
         cube = null;
         if (navigator != null) navigator.Clear();
+        indoorMap?.Clear();
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
@@ -342,6 +373,25 @@ public class RelocalizationController : MonoBehaviour
     void SetStatus(string message)
     {
         if (statusText != null) statusText.text = message;
+        if (statusEyebrow != null)
+            statusEyebrow.text = state == State.Located ? "LOCATION CONFIRMED" : "GNARLY NAVIGATION";
+        if (statusIndicator != null)
+            statusIndicator.color = StatusColor();
+        if (retryBackground != null)
+            retryBackground.color = state == State.Failed
+                ? new Color(0.7f, 0.18f, 0.2f, 0.96f)
+                : new Color(0.05f, 0.12f, 0.18f, 0.92f);
+    }
+
+    Color StatusColor()
+    {
+        return state switch
+        {
+            State.Located => new Color(0.25f, 0.95f, 0.72f),
+            State.Failed => new Color(1f, 0.35f, 0.36f),
+            State.TrackingLost => new Color(1f, 0.69f, 0.24f),
+            _ => new Color(0.25f, 0.85f, 1f)
+        };
     }
 
     void ReportTrackingState(bool force = false)
@@ -371,27 +421,49 @@ public class RelocalizationController : MonoBehaviour
 
         var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
-        var panel = CreateRect("StatusPanel", canvasObject.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -360), new Vector2(0, -120));
-        panel.gameObject.AddComponent<Image>().color = new Color(0, 0, 0, 0.6f);
+        var panel = CreateRect("StatusPanel", canvasObject.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(22, -330), new Vector2(-22, -112));
+        panel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.88f);
 
-        statusText = CreateRect("StatusText", panel, Vector2.zero, Vector2.one, new Vector2(40, 0), new Vector2(-40, 0)).gameObject.AddComponent<Text>();
+        statusIndicator = CreateRect("StatusIndicator", panel, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(26, -11), new Vector2(48, 11)).gameObject.AddComponent<Image>();
+        statusIndicator.color = StatusColor();
+
+        statusEyebrow = CreateRect("Eyebrow", panel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(64, -57), new Vector2(-28, -16)).gameObject.AddComponent<Text>();
+        statusEyebrow.font = font;
+        statusEyebrow.fontSize = 24;
+        statusEyebrow.fontStyle = FontStyle.Bold;
+        statusEyebrow.alignment = TextAnchor.MiddleLeft;
+        statusEyebrow.color = new Color(0.44f, 0.78f, 0.92f);
+        statusEyebrow.text = "GNARLY NAVIGATION";
+
+        statusText = CreateRect("StatusText", panel, Vector2.zero, Vector2.one, new Vector2(64, 8), new Vector2(-28, -54)).gameObject.AddComponent<Text>();
         statusText.font = font;
-        statusText.fontSize = 48;
-        statusText.alignment = TextAnchor.MiddleCenter;
+        statusText.fontSize = 38;
+        statusText.alignment = TextAnchor.MiddleLeft;
         statusText.color = Color.white;
+        statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
 
-        var button = CreateRect("RetryButton", canvasObject.transform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(-220, 120), new Vector2(220, 260));
-        button.gameObject.AddComponent<Image>().color = new Color(1, 1, 1, 0.85f);
+        var button = CreateRect("RetryButton", canvasObject.transform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(-190, 88), new Vector2(190, 190));
+        retryBackground = button.gameObject.AddComponent<Image>();
+        retryBackground.color = new Color(0.05f, 0.12f, 0.18f, 0.92f);
         button.gameObject.AddComponent<Button>().onClick.AddListener(Retry);
 
         var label = CreateRect("Label", button, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
         label.font = font;
-        label.fontSize = 48;
+        label.fontSize = 34;
+        label.fontStyle = FontStyle.Bold;
         label.alignment = TextAnchor.MiddleCenter;
-        label.color = Color.black;
-        label.text = "Retry";
+        label.color = Color.white;
+        label.text = "Reset map";
 
-        destinationPanel = CreateRect("DestinationPanel", canvasObject.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(40, 280), new Vector2(-40, 900));
+        destinationPanel = CreateRect("DestinationPanel", canvasObject.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(24, 220), new Vector2(-24, 860));
+        destinationPanel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.9f);
+        var destinationHeading = CreateRect("Heading", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -60), new Vector2(-24, -12)).gameObject.AddComponent<Text>();
+        destinationHeading.font = font;
+        destinationHeading.fontSize = 26;
+        destinationHeading.fontStyle = FontStyle.Bold;
+        destinationHeading.alignment = TextAnchor.MiddleLeft;
+        destinationHeading.color = new Color(0.44f, 0.78f, 0.92f);
+        destinationHeading.text = "CHOOSE A DESTINATION";
         destinationPanel.gameObject.SetActive(false);
 
         if (FindAnyObjectByType<EventSystem>() == null)
