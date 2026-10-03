@@ -77,6 +77,10 @@ public class LidarPulseView : MonoBehaviour
     static readonly int FreshSecondsId = Shader.PropertyToID("_FreshSeconds");
 
     AROcclusionManager occlusion;
+    ARCameraManager cameraManager;
+    Matrix4x4 displayMatrix;
+    bool hasDisplayMatrix;
+    ScreenOrientation loggedOrientation = ScreenOrientation.AutoRotation;
     bool isOn;
     bool unavailable;
     float nextCaptureAt;
@@ -113,8 +117,29 @@ public class LidarPulseView : MonoBehaviour
         if (origin == null) origin = FindAnyObjectByType<XROrigin>();
         if (navigator == null) navigator = GetComponent<RouteNavigator>();
         if (navigator == null) navigator = FindAnyObjectByType<RouteNavigator>();
+        if (origin != null && origin.Camera != null) cameraManager = origin.Camera.GetComponent<ARCameraManager>();
         BuildUi();
         UpdateButton();
+    }
+
+    void OnEnable()
+    {
+        if (cameraManager != null) cameraManager.frameReceived += OnCameraFrame;
+    }
+
+    void OnDisable()
+    {
+        if (cameraManager != null) cameraManager.frameReceived -= OnCameraFrame;
+    }
+
+    void OnCameraFrame(ARCameraFrameEventArgs args)
+    {
+        if (!args.displayMatrix.HasValue) return;
+        displayMatrix = args.displayMatrix.Value;
+        hasDisplayMatrix = true;
+        if (Screen.orientation == loggedOrientation) return;
+        loggedOrientation = Screen.orientation;
+        Debug.Log($"[Gnarly] LiDAR display matrix for {loggedOrientation}:\n{displayMatrix}");
     }
 
     public void Toggle() => SetOn(!isOn);
@@ -310,13 +335,23 @@ public class LidarPulseView : MonoBehaviour
         public int height;
         public Matrix4x4 projection;
         public Matrix4x4 cameraToSession;
-        public ScreenOrientation orientation;
-        public float cropX;
-        public float cropY;
+        public Vector2 viewportOrigin;
+        public Vector2 viewportPerU;
+        public Vector2 viewportPerV;
     }
 
     void AddPoints(XRCpuImage depthImage, XRCpuImage confidenceImage, bool useConfidence)
     {
+        if (!hasDisplayMatrix) return;
+        // The background shader maps viewport to image UV as uv = (vx, vy, 1, 1) * displayMatrix;
+        // the depth texture is sampled with that same UV, so its inverse places depth pixels on screen.
+        var m = displayMatrix;
+        var det = m.m00 * m.m11 - m.m10 * m.m01;
+        if (Mathf.Abs(det) < 1e-6f) return;
+        var perU = new Vector2(m.m11, -m.m01) / det;
+        var perV = new Vector2(-m.m10, m.m00) / det;
+        var imageOffset = new Vector2(m.m20 + m.m30, m.m21 + m.m31);
+
         var depthPlane = depthImage.GetPlane(0);
         var camera = origin.Camera;
         var frame = new DepthFrame
@@ -329,13 +364,10 @@ public class LidarPulseView : MonoBehaviour
             height = depthImage.height,
             projection = camera.projectionMatrix,
             cameraToSession = origin.TrackablesParent.worldToLocalMatrix * camera.cameraToWorldMatrix,
-            orientation = Screen.orientation
+            viewportOrigin = -(imageOffset.x * perU + imageOffset.y * perV),
+            viewportPerU = perU,
+            viewportPerV = perV
         };
-        var portrait = frame.orientation == ScreenOrientation.Portrait || frame.orientation == ScreenOrientation.PortraitUpsideDown;
-        var imageAspect = portrait ? frame.height / (float)frame.width : frame.width / (float)frame.height;
-        var screenAspect = camera.pixelWidth / (float)camera.pixelHeight;
-        frame.cropX = imageAspect > screenAspect ? imageAspect / screenAspect : 1f;
-        frame.cropY = imageAspect > screenAspect ? 1f : screenAspect / imageAspect;
 
         var hasPath = navigator != null && navigator.CopyUpcomingPath(upcomingPath);
         blockingHits = 0;
@@ -479,9 +511,10 @@ public class LidarPulseView : MonoBehaviour
     }
 
     /// <summary>
-    /// The depth image is in the camera sensor's landscape orientation and is aspect-filled onto the
-    /// screen, which is also how ARKit derives the camera's projection matrix. A sample at continuous
-    /// pixel coordinates is mapped to the viewport, then unprojected with that matrix at its LiDAR depth.
+    /// The depth image is in the camera sensor's landscape orientation. A sample at continuous pixel
+    /// coordinates is mapped to the viewport with the inverse display matrix (which includes the
+    /// rotation and aspect-fill crop), then unprojected with the camera's projection at its LiDAR depth.
+    /// Pixels cropped off screen map outside 0–1 and still unproject correctly.
     /// </summary>
     bool TrySample(in DepthFrame frame, float px, float py, out Vector3 sessionPoint, out float d)
     {
@@ -492,17 +525,11 @@ public class LidarPulseView : MonoBehaviour
         if (!(d >= minDepth && d <= maxDepth)) return false;
         if (frame.useConfidence && frame.confidence.data[y * frame.confidence.rowStride + x] < 1) return false;
 
-        var u = px / frame.width;
-        var v = py / frame.height;
-        Vector2 viewport = frame.orientation switch
-        {
-            ScreenOrientation.LandscapeLeft => new Vector2(u, 1f - v),
-            ScreenOrientation.LandscapeRight => new Vector2(1f - u, v),
-            ScreenOrientation.PortraitUpsideDown => new Vector2(v, u),
-            _ => new Vector2(1f - v, 1f - u)
-        };
-        var ndcX = (viewport.x - 0.5f) * 2f * frame.cropX;
-        var ndcY = (viewport.y - 0.5f) * 2f * frame.cropY;
+        var viewport = frame.viewportOrigin +
+                       px / frame.width * frame.viewportPerU +
+                       py / frame.height * frame.viewportPerV;
+        var ndcX = (viewport.x - 0.5f) * 2f;
+        var ndcY = (viewport.y - 0.5f) * 2f;
         var cameraPoint = new Vector3(
             (ndcX + frame.projection.m02) * d / frame.projection.m00,
             (ndcY + frame.projection.m12) * d / frame.projection.m11,
