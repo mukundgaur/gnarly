@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly RoomPlan scan features",
+  "description": "Normalized RoomPlan walls, doors, openings, windows, floors, objects, and sections in ARKit world meters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "zoneId", "coordinateSystem", "walls", "doors", "openings", "windows", "floors", "objects"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "zoneId": { "type": "string", "minLength": 1 },
+    "coordinateSystem": { "const": "arkit-world-meters" },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "roomIdentifier": { "type": "string" },
+    "story": { "type": "integer" },
+    "walls": { "$ref": "#/$defs/surfaces" },
+    "doors": { "$ref": "#/$defs/surfaces" },
+    "openings": { "$ref": "#/$defs/surfaces" },
+    "windows": { "$ref": "#/$defs/surfaces" },
+    "floors": { "$ref": "#/$defs/surfaces" },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identifier", "category", "position", "dimensions"],
+        "properties": {
+          "identifier": { "type": "string" },
+          "category": { "type": "string" },
+          "confidence": { "type": "string" },
+          "story": { "type": "integer" },
+          "dimensions": { "$ref": "#/$defs/vec3" },
+          "position": { "$ref": "#/$defs/vec3" },
+          "transformColumnMajor": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 16,
+            "maxItems": 16
+          },
+          "parentIdentifier": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "center"],
+        "properties": {
+          "label": { "type": "string" },
+          "story": { "type": "integer" },
+          "center": { "$ref": "#/$defs/vec3" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identifier", "category", "position", "dimensions"],
+        "properties": {
+          "identifier": { "type": "string" },
+          "category": { "type": "string" },
+          "confidence": { "type": "string" },
+          "story": { "type": "integer" },
+          "dimensions": { "$ref": "#/$defs/vec3" },
+          "position": { "$ref": "#/$defs/vec3" },
+          "transformColumnMajor": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 16,
+            "maxItems": 16
+          },
+          "polygonCorners": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/vec3" }
+          },
+          "parentIdentifier": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

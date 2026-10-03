@@ -30,7 +30,7 @@ Copy the mapper's files into `Assets/StreamingAssets/zone-a/` before building. T
 | `test-anchor.json` | Yes | Position of the test cube ([schema](../shared/test-anchor.schema.json)) |
 | `route.json` | No | Waypoints for path guidance ([schema](../shared/route.schema.json)) |
 
-The mapper does not export `route.json` yet (see [../mapper-ios/README.md](../mapper-ios/README.md)); hand-write one from [../shared/examples/route.example.json](../shared/examples/route.example.json) to test.
+The mapper exports `route.json` when at least two graph nodes are recorded (see [../mapper-ios/README.md](../mapper-ios/README.md)); you can still hand-write one from [../shared/examples/route.example.json](../shared/examples/route.example.json) to test.
 
 ## Behavior
 

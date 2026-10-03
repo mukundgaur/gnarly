@@ -45,4 +45,4 @@ No Firebase, destination search, routing, RoomPlan parsing, minimap, two-floor b
 
 ## Added: route guidance
 
-Path display has been started ahead of the cube proof. The Unity app reads an optional `route.json` ([schema](../shared/route.schema.json)) and draws a floor path through its waypoints, with an edge arrow when the next waypoint is off-screen. Waypoints are hand-written for now; the mapper still needs to record and export them (see [../mapper-ios/README.md](../mapper-ios/README.md)). Path finding (A*/graph routing) is still out of scope; the route is the recorded waypoint order.
+Path display has been started ahead of the cube proof. The Unity app reads an optional `route.json` ([schema](../shared/route.schema.json)) and draws a floor path through its waypoints, with an edge arrow when the next waypoint is off-screen. The mapper records walk-order nodes and exports `route.json` plus `building.json` (see [../mapper-ios/README.md](../mapper-ios/README.md)). Path finding (A*/graph routing) is still out of scope on the Unity side; the drawn route is the recorded waypoint order.

@@ -8,6 +8,7 @@ Record decisions and findings here as the two workstreams meet. This prevents a 
 | 2026-10-02 | Unity | Relocalization is ready when tracking returns to normal after ARKit has reported `Relocalizing`. | Defines when the cube and path appear | Confirm on device |
 | 2026-10-02 | Unity | ARKit `[x, y, z]` becomes Unity `(x, y, -z)`, placed under `XROrigin.TrackablesParent`. | Applies to anchor and route positions | — |
 | 2026-10-02 | Unity | Route guidance started ahead of the cube proof: optional `route.json` ([schema](../shared/route.schema.json)) is drawn as a floor path with an off-screen turn arrow. | Mapper must export `route.json` (see `mapper-ios/README.md`) | Mapper: add waypoint recording |
+| 2026-10-02 | Mapper | Mapper records graph nodes during the scan and exports `scan.json`, `scan-features.json`, `building.json`, and `route.json`. RoomPlan doors/openings/stairs are unconnected `roomplan-hint` nodes. | Graph work can start from a LiDAR package without waiting on Unity | Confirm on a LiDAR iPhone; connect remaining edges by hand |
 
 ## Decisions to record
 
