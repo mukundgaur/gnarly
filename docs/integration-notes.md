@@ -4,7 +4,10 @@ Record decisions and findings here as the two workstreams meet. This prevents a 
 
 | Date | Owner | Finding / decision | Impact | Follow-up |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| 2026-10-02 | Unity | Unity 6000.6.0f1 with AR Foundation 6.6.2 and Apple ARKit XR Plug-in 6.6.2. Map applied via `ARWorldMap.TryDeserialize` and `ARKitSessionSubsystem.ApplyWorldMap`; both sides use `NSKeyedArchiver`, so no native bridge is expected. | Bridge only needed if deserialization fails on device | Confirm on device |
+| 2026-10-02 | Unity | Relocalization is ready when tracking returns to normal after ARKit has reported `Relocalizing`. | Defines when the cube and path appear | Confirm on device |
+| 2026-10-02 | Unity | ARKit `[x, y, z]` becomes Unity `(x, y, -z)`, placed under `XROrigin.TrackablesParent`. | Applies to anchor and route positions | — |
+| 2026-10-02 | Unity | Route guidance started ahead of the cube proof: optional `route.json` ([schema](../shared/route.schema.json)) is drawn as a floor path with an off-screen turn arrow. | Mapper must export `route.json` (see `mapper-ios/README.md`) | Mapper: add waypoint recording |
 
 ## Decisions to record
 

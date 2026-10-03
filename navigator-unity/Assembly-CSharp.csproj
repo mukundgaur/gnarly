@@ -56,8 +56,10 @@
     <Analyzer Include="C:\Program Files\Unity\Hub\Editor\6000.6.0f1\Editor\Data\BCLExtensions\TargetingPacks\netstandard2.1\analyzers\dotnet\roslyn4.0\cs\System.Text.Json.SourceGeneration.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\Scripts\RouteNavigator.cs" />
     <Compile Include="Assets\Scripts\TestAnchor.cs" />
     <Compile Include="Assets\TutorialInfo\Readme.cs" />
+    <Compile Include="Assets\Scripts\Route.cs" />
     <Compile Include="Assets\Scripts\RelocalizationController.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -27,6 +27,7 @@ Documents/POCExports/<timestamp>-<zone-id>/
   worldmap-zone-a.bin
   test-anchor.json
   structure.usdz
+  route.json          planned; see "Still to do" in README.md
 ```
 
 Use the app’s share action to transfer that directory to the Unity engineer. Do not commit a real `ARWorldMap` to this repository.

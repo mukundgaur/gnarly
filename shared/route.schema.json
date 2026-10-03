@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly route",
+  "description": "Ordered waypoints from start to destination, in the same ARKit world map as the zone's worldmap file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "zoneId", "coordinateSystem", "waypoints"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "zoneId": { "type": "string", "minLength": 1 },
+    "coordinateSystem": { "const": "arkit-world-meters" },
+    "heightReference": {
+      "enum": ["floor", "device"],
+      "default": "floor",
+      "description": "floor: waypoint y is on the floor. device: waypoint y is the phone's camera height when recorded; the navigator lowers it to the floor."
+    },
+    "waypoints": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Walk order: the first item is the start and the last item is the destination.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "position"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "position": {
+            "type": "array",
+            "description": "[x, y, z] in meters in the capture ARKit world coordinate system.",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        }
+      }
+    },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string" }
+  }
+}

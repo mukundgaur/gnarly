@@ -32,3 +32,5 @@ docs/                   Setup, handoff, and integration notes
 ## Guardrail
 
 Do not begin Firebase, graph routing, multi-floor transfers, or production UI until the same map can be captured, saved, loaded in Unity, relocalized, and used to place the test cube in the original physical location.
+
+Exception: the Unity app already draws a path from an optional, hand-written `route.json`. The mapper still needs to record waypoints and export that file; see [mapper-ios/README.md](mapper-ios/README.md).

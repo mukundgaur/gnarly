@@ -15,7 +15,8 @@ using UnityEngine.InputSystem.UI;
 #endif
 
 /// <summary>
-/// Loads the mapper's ARWorldMap, waits for ARKit to relocalize, then places the test cube.
+/// Loads the mapper's ARWorldMap, waits for ARKit to relocalize, then places the test cube
+/// and, if route.json is present, starts route guidance.
 /// </summary>
 public class RelocalizationController : MonoBehaviour
 {
@@ -23,14 +24,21 @@ public class RelocalizationController : MonoBehaviour
 
     [SerializeField] ARSession session;
     [SerializeField] XROrigin origin;
+    [SerializeField] RouteNavigator navigator;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] float cubeSize = 0.2f;
+    [Tooltip("Debug only: skip the world map so coordinates are relative to where the app starts.")]
+    [SerializeField] bool skipWorldMap;
 
     State state = State.WaitingForSession;
     bool sawRelocalizing;
     TestAnchor anchor;
+    Route route;
     GameObject cube;
     Text statusText;
+#if UNITY_IOS && !UNITY_EDITOR
+    ARWorldMap? appliedWorldMap;
+#endif
 
     string PackageDirectory => Path.Combine(Application.streamingAssetsPath, zoneId);
 
@@ -38,6 +46,7 @@ public class RelocalizationController : MonoBehaviour
     {
         if (session == null) session = FindAnyObjectByType<ARSession>();
         if (origin == null) origin = FindAnyObjectByType<XROrigin>();
+        if (navigator == null) navigator = GetComponent<RouteNavigator>();
         BuildUi();
     }
 
@@ -57,19 +66,20 @@ public class RelocalizationController : MonoBehaviour
             case State.Locating:
                 if (ARSession.notTrackingReason == NotTrackingReason.Relocalizing)
                     sawRelocalizing = true;
-                if (sawRelocalizing && IsTrackingNormally())
-                {
-                    PlaceCube();
-                    state = State.Located;
-                    SetStatus("Located");
-                }
+                if ((sawRelocalizing || skipWorldMap) && IsTrackingNormally())
+                    OnLocated();
                 break;
 
             case State.Located:
                 if (!IsTrackingNormally())
                 {
                     state = State.TrackingLost;
+                    if (navigator != null) navigator.SetVisible(false);
                     SetStatus($"Tracking lost ({ARSession.notTrackingReason}). Look around the scanned area.");
+                }
+                else if (navigator != null && navigator.IsActive)
+                {
+                    SetStatus(navigator.StatusMessage);
                 }
                 break;
 
@@ -77,6 +87,7 @@ public class RelocalizationController : MonoBehaviour
                 if (IsTrackingNormally())
                 {
                     state = State.Located;
+                    if (navigator != null) navigator.SetVisible(true);
                     SetStatus("Located");
                 }
                 break;
@@ -92,8 +103,10 @@ public class RelocalizationController : MonoBehaviour
         try
         {
             anchor = TestAnchor.Parse(File.ReadAllText(Path.Combine(PackageDirectory, "test-anchor.json")), zoneId);
-            var mapBytes = File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin"));
-            ApplyWorldMap(mapBytes);
+            var routePath = Path.Combine(PackageDirectory, "route.json");
+            route = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), zoneId) : null;
+            if (!skipWorldMap)
+                ApplyWorldMap(File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin")));
             sawRelocalizing = false;
             state = State.Locating;
             SetStatus("Locating… Look around the scanned area.");
@@ -116,13 +129,38 @@ public class RelocalizationController : MonoBehaviour
         if (!ARWorldMap.TryDeserialize(data, out var worldMap))
             throw new InvalidOperationException("Unity could not deserialize the mapper's ARWorldMap. A native bridge is required.");
         if (!worldMap.valid)
+        {
+            worldMap.Dispose();
             throw new InvalidOperationException("The deserialized ARWorldMap is invalid.");
+        }
 
         Debug.Log($"[Gnarly] Applying {mapBytes.Length}-byte world map for {zoneId}.");
         arkit.ApplyWorldMap(worldMap);
+        DisposeWorldMap();
+        appliedWorldMap = worldMap;
 #else
         throw new PlatformNotSupportedException($"Loaded {mapBytes.Length}-byte map, but ARWorldMap can only be applied on an iOS device.");
 #endif
+    }
+
+    void OnDestroy() => DisposeWorldMap();
+
+    void DisposeWorldMap()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        appliedWorldMap?.Dispose();
+        appliedWorldMap = null;
+#endif
+    }
+
+    void OnLocated()
+    {
+        PlaceCube();
+        state = State.Located;
+        if (route != null && navigator != null)
+            navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        else
+            SetStatus(route == null ? "Located (no route.json)" : "Located");
     }
 
     void PlaceCube()
@@ -145,6 +183,7 @@ public class RelocalizationController : MonoBehaviour
     {
         if (cube != null) Destroy(cube);
         cube = null;
+        if (navigator != null) navigator.Clear();
         state = State.WaitingForSession;
         session.Reset();
         SetStatus("Restarting…");
