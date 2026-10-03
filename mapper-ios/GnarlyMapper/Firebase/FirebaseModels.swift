@@ -42,6 +42,9 @@ struct Zone: Codable, Identifiable {
     var floorId: String
     var worldMapPath: String?
     var buildingJsonPath: String?
+    var scanJsonPath: String? = nil
+    var scanFeaturesPath: String? = nil
+    var structurePath: String? = nil
     var relocalizationHint: String
     var startNodeId: String
 }

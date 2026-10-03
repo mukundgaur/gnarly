@@ -183,8 +183,15 @@ final class MapperViewModel: ObservableObject {
             do {
                 let repository = try FirebaseDataRepository()
                 let buildingJSON = packageURL.appendingPathComponent("building.json")
+                let scanJSON = packageURL.appendingPathComponent("scan.json")
+                let scanFeatures = packageURL.appendingPathComponent("scan-features.json")
+                let structure = packageURL.appendingPathComponent("structure.usdz")
                 let worldMap = packageURL.appendingPathComponent("worldmap-\(zoneID).bin")
-                guard FileManager.default.fileExists(atPath: buildingJSON.path), FileManager.default.fileExists(atPath: worldMap.path) else {
+                guard FileManager.default.fileExists(atPath: buildingJSON.path),
+                      FileManager.default.fileExists(atPath: scanJSON.path),
+                      FileManager.default.fileExists(atPath: scanFeatures.path),
+                      FileManager.default.fileExists(atPath: structure.path),
+                      FileManager.default.fileExists(atPath: worldMap.path) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
                 statusText = "Checking Firebase building…"
@@ -203,6 +210,13 @@ final class MapperViewModel: ObservableObject {
                 try Task.checkCancellation()
                 statusText = "Uploading zone graph…"
                 try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try Task.checkCancellation()
+                statusText = "Uploading RoomPlan scan…"
+                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try Task.checkCancellation()
+                try await repository.uploadZoneScanFeatures(from: scanFeatures, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try Task.checkCancellation()
+                try await repository.uploadZoneStructure(from: structure, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
                 statusText = "Uploading AR world map…"
                 try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)

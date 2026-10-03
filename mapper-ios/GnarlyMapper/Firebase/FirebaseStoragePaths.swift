@@ -20,8 +20,24 @@ enum FirebaseStoragePaths {
         try base(buildingId: buildingId, versionId: versionId) + "/scan.json"
     }
 
+    static func scanFeatures(buildingId: String, versionId: String) throws -> String {
+        try base(buildingId: buildingId, versionId: versionId) + "/scan-features.json"
+    }
+
     static func structure(buildingId: String, versionId: String) throws -> String {
         try base(buildingId: buildingId, versionId: versionId) + "/structure.usdz"
+    }
+
+    static func zoneScanJSON(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/scan.json"
+    }
+
+    static func zoneScanFeatures(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/scan-features.json"
+    }
+
+    static func zoneStructure(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/structure.usdz"
     }
 
     static func worldMap(buildingId: String, versionId: String, zoneId: String) throws -> String {
@@ -40,5 +56,10 @@ enum FirebaseStoragePaths {
         try validate(buildingId, field: "buildingId")
         try validate(versionId, field: "versionId")
         return "buildings/\(buildingId)/\(versionId)"
+    }
+
+    private static func zoneBase(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try validate(zoneId, field: "zoneId")
+        return try base(buildingId: buildingId, versionId: versionId) + "/zones/\(zoneId)"
     }
 }

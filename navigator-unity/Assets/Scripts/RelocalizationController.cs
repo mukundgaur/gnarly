@@ -23,13 +23,20 @@ using UnityEngine.InputSystem.UI;
 /// </summary>
 public class RelocalizationController : MonoBehaviour
 {
-    enum State { WaitingForPackage, WaitingForSession, Locating, Located, TrackingLost, Failed }
+    enum State { WaitingForPackage, WaitingForSession, Locating, Located, AwaitingZoneTransition, TrackingLost, Failed }
 
     sealed class ZonePackage
     {
         public string directory;
         public Pathfinding.ScanFeatures scan;
         public Pathfinding.Graph graph;
+    }
+
+    [Serializable]
+    sealed class IndoorMapRouteRequest
+    {
+        public string startId;
+        public string destinationId;
     }
 
     const string ZoneConnectionsFileName = "zone-connections.json";
@@ -71,6 +78,10 @@ public class RelocalizationController : MonoBehaviour
     Image statusIndicator;
     Image retryBackground;
     RectTransform destinationPanel;
+    RectTransform transitionPanel;
+    Text transitionHeading;
+    Text transitionInstructions;
+    Text transitionButtonLabel;
     readonly List<GameObject> destinationButtons = new List<GameObject>();
 #if UNITY_IOS && !UNITY_EDITOR
     ARWorldMap? appliedWorldMap;
@@ -179,13 +190,15 @@ public class RelocalizationController : MonoBehaviour
                 else if (navigator != null && navigator.IsActive)
                 {
                     if (navigator.HasArrived && activeLegs != null && activeLegIndex < activeLegs.Count - 1)
-                    {
-                        activeLegIndex++;
-                        SwitchZone(activeLegs[activeLegIndex].zoneId);
-                    }
+                        AwaitZoneTransition();
                     else
                         SetStatus(LegStatus());
                 }
+                break;
+
+            case State.AwaitingZoneTransition:
+                if (!IsTrackingNormally())
+                    SetStatus("Tracking paused. Keep the phone pointed at the scanned area, then continue into the next zone.");
                 break;
 
             case State.TrackingLost:
@@ -338,7 +351,10 @@ public class RelocalizationController : MonoBehaviour
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
         indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera);
-        indoorMap?.SetAppleModelPath(Path.Combine(zone.directory, "structure.usdz"));
+        indoorMap?.SetPackagePaths(
+            Path.Combine(zone.directory, "structure.usdz"),
+            Path.Combine(zone.directory, "building.json"),
+            Path.Combine(zone.directory, "scan-features.json"));
 
         if (activeLegs != null)
         {
@@ -405,15 +421,66 @@ public class RelocalizationController : MonoBehaviour
             return;
         }
 
-        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
-        if (path == null || path.Count < 2)
+        BeginRoute(startId, goalId);
+    }
+
+    /// <summary>Called by the native iPhone map after the user chooses map markers.</summary>
+    public void OnIndoorMapRouteRequested(string requestJson)
+    {
+        try
         {
-            SetStatus($"No A* path from {startId} to {goalId}. Look around or pick another destination.");
+            var request = JsonUtility.FromJson<IndoorMapRouteRequest>(requestJson);
+            if (request == null || string.IsNullOrEmpty(request.startId) || string.IsNullOrEmpty(request.destinationId))
+                throw new FormatException("The map route request did not contain start and destination node IDs.");
+
+            var startId = ResolveCurrentZoneNode(request.startId);
+            var destinationId = ResolveCurrentZoneNode(request.destinationId);
+            if (startId == null || destinationId == null)
+                throw new KeyNotFoundException(
+                    $"The selected map node is not in the navigation graph ({request.startId} -> {request.destinationId}).");
+
+            BeginRoute(startId, destinationId);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[Gnarly] Interactive map route selection failed: {exception}");
+            var message = "Could not create the selected map route: " + exception.Message;
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
+        }
+    }
+
+    string ResolveCurrentZoneNode(string nodeId)
+    {
+        if (navigationGraph == null) return null;
+        var zoneKey = Pathfinding.ZoneKey(currentZoneId, nodeId);
+        if (navigationGraph.Node(zoneKey) != null) return zoneKey;
+        return navigationGraph.Node(nodeId) != null ? nodeId : null;
+    }
+
+    void BeginRoute(string startId, string goalId)
+    {
+        if (navigationGraph == null || navigator == null) return;
+
+        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
+        if (path == null)
+        {
+            var message = $"No A* path from {startId} to {goalId}. Pick another map point.";
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
+            return;
+        }
+        if (path.Count < 2)
+        {
+            const string message = "Start and destination are the same location. Choose two different map points.";
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
             return;
         }
 
         activeLegs = Pathfinding.SplitByZone(navigationGraph, path);
         activeLegIndex = 0;
+        if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         Debug.Log($"[Gnarly] A* {string.Join(" -> ", path)} ({activeLegs.Count} zone leg(s))");
@@ -443,6 +510,38 @@ public class RelocalizationController : MonoBehaviour
         var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
         var connectorName = string.IsNullOrEmpty(connector.label) ? connector.localId : connector.label;
         return $"{navigator.StatusMessage} to {connectorName}, then into {activeLegs[activeLegIndex + 1].zoneId}";
+    }
+
+    void AwaitZoneTransition()
+    {
+        var nextZone = activeLegs[activeLegIndex + 1].zoneId;
+        var leg = activeLegs[activeLegIndex];
+        var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
+        var connectorName = string.IsNullOrEmpty(connector.label) ? "the connection" : connector.label;
+        state = State.AwaitingZoneTransition;
+        navigator.SetVisible(false);
+        if (transitionHeading != null) transitionHeading.text = $"{currentZoneId}  →  {nextZone}";
+        if (transitionInstructions != null)
+            transitionInstructions.text = $"Reached {connectorName}. Walk into {nextZone}, then tap below to load its map. Look around there until your position is confirmed.";
+        if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm in {nextZone}";
+        if (transitionPanel != null) transitionPanel.gameObject.SetActive(true);
+        SetStatus($"At {connectorName}. Continue into {nextZone}, then confirm below.");
+        Debug.Log($"[Gnarly] Waiting at connector {currentZoneId} -> {nextZone} for the user to enter the next zone.");
+    }
+
+    void ConfirmZoneTransition()
+    {
+        if (state != State.AwaitingZoneTransition || activeLegs == null || activeLegIndex >= activeLegs.Count - 1)
+            return;
+        var nextZone = activeLegs[activeLegIndex + 1].zoneId;
+        if (!zonePackages.ContainsKey(nextZone))
+        {
+            SetStatus($"Map for {nextZone} is unavailable. Stay in {currentZoneId} and retry the download.");
+            return;
+        }
+        activeLegIndex++;
+        if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
+        SwitchZone(nextZone);
     }
 
     /// <summary>Each zone has its own ARWorldMap, so crossing a connection means relocalizing in the next map.</summary>
@@ -501,6 +600,7 @@ public class RelocalizationController : MonoBehaviour
         lidarView?.ClearPoints();
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
+        if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
         session.Reset();
         SetStatus(message);
@@ -523,6 +623,7 @@ public class RelocalizationController : MonoBehaviour
     void Fail(string message)
     {
         state = State.Failed;
+        if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
         Debug.LogError($"[Gnarly] {message}");
         SetStatus($"Error: {message}");
     }
@@ -531,7 +632,9 @@ public class RelocalizationController : MonoBehaviour
     {
         if (statusText != null) statusText.text = message;
         if (statusEyebrow != null)
-            statusEyebrow.text = state == State.Located ? "LOCATION CONFIRMED" : "GNARLY NAVIGATION";
+            statusEyebrow.text = activeLegs != null && activeLegs.Count > 0
+                ? $"ZONE {currentZoneId}  ·  LEG {activeLegIndex + 1}/{activeLegs.Count}"
+                : state == State.Located ? "LOCATION CONFIRMED" : "GNARLY NAVIGATION";
         if (statusIndicator != null)
             statusIndicator.color = StatusColor();
         if (retryBackground != null)
@@ -545,6 +648,7 @@ public class RelocalizationController : MonoBehaviour
         return state switch
         {
             State.Located => new Color(0.25f, 0.95f, 0.72f),
+            State.AwaitingZoneTransition => new Color(1f, 0.69f, 0.24f),
             State.Failed => new Color(1f, 0.35f, 0.36f),
             State.TrackingLost => new Color(1f, 0.69f, 0.24f),
             _ => new Color(0.25f, 0.85f, 1f)
@@ -561,11 +665,11 @@ public class RelocalizationController : MonoBehaviour
         if (state != State.Locating) return;
         if (IsTrackingNormally() && !sawRelocalizing)
         {
-            SetStatus("ARKit is tracking normally, but has not reported relocalization. Look around the scanned area.");
+            SetStatus($"Locating in {currentZoneId}. Look around the scanned area until your position is confirmed.");
             return;
         }
 
-        SetStatus($"Locating… ARKit: {snapshot}. Look around the scanned area.");
+        SetStatus($"Locating in {currentZoneId}… ARKit: {snapshot}. Look around the scanned area.");
     }
 
     void BuildUi()
@@ -622,6 +726,30 @@ public class RelocalizationController : MonoBehaviour
         destinationHeading.color = new Color(0.44f, 0.78f, 0.92f);
         destinationHeading.text = "CHOOSE A DESTINATION";
         destinationPanel.gameObject.SetActive(false);
+
+        transitionPanel = CreateRect("ZoneTransitionPanel", canvasObject.transform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(24, -245), new Vector2(-24, 245));
+        transitionPanel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.96f);
+        transitionHeading = CreateRect("ZoneTransitionHeading", transitionPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(32, -90), new Vector2(-32, -22)).gameObject.AddComponent<Text>();
+        transitionHeading.font = font;
+        transitionHeading.fontSize = 42;
+        transitionHeading.fontStyle = FontStyle.Bold;
+        transitionHeading.alignment = TextAnchor.MiddleCenter;
+        transitionHeading.color = new Color(0.44f, 0.78f, 0.92f);
+        transitionInstructions = CreateRect("ZoneTransitionInstructions", transitionPanel, Vector2.zero, Vector2.one, new Vector2(36, 130), new Vector2(-36, -104)).gameObject.AddComponent<Text>();
+        transitionInstructions.font = font;
+        transitionInstructions.fontSize = 34;
+        transitionInstructions.alignment = TextAnchor.MiddleCenter;
+        transitionInstructions.color = Color.white;
+        var transitionButton = CreateRect("ConfirmZoneTransition", transitionPanel, new Vector2(0, 0), new Vector2(1, 0), new Vector2(32, 24), new Vector2(-32, 116));
+        transitionButton.gameObject.AddComponent<Image>().color = new Color(0.08f, 0.49f, 0.5f, 1f);
+        transitionButton.gameObject.AddComponent<Button>().onClick.AddListener(ConfirmZoneTransition);
+        transitionButtonLabel = CreateRect("Label", transitionButton, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
+        transitionButtonLabel.font = font;
+        transitionButtonLabel.fontSize = 34;
+        transitionButtonLabel.fontStyle = FontStyle.Bold;
+        transitionButtonLabel.alignment = TextAnchor.MiddleCenter;
+        transitionButtonLabel.color = Color.white;
+        transitionPanel.gameObject.SetActive(false);
 
         if (FindAnyObjectByType<EventSystem>() == null)
         {

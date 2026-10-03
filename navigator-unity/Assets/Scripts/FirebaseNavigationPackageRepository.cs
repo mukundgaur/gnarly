@@ -139,9 +139,18 @@ public sealed class FirebaseNavigationPackageRepository
         var zone = await GetDocumentAsync(zonePath, "zone metadata");
 
         var expectedBuildingPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/building.json";
+        var expectedScanPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/scan.json";
+        var expectedScanFeaturesPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/scan-features.json";
+        var expectedStructurePath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/structure.usdz";
         var expectedWorldMapPath = $"buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin";
         RequireExpectedPath(expectedBuildingPath,
             RequiredString(zone.fields?.buildingJsonPath, "buildingJsonPath", zonePath), "buildingJsonPath");
+        RequireExpectedPath(expectedScanPath,
+            RequiredString(zone.fields?.scanJsonPath, "scanJsonPath", zonePath), "scanJsonPath");
+        RequireExpectedPath(expectedScanFeaturesPath,
+            RequiredString(zone.fields?.scanFeaturesPath, "scanFeaturesPath", zonePath), "scanFeaturesPath");
+        RequireExpectedPath(expectedStructurePath,
+            RequiredString(zone.fields?.structurePath, "structurePath", zonePath), "structurePath");
         RequireExpectedPath(expectedWorldMapPath,
             RequiredString(zone.fields?.worldMapPath, "worldMapPath", zonePath), "worldMapPath");
 
@@ -152,10 +161,16 @@ public sealed class FirebaseNavigationPackageRepository
         try
         {
             var buildingFile = Path.Combine(staging, "building.json");
+            var scanFile = Path.Combine(staging, "scan.json");
+            var scanFeaturesFile = Path.Combine(staging, "scan-features.json");
+            var structureFile = Path.Combine(staging, "structure.usdz");
             var worldMapFile = Path.Combine(staging, $"worldmap-{zoneId}.bin");
             await DownloadStorageObjectAsync(expectedBuildingPath, buildingFile, "building.json");
+            await DownloadStorageObjectAsync(expectedScanPath, scanFile, "raw RoomPlan scan.json");
+            await DownloadStorageObjectAsync(expectedScanFeaturesPath, scanFeaturesFile, "normalized RoomPlan scan-features.json");
+            await DownloadStorageObjectAsync(expectedStructurePath, structureFile, "RoomPlan structure.usdz");
             await DownloadStorageObjectAsync(expectedWorldMapPath, worldMapFile, "ARWorldMap");
-            ValidatePackageFiles(buildingFile, worldMapFile, zoneId);
+            ValidatePackageFiles(buildingFile, scanFile, scanFeaturesFile, structureFile, worldMapFile, zoneId);
             await TryDownloadZoneConnectionsAsync(
                 $"buildings/{buildingId}/{versionId}/zone-connections.json",
                 Path.Combine(staging, "zone-connections.json"));
@@ -400,6 +415,9 @@ public sealed class FirebaseNavigationPackageRepository
         ValidateIdentifier(manifest.versionId, "cached versionId");
         ValidatePackageFiles(
             Path.Combine(directory, "building.json"),
+            Path.Combine(directory, "scan.json"),
+            Path.Combine(directory, "scan-features.json"),
+            Path.Combine(directory, "structure.usdz"),
             Path.Combine(directory, $"worldmap-{expectedZoneId}.bin"),
             expectedZoneId);
         package = new DownloadedNavigationPackage(
@@ -407,10 +425,22 @@ public sealed class FirebaseNavigationPackageRepository
         return true;
     }
 
-    static void ValidatePackageFiles(string buildingFile, string worldMapFile, string expectedZoneId)
+    static void ValidatePackageFiles(
+        string buildingFile,
+        string scanFile,
+        string scanFeaturesFile,
+        string structureFile,
+        string worldMapFile,
+        string expectedZoneId)
     {
         if (!File.Exists(buildingFile) || new FileInfo(buildingFile).Length == 0)
             throw new FirebaseNavigationException("Downloaded building.json is missing or empty.");
+        if (!File.Exists(scanFile) || new FileInfo(scanFile).Length == 0)
+            throw new FirebaseNavigationException("Downloaded raw RoomPlan scan.json is missing or empty.");
+        if (!File.Exists(scanFeaturesFile) || new FileInfo(scanFeaturesFile).Length == 0)
+            throw new FirebaseNavigationException("Downloaded normalized RoomPlan scan-features.json is missing or empty.");
+        if (!File.Exists(structureFile) || new FileInfo(structureFile).Length == 0)
+            throw new FirebaseNavigationException("Downloaded RoomPlan structure.usdz is missing or empty.");
         if (!File.Exists(worldMapFile) || new FileInfo(worldMapFile).Length == 0)
             throw new FirebaseNavigationException("Downloaded ARWorldMap is missing or empty.");
 
@@ -422,6 +452,17 @@ public sealed class FirebaseNavigationPackageRepository
                 $"building.json zone '{building.zoneId}' does not match requested zone '{expectedZoneId}'.");
         if (building.nodes == null || building.edges == null)
             throw new FirebaseNavigationException("building.json must contain nodes and edges arrays.");
+
+        var rawScan = File.ReadAllText(scanFile).TrimStart();
+        if (!rawScan.StartsWith("{", StringComparison.Ordinal))
+            throw new FirebaseNavigationException("Downloaded raw RoomPlan scan.json is not a JSON object.");
+
+        var scan = Pathfinding.ParseScan(File.ReadAllText(scanFeaturesFile));
+        if (scan.schemaVersion != 1)
+            throw new FirebaseNavigationException($"Unsupported scan-features.json schemaVersion {scan.schemaVersion}.");
+        if (scan.zoneId != expectedZoneId)
+            throw new FirebaseNavigationException(
+                $"scan-features.json zone '{scan.zoneId}' does not match requested zone '{expectedZoneId}'.");
     }
 
     static string RequiredString(FirestoreStringValue value, string field, string documentPath)
@@ -518,6 +559,9 @@ public sealed class FirebaseNavigationPackageRepository
     {
         public FirestoreStringValue activeVersion;
         public FirestoreStringValue buildingJsonPath;
+        public FirestoreStringValue scanJsonPath;
+        public FirestoreStringValue scanFeaturesPath;
+        public FirestoreStringValue structurePath;
         public FirestoreStringValue worldMapPath;
     }
 
