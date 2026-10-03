@@ -55,6 +55,7 @@ function ScannedFloor({ feature, floorId, onPick }: { feature: ScanFeature; floo
     const shape = new Shape(outline.map(([x, y]) => new Vector2(x, y)));
     return new ShapeGeometry(shape);
   }, [feature]);
+  useEffect(()=>()=>geometry?.dispose(),[geometry]);
   const matrix = useMemo(() => featureMatrix(feature), [feature]);
   if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh userData={{ walkableFloor: true, floorId }} onClick={event=>{if(onPick){event.stopPropagation();onPick(event.point.toArray() as [number,number,number])}}}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
   return <group matrix={matrix} matrixAutoUpdate={false}>
@@ -163,7 +164,8 @@ function GraphFloor({ graph, floor, illustrative, onFloorPick }: { graph: Graph;
 }
 
 function CameraRig({ graph, scan, floor, reset }: Pick<ViewerProps, 'graph' | 'scan' | 'floor' | 'reset'>) {
-  const { camera } = useThree();
+  const { camera, size: viewportSize } = useThree();
+  const geometryKey=graph.nodes.map(node=>node.floor+':'+node.position.join(',')).join('|');
   const controls = useRef<{ target: Vector3; update: () => void } | null>(null);
   useEffect(() => {
     const box = new Box3();
@@ -182,12 +184,12 @@ function CameraRig({ graph, scan, floor, reset }: Pick<ViewerProps, 'graph' | 's
     if (box.isEmpty()) box.expandByPoint(new Vector3(0, 0, 0));
     const center = box.getCenter(new Vector3());
     const size = box.getSize(new Vector3());
-    const span = Math.max(8, size.x, size.z, size.y * 2);
+    const span = Math.max(8, size.x, size.z, size.y * 2) * Math.max(1, viewportSize.height / Math.max(1,viewportSize.width));
     camera.position.copy(center).add(new Vector3(span * 1.2, span * .95, span * 1.2));
     camera.lookAt(center);
     controls.current?.target.copy(center);
     controls.current?.update();
-  }, [camera, graph, scan, floor, reset]);
+  }, [camera, geometryKey, scan, floor, reset, viewportSize.width, viewportSize.height]);
   return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={200} maxPolarAngle={Math.PI / 2.05} />;
 }
 
@@ -202,6 +204,7 @@ function DropController({ request, onDrop }: { request?: DropRequest | null; onD
       ((request.clientX - bounds.left) / bounds.width) * 2 - 1,
       -((request.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
+    if(request.clientX<bounds.left||request.clientX>bounds.right||request.clientY<bounds.top||request.clientY>bounds.bottom){onDrop(null);return}
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(scene.children, true)
       .find(item => item.object.userData.walkableFloor === true && typeof item.object.userData.floorId === 'string');
@@ -275,6 +278,8 @@ function WalkCamera({ location, graph, scan, onMove }: {
 
     const movementCodes = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
     const keyDown = (event: KeyboardEvent) => {
+      const target=event.target;
+      if(event.ctrlKey||event.metaKey||event.altKey||target instanceof HTMLElement && (target.matches('input,textarea,select,button')||target.isContentEditable))return;
       if (movementCodes.has(event.code)) {
         event.preventDefault();
         keys.current.add(event.code);
@@ -305,6 +310,7 @@ function WalkCamera({ location, graph, scan, onMove }: {
     window.addEventListener('keydown', keyDown, { passive: false });
     window.addEventListener('keyup', keyUp);
     window.addEventListener('blur', clear);
+    canvas.addEventListener('blur', clear);
     canvas.addEventListener('pointerdown', pointerDown);
     canvas.addEventListener('pointermove', pointerMove);
     canvas.addEventListener('pointerup', pointerUp);
@@ -313,6 +319,8 @@ function WalkCamera({ location, graph, scan, onMove }: {
       window.removeEventListener('keydown', keyDown);
       window.removeEventListener('keyup', keyUp);
       window.removeEventListener('blur', clear);
+      keys.current.clear();
+      canvas.removeEventListener('blur', clear);
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('pointermove', pointerMove);
       canvas.removeEventListener('pointerup', pointerUp);
@@ -383,7 +391,7 @@ function Scene(props: ViewerProps) {
         </Html>}
       </group>)}
     {routeSegments.map(([from, to], index) => <Line key={'route-' + index} points={[[from.position[0], from.position[1] + .18, from.position[2]], [to.position[0], to.position[1] + .18, to.position[2]]]} color="#2583df" lineWidth={5} />)}
-    {path.slice(0, step + 1).map(node => <mesh key={'breadcrumb-' + node.id} position={[node.position[0], node.position[1] + .24, node.position[2]]}>
+    {path.slice(0, step + 1).filter(node=>floor==='all'||node.floor===floor).map(node => <mesh key={'breadcrumb-' + node.id} position={[node.position[0], node.position[1] + .24, node.position[2]]}>
       <sphereGeometry args={[.14, 12, 12]} />
       <meshBasicMaterial color="#2583df" />
     </mesh>)}

@@ -1,1 +1,33 @@
-{"name":"gnarly-web","private":true,"version":"0.1.0","type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"tsc -b && vite build","start":"node server.mjs"},"dependencies":{"@react-three/drei":"^10.7.7","@react-three/fiber":"^9.4.2","@vis.gl/react-google-maps":"^1.10.1","firebase":"^12.4.0","leaflet":"^1.9.4","lucide-react":"^0.468.0","react":"^19.2.0","react-dom":"^19.2.0","react-leaflet":"^5.0.0","three":"^0.180.0"},"devDependencies":{"@types/leaflet":"^1.9.21","@types/react":"^19.2.0","@types/react-dom":"^19.2.0","@types/three":"^0.180.0","@vitejs/plugin-react":"^5.0.4","typescript":"^5.9.3","vite":"^7.1.12"}}
+{
+  "name": "gnarly-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "start": "node server.mjs",
+    "test": "node --experimental-strip-types --test src/routing.test.ts"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.4.2",
+    "@vis.gl/react-google-maps": "^1.10.1",
+    "firebase": "^12.4.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-leaflet": "^5.0.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.180.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
