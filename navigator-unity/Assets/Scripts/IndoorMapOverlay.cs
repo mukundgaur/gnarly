@@ -1,14 +1,20 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
 /// <summary>
 /// Renders navigation data into an interactive top-right overview.
 ///
-/// This deliberately does not recreate RoomPlan walls with Unity cubes. The actual RoomPlan
-/// visual is Apple's structure.usdz and needs a native RealityKit overlay on iOS.
+/// The compact card renders normalized RoomPlan geometry into a Unity RenderTexture. On iPhone,
+/// the expanded view uses the original structure.usdz in RealityKit and returns selected graph IDs
+/// to the existing A* navigator.
 /// </summary>
 public class IndoorMapOverlay : MonoBehaviour
 {
@@ -26,18 +32,38 @@ public class IndoorMapOverlay : MonoBehaviour
     Transform userMarker;
     Material graphMaterial;
     Material routeMaterial;
+    Material wallMaterial;
+    Material floorMaterial;
+    Material openingMaterial;
+    Material objectMaterial;
     Vector3 center;
     float span = 8f;
     string appleModelPath;
+    string buildingJsonPath;
+    string scanJsonPath;
+    Text expandedMessage;
 
 #if UNITY_IOS && !UNITY_EDITOR
     [DllImport("__Internal")]
-    static extern void GnarlyShowRoomModel(string absolutePath);
+    static extern void GnarlyShowRoomModel(
+        string absolutePath,
+        string buildingPath,
+        string scanPath,
+        string callbackObjectName);
+    [DllImport("__Internal")]
+    static extern void GnarlySetRoomModelRoute(string routeJson);
+    [DllImport("__Internal")]
+    static extern void GnarlySetRoomModelStatus(string message);
     [DllImport("__Internal")]
     static extern void GnarlyUpdateRoomModelPosition(float x, float y, float z);
 #endif
 
-    public void SetAppleModelPath(string path) => appleModelPath = path;
+    public void SetPackagePaths(string modelPath, string buildingPath, string scanPath)
+    {
+        appleModelPath = modelPath;
+        buildingJsonPath = buildingPath;
+        scanJsonPath = scanPath;
+    }
 
     public void Configure(Pathfinding.ScanFeatures scan, Pathfinding.Graph graph, Transform sessionTransform, Camera camera)
     {
@@ -46,6 +72,7 @@ public class IndoorMapOverlay : MonoBehaviour
         arCamera = camera;
         BuildMapRoot();
         CalculateMapBounds(scan);
+        BuildScanGeometry(scan);
         BuildGraph(graph);
         BuildUserMarker();
         FrameCamera();
@@ -70,6 +97,16 @@ public class IndoorMapOverlay : MonoBehaviour
         for (var i = 0; i < points.Length; i++)
             points[i] = route.SessionSpacePosition(i) + Vector3.up * 0.08f;
         line.SetPositions(points);
+#if UNITY_IOS && !UNITY_EDITOR
+        GnarlySetRoomModelRoute(JsonUtility.ToJson(route));
+#endif
+    }
+
+    public void SetExpandedStatus(string message)
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        GnarlySetRoomModelStatus(message ?? "");
+#endif
     }
 
     void Update()
@@ -98,6 +135,78 @@ public class IndoorMapOverlay : MonoBehaviour
 
         graphMaterial = MakeMaterial(new Color(0.42f, 0.75f, 0.85f, 0.35f));
         routeMaterial = MakeMaterial(new Color(0.08f, 0.95f, 0.82f, 1f));
+        wallMaterial = MakeMaterial(new Color(0.66f, 0.76f, 0.82f, 0.9f));
+        floorMaterial = MakeMaterial(new Color(0.11f, 0.2f, 0.25f, 1f));
+        openingMaterial = MakeMaterial(new Color(0.24f, 0.72f, 0.9f, 0.72f));
+        objectMaterial = MakeMaterial(new Color(0.35f, 0.48f, 0.55f, 0.88f));
+    }
+
+    void BuildScanGeometry(Pathfinding.ScanFeatures scan)
+    {
+        if (scan == null)
+        {
+            Debug.LogError("[Gnarly] The RoomPlan scan is missing; the minimap cannot render building geometry.");
+            return;
+        }
+
+        BuildSurfaces(scan.floors, floorMaterial, true);
+        BuildSurfaces(scan.walls, wallMaterial, false);
+        BuildSurfaces(scan.doors, openingMaterial, false);
+        BuildSurfaces(scan.openings, openingMaterial, false);
+        BuildSurfaces(scan.windows, openingMaterial, false);
+        if (scan.objects == null) return;
+        foreach (var item in scan.objects)
+        {
+            if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
+            CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
+                item.transformColumnMajor, objectMaterial, false);
+        }
+    }
+
+    void BuildSurfaces(Pathfinding.Surface[] surfaces, Material material, bool floor)
+    {
+        if (surfaces == null) return;
+        foreach (var surface in surfaces)
+        {
+            if (!ValidVector(surface.position) || surface.dimensions == null || surface.dimensions.Length < 2) continue;
+            var dimensions = surface.dimensions.Length >= 3
+                ? (float[])surface.dimensions.Clone()
+                : new[] { surface.dimensions[0], surface.dimensions[1], 0.06f };
+            if (floor)
+            {
+                // RoomPlan surfaces are nearly planar. Keep the scan footprint visible from oblique angles.
+                dimensions[1] = 0.04f;
+                if (dimensions[2] < 0.1f) dimensions[2] = Math.Max(0.5f, surface.dimensions[1]);
+            }
+            else if (dimensions[2] < 0.04f)
+            {
+                dimensions[2] = 0.06f;
+            }
+            CreateScanBox("RoomPlan-" + surface.category, surface.position, dimensions,
+                surface.transformColumnMajor, material, floor);
+        }
+    }
+
+    void CreateScanBox(
+        string objectName,
+        float[] position,
+        float[] dimensions,
+        float[] transform,
+        Material material,
+        bool floor)
+    {
+        var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        box.name = objectName;
+        box.transform.SetParent(mapRoot, false);
+        box.transform.localPosition = ToUnity(position);
+        box.transform.localRotation = ToUnityRotation(transform, floor);
+        box.transform.localScale = new Vector3(
+            Mathf.Max(0.02f, Mathf.Abs(dimensions[0])),
+            Mathf.Max(0.02f, Mathf.Abs(dimensions[1])),
+            Mathf.Max(0.02f, Mathf.Abs(dimensions[2])));
+        box.GetComponent<Renderer>().sharedMaterial = material;
+        Destroy(box.GetComponent<Collider>());
+        SetLayer(box, MapLayer);
     }
 
     void CalculateMapBounds(Pathfinding.ScanFeatures scan)
@@ -191,15 +300,24 @@ public class IndoorMapOverlay : MonoBehaviour
         var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
         compactCard = CreateRect("MiniMap", canvasObject.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-354, -430), new Vector2(-28, -104));
-        compactCard.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.93f);
+        var compactGroup = compactCard.gameObject.AddComponent<CanvasGroup>();
+        compactGroup.interactable = true;
+        compactGroup.blocksRaycasts = true;
+        var compactBackground = compactCard.gameObject.AddComponent<Image>();
+        compactBackground.color = new Color(0.025f, 0.06f, 0.1f, 0.93f);
+        compactBackground.raycastTarget = true;
         AddMapImage(compactCard, new Vector2(12, 12), new Vector2(-12, -50));
         AddText(compactCard, "LIVE POSITION · TAP TO EXPAND", 18, new Vector2(14, 8), new Vector2(-14, 40), new Color(0.45f, 0.83f, 0.95f), font);
-        compactCard.gameObject.AddComponent<Button>().onClick.AddListener(OpenExpandedModel);
+        var compactButton = compactCard.gameObject.AddComponent<Button>();
+        compactButton.targetGraphic = compactBackground;
+        compactButton.interactable = true;
+        compactButton.onClick.AddListener(OpenExpandedModel);
 
         expandedCard = CreateRect("ExpandedMap", canvasObject.transform, Vector2.zero, Vector2.one, new Vector2(26, 120), new Vector2(-26, -110));
         expandedCard.gameObject.AddComponent<Image>().color = new Color(0.015f, 0.035f, 0.06f, 0.98f);
         AddMapImage(expandedCard, new Vector2(20, 20), new Vector2(-20, -94));
         AddText(expandedCard, "NAVIGATION MAP  ·  YOUR POSITION IS MINT", 25, new Vector2(28, 14), new Vector2(-190, 74), new Color(0.45f, 0.83f, 0.95f), font);
+        expandedMessage = AddText(expandedCard, "", 30, new Vector2(36, 110), new Vector2(-36, 250), Color.white, font, true);
         var close = CreateRect("Close", expandedCard, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-150, 14), new Vector2(-24, 74));
         close.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.31f, 0.4f, 1f);
         close.gameObject.AddComponent<Button>().onClick.AddListener(() => expandedCard.gameObject.SetActive(false));
@@ -207,19 +325,32 @@ public class IndoorMapOverlay : MonoBehaviour
         expandedCard.gameObject.SetActive(false);
 
         if (FindAnyObjectByType<EventSystem>() == null)
+        {
+#if ENABLE_INPUT_SYSTEM
+            new GameObject("MapEventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
+#else
             new GameObject("MapEventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+#endif
+        }
     }
 
     void OpenExpandedModel()
     {
 #if UNITY_IOS && !UNITY_EDITOR
-        if (!string.IsNullOrEmpty(appleModelPath))
+        var missing = new List<string>();
+        if (string.IsNullOrEmpty(appleModelPath) || !File.Exists(appleModelPath)) missing.Add("structure.usdz");
+        if (string.IsNullOrEmpty(buildingJsonPath) || !File.Exists(buildingJsonPath)) missing.Add("building.json");
+        if (string.IsNullOrEmpty(scanJsonPath) || !File.Exists(scanJsonPath)) missing.Add("scan-features.json");
+        if (missing.Count == 0)
         {
-            GnarlyShowRoomModel(appleModelPath);
+            GnarlyShowRoomModel(appleModelPath, buildingJsonPath, scanJsonPath, gameObject.name);
             return;
         }
+        var error = "The interactive map package is incomplete: missing " + string.Join(", ", missing) + ". Re-upload this scan from the mapper.";
+        Debug.LogError("[Gnarly] " + error);
+        if (expandedMessage != null) expandedMessage.text = error;
 #endif
-        // The editor and other platforms retain a data-only expanded map for development.
+        // Editor fallback keeps the same map visible for layout inspection; iPhone uses RealityKit.
         expandedCard.gameObject.SetActive(true);
     }
 
@@ -231,7 +362,7 @@ public class IndoorMapOverlay : MonoBehaviour
         image.raycastTarget = false;
     }
 
-    static void AddText(RectTransform parent, string text, int size, Vector2 offsetMin, Vector2 offsetMax, Color color, Font font, bool centered = false)
+    static Text AddText(RectTransform parent, string text, int size, Vector2 offsetMin, Vector2 offsetMax, Color color, Font font, bool centered = false)
     {
         var labelRect = centered
             ? CreateRect("Label", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero)
@@ -243,6 +374,8 @@ public class IndoorMapOverlay : MonoBehaviour
         label.alignment = centered ? TextAnchor.MiddleCenter : TextAnchor.MiddleLeft;
         label.color = color;
         label.text = text;
+        label.raycastTarget = false;
+        return label;
     }
 
     static RectTransform CreateRect(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)
@@ -264,6 +397,18 @@ public class IndoorMapOverlay : MonoBehaviour
     }
 
     static Vector3 ToUnity(float[] arkit) => new Vector3(arkit[0], arkit[1], -arkit[2]);
+
+    static bool ValidVector(float[] vector) => vector != null && vector.Length >= 3;
+
+    static Quaternion ToUnityRotation(float[] transform, bool floor)
+    {
+        if (transform == null || transform.Length != 16)
+            return floor ? Quaternion.identity : Quaternion.identity;
+        var up = new Vector3(transform[4], transform[5], -transform[6]);
+        var forward = new Vector3(transform[8], transform[9], -transform[10]);
+        if (up.sqrMagnitude < 0.0001f || forward.sqrMagnitude < 0.0001f) return Quaternion.identity;
+        return Quaternion.LookRotation(forward.normalized, up.normalized);
+    }
 
     static Vector3 WallAxis(float[] transform)
     {
@@ -287,6 +432,15 @@ public class IndoorMapOverlay : MonoBehaviour
         if (renderTexture != null) renderTexture.Release();
         if (graphMaterial != null) Destroy(graphMaterial);
         if (routeMaterial != null) Destroy(routeMaterial);
+        if (wallMaterial != null) Destroy(wallMaterial);
+        if (floorMaterial != null) Destroy(floorMaterial);
+        if (openingMaterial != null) Destroy(openingMaterial);
+        if (objectMaterial != null) Destroy(objectMaterial);
+        mapRoot = null;
+        mapCamera = null;
+        compactCard = null;
+        expandedCard = null;
+        renderTexture = null;
     }
 
     void OnDestroy() => Clear();

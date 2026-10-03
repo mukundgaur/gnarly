@@ -35,6 +35,8 @@ Do not restart the AR session between scanning, recording nodes, and exporting.
 - The anchor, route, and graph use the same `zoneId` as the world map.
 - Share the generated package directory; do not commit real capture artifacts.
 
+Uploading from the mapper publishes raw `scan.json`, normalized `scan-features.json`, `structure.usdz`, `building.json`, and the zone ARWorldMap. The navigator requires all five files for a complete interactive-map package. Re-upload scans whose active Firebase version predates this package format.
+
 ## Multi-zone buildings (floors and stairs)
 
 A zone is one scan with its own ARWorldMap. Scan each floor area as one zone and each staircase as its own zone (for example `floor-1`, `stairs-a`, `floor-2`). The Unity navigator plans A* across zones using `zone-connections.json` ([schema](../shared/zone-connections.schema.json), [example](../shared/examples/zone-connections.example.json)). Each connection links two nodes that are physically next to each other in different zones, and has A* weight 1.
