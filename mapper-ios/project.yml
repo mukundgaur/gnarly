@@ -1,0 +1,21 @@
+name: GnarlyMapper
+options:
+  bundleIdPrefix: com.gnarly
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  GnarlyMapper:
+    type: application
+    platform: iOS
+    sources:
+      - path: GnarlyMapper
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gnarly.mapper
+        INFOPLIST_FILE: GnarlyMapper/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: GnarlyMapper/GnarlyMapper.entitlements
+    entitlements:
+      path: GnarlyMapper/GnarlyMapper.entitlements
+      properties: {}

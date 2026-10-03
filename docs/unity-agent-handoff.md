@@ -8,7 +8,7 @@ You own the Unity app only; the mapper team owns RoomPlan, scanning, ARKit world
 
 ## What you will receive
 
-The mapper will make this local package available at `shared/local-packages/zone-a/`:
+The mapper app exports this package to its sandboxed Documents directory. Transfer it via the iOS share sheet, then place a local copy at `shared/local-packages/zone-a/` for Unity development:
 
 ```text
 worldmap-zone-a.bin   Saved ARKit ARWorldMap bytes

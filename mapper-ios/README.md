@@ -1,6 +1,6 @@
 # Native mapper workspace
 
-This directory is reserved for the Xcode project owned by the mapper engineer.
+This is the native Swift/SwiftUI mapper proof-of-concept app. See [SETUP.md](SETUP.md) to generate the Xcode project and run it on a LiDAR iPhone.
 
 ## POC responsibility
 
@@ -8,20 +8,9 @@ This directory is reserved for the Xcode project owned by the mapper engineer.
 - Scan one connected, visually distinctive test area.
 - Persist the `ARWorldMap` from that session.
 - Export one known test position in the same coordinate system.
-- Put local test output in `../shared/local-packages/zone-a/`.
+- Export a package from the app’s Documents directory and share it with the Unity engineer. After transfer, they may place a copy in `../shared/local-packages/zone-a/` for their local Unity build.
 
-## Create the app project
-
-Create the Xcode project here when implementation starts:
-
-```text
-mapper-ios/
-  GnarlyMapper.xcodeproj/
-  GnarlyMapper/
-  GnarlyMapperTests/
-```
-
-Target a LiDAR-capable iPhone and select a deployment target compatible with the ARKit and RoomPlan APIs the team chooses. Before code is written, record the selected Xcode/iOS versions in [../docs/integration-notes.md](../docs/integration-notes.md).
+Target a LiDAR-capable iPhone running iOS 16 or later. Before testing, record the selected Xcode/iOS versions in [../docs/integration-notes.md](../docs/integration-notes.md).
 
 ## Export checklist
 
@@ -29,3 +18,4 @@ Target a LiDAR-capable iPhone and select a deployment target compatible with the
 - `test-anchor.json` validates against [../shared/test-anchor.schema.json](../shared/test-anchor.schema.json).
 - The anchor describes an intentionally chosen physical point.
 - Both files came from the same AR session/zone.
+- Share the generated package directory with the Unity engineer; do not commit real capture artifacts.
