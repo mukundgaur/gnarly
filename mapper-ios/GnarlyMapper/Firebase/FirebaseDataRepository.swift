@@ -357,8 +357,6 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
 
     func downloadBuildingJSON(buildingId: String, versionId: String) async throws -> URL {
         let deterministicPath = try FirebaseStoragePaths.buildingJSON(buildingId: buildingId, versionId: versionId)
-        if let cached = try await cachedFile(storagePath: deterministicPath) { return cached }
-
         let version: BuildingVersion = try await fetch(
             BuildingVersion.self,
             from: versionReference(buildingId: buildingId, versionId: versionId),
@@ -370,10 +368,12 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
                 documentPath: "buildings/\(buildingId)/versions/\(versionId)"
             )
         }
-        guard path == deterministicPath else {
+        let editPrefix = "buildings/\(buildingId)/\(versionId)/graph-edits/"
+        let editedName = path.hasPrefix(editPrefix) ? String(path.dropFirst(editPrefix.count)) : ""
+        guard path == deterministicPath || (!editedName.isEmpty && !editedName.contains("/") && editedName.hasSuffix(".json")) else {
             throw FirebaseDataError.unexpectedStoragePath(expected: deterministicPath, actual: path)
         }
-        return try await cachedOrDownload(storagePath: deterministicPath)
+        return try await cachedOrDownload(storagePath: path)
     }
 
     func downloadWorldMap(buildingId: String, versionId: String, zoneId: String) async throws -> URL {
@@ -402,10 +402,21 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
 
     func downloadActivePackage(buildingId: String, zoneId: String) async throws -> DownloadedNavigationPackage {
         let active = try await fetchActiveVersion(buildingId: buildingId)
-        let buildingJSONURL = try await downloadBuildingJSON(
-            buildingId: buildingId,
-            versionId: active.versionId
-        )
+        let versionId = active.versionId
+        let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
+        let zone: Zone = try await fetch(Zone.self, from: zoneRef, operation: "fetch zone graph")
+        let canonicalPath = try FirebaseStoragePaths.zoneBuildingJSON(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
+        let buildingJSONURL: URL
+        if let graphPath = zone.buildingJsonPath, !graphPath.isEmpty {
+            let editPrefix = "buildings/\(buildingId)/\(versionId)/zones/\(zoneId)/graph-edits/"
+            let editedName = graphPath.hasPrefix(editPrefix) ? String(graphPath.dropFirst(editPrefix.count)) : ""
+            guard graphPath == canonicalPath || (!editedName.isEmpty && !editedName.contains("/") && editedName.hasSuffix(".json")) else {
+                throw FirebaseDataError.unexpectedStoragePath(expected: canonicalPath, actual: graphPath)
+            }
+            buildingJSONURL = try await cachedOrDownload(storagePath: graphPath)
+        } else {
+            buildingJSONURL = try await downloadBuildingJSON(buildingId: buildingId, versionId: versionId)
+        }
         let worldMapURL = try await downloadWorldMap(
             buildingId: buildingId,
             versionId: active.versionId,

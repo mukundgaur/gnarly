@@ -46,7 +46,7 @@
             "minItems": 3,
             "maxItems": 3
           },
-          "source": { "enum": ["recorded", "roomplan-hint", "roomplan"] },
+          "source": { "enum": ["recorded", "roomplan-hint", "roomplan", "manual"] },
           "label": { "type": ["string", "null"] },
           "roomPlanIdentifier": { "type": ["string", "null"] }
         }
@@ -63,7 +63,7 @@
           "to": { "type": "string", "minLength": 1 },
           "kind": { "enum": ["hallway", "stairs"] },
           "meters": { "type": "number", "minimum": 0 },
-          "source": { "enum": ["recorded", "visibility", "manual"] }
+          "source": { "enum": ["recorded", "walked-path", "visibility", "manual"] }
         }
       }
     },

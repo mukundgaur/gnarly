@@ -18,6 +18,7 @@ The only success criterion for this phase is documented in [docs/poc-success-cri
 ```text
 mapper-ios/             Native Swift/Xcode mapper workspace
 navigator-unity/        Unity navigator workspace
+web/                    React web companion and route preview
 shared/                 Versioned package schema and example data
 docs/                   Setup, handoff, and integration notes
 firebase/               Firestore and Cloud Storage security rules

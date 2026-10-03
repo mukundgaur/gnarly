@@ -143,8 +143,13 @@ public sealed class FirebaseNavigationPackageRepository
         var expectedScanFeaturesPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/scan-features.json";
         var expectedStructurePath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/structure.usdz";
         var expectedWorldMapPath = $"buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin";
-        RequireExpectedPath(expectedBuildingPath,
-            RequiredString(zone.fields?.buildingJsonPath, "buildingJsonPath", zonePath), "buildingJsonPath");
+        var buildingStoragePath = RequiredString(zone.fields?.buildingJsonPath, "buildingJsonPath", zonePath);
+        var editedGraphPrefix = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/graph-edits/";
+        if (buildingStoragePath != expectedBuildingPath &&
+            (!buildingStoragePath.StartsWith(editedGraphPrefix, StringComparison.Ordinal) ||
+             !buildingStoragePath.EndsWith(".json", StringComparison.Ordinal) ||
+             buildingStoragePath.Substring(editedGraphPrefix.Length).Contains("/")))
+            throw new InvalidOperationException($"Unexpected buildingJsonPath for {zonePath}: {buildingStoragePath}");
         RequireExpectedPath(expectedScanPath,
             RequiredString(zone.fields?.scanJsonPath, "scanJsonPath", zonePath), "scanJsonPath");
         RequireExpectedPath(expectedScanFeaturesPath,
@@ -165,7 +170,7 @@ public sealed class FirebaseNavigationPackageRepository
             var scanFeaturesFile = Path.Combine(staging, "scan-features.json");
             var structureFile = Path.Combine(staging, "structure.usdz");
             var worldMapFile = Path.Combine(staging, $"worldmap-{zoneId}.bin");
-            await DownloadStorageObjectAsync(expectedBuildingPath, buildingFile, "building.json");
+            await DownloadStorageObjectAsync(buildingStoragePath, buildingFile, "building.json");
             await DownloadStorageObjectAsync(expectedScanPath, scanFile, "raw RoomPlan scan.json");
             await DownloadStorageObjectAsync(expectedScanFeaturesPath, scanFeaturesFile, "normalized RoomPlan scan-features.json");
             await DownloadStorageObjectAsync(expectedStructurePath, structureFile, "RoomPlan structure.usdz");
