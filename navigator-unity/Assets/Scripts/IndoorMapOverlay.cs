@@ -182,9 +182,9 @@ public class IndoorMapOverlay : MonoBehaviour
                 : new[] { surface.dimensions[0], surface.dimensions[1], 0.06f };
             if (floor)
             {
-                // RoomPlan surfaces are nearly planar. Keep the scan footprint visible from oblique angles.
-                dimensions[1] = 0.04f;
-                if (dimensions[2] < 0.1f) dimensions[2] = Math.Max(0.5f, surface.dimensions[1]);
+                // RoomPlan floor surfaces span local X/Y; local Z is the surface normal.
+                // Keeping Y as the scanned depth prevents a floor from becoming a tall slab.
+                dimensions[2] = 0.04f;
             }
             else if (dimensions[2] < 0.04f)
             {
@@ -305,6 +305,7 @@ public class IndoorMapOverlay : MonoBehaviour
         compactButton.onClick.AddListener(OpenExpandedModel);
 
         expandedCard = CreateRect("ExpandedMap", canvasObject.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-430, -430), new Vector2(430, 430));
+        expandedCard.gameObject.AddComponent<Image>().color = new Color(0.015f, 0.035f, 0.06f, 0.98f);
         AddMapImage(expandedCard, Vector2.zero, new Vector2(0, -74));
         AddText(expandedCard, "NAVIGATION MAP  ·  YOUR POSITION IS MINT", 25, new Vector2(28, 14), new Vector2(-190, 74), new Color(0.45f, 0.83f, 0.95f), font);
         expandedMessage = AddText(expandedCard, "", 30, new Vector2(36, 110), new Vector2(-36, 250), Color.white, font, true);
@@ -326,6 +327,9 @@ public class IndoorMapOverlay : MonoBehaviour
 
     void OpenExpandedModel()
     {
+        Debug.Log("[Gnarly] Minimap tapped; opening expanded model.");
+        // Show immediate feedback even if the native USDZ presenter cannot open.
+        if (expandedCard != null) expandedCard.gameObject.SetActive(true);
 #if UNITY_IOS && !UNITY_EDITOR
         var missing = new List<string>();
         if (string.IsNullOrEmpty(appleModelPath) || !File.Exists(appleModelPath)) missing.Add("structure.usdz");
@@ -340,8 +344,7 @@ public class IndoorMapOverlay : MonoBehaviour
         Debug.LogError("[Gnarly] " + error);
         if (expandedMessage != null) expandedMessage.text = error;
 #endif
-        // Editor fallback keeps the same map visible for layout inspection; iPhone uses RealityKit.
-        expandedCard.gameObject.SetActive(true);
+        // Editor and native-presenter fallback keep the same map visible.
     }
 
     void AddMapImage(RectTransform parent, Vector2 insetMin, Vector2 insetMax)
