@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Graph, ScanFeature, ScanFeatures } from './data.ts';
-import { checkEdge } from './geometry.ts';
+import { canWalkBetween, checkEdge } from './geometry.ts';
 import { addWaypoint, connectWaypoints, deleteWaypoint, updateWaypoint } from './graphEdit.ts';
 import { findRoute } from './routing.ts';
 const matrix = (x: number, y: number, z: number, vertical = false) => vertical
@@ -67,4 +67,9 @@ test('invalid endpoints, disconnected graphs, and unscanned confirmation',()=>{
   assert.equal(findRoute({graph:disconnected,startId:'a',destinationId:'b',options:{scan}}).ok,false);
   assert.equal(checkEdge(graph.edges[1],graph).status,'unverified');
   assert.equal(checkEdge({...graph.edges[1],source:'visibility'},graph).status,'blocked');
+});
+test('walk mode stays on the floor and only crosses walls through doors',()=>{
+  assert.equal(canWalkBetween([-2,0,2],[2,0,2],'ground',graph,scan),false);
+  assert.equal(canWalkBetween([-2,0,0],[2,0,0],'ground',graph,scan),true);
+  assert.equal(canWalkBetween([4.9,0,4.9],[5.2,0,5.2],'ground',graph,scan),false);
 });

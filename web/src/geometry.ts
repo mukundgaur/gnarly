@@ -70,6 +70,27 @@ export function pointOnFloor(position: [number, number, number], floorId: string
   const floors = scan.floors.filter(item => story == null || item.story == null || item.story === story);
   return floors.some(item => inPolygon(xz(position), floorPolygon(item), .25));
 }
+export function canWalkBetween(from: [number, number, number], to: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): boolean {
+  if (!pointOnFloor(to, floorId, graph, scan)) return false;
+  if (!scan?.floors?.length) return true;
+  const story = graph.floors.find(floor => floor.id === floorId)?.story;
+  const portals = [...(scan.doors || []), ...(scan.openings || [])];
+  const a = xz(from), b = xz(to);
+  for (const wall of scan.walls || []) {
+    if (story != null && wall.story != null && wall.story !== story) continue;
+    const [c, d] = surfaceSegment(wall);
+    if (overlapsWall(a, b, c, d)) return false;
+    const hit = segmentHit(a, b, c, d);
+    if (!hit) continue;
+    const doorway = portals.some(portal => {
+      if (portal.parentIdentifier && portal.parentIdentifier !== wall.identifier) return false;
+      const [left, right] = surfaceSegment(portal);
+      return distanceToSegment(hit, left, right) <= .12;
+    });
+    if (!doorway) return false;
+  }
+  return true;
+}
 function isWalked(edge: Edge): boolean { return ['manual', 'recorded', 'walked-path'].includes(edge.source || ''); }
 export function checkEdge(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCheck {
   const from = graph.nodes.find(node => node.id === edge.from);
