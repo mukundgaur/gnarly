@@ -5,12 +5,16 @@ using UnityEngine;
 /// <summary>
 /// RoomPlan/ARKit do not export a walkable graph. scan-features.json is walls, doors,
 /// openings, and objects. This file turns those primitives into nodes, visibility edges,
-/// and an A* path in ARKit world meters.
+/// and an A* path in ARKit world meters. Two nodes are neighbors only when they are on
+/// the same floor, within <see cref="MaxEdgeMeters"/>, and the straight line does not
+/// cross a wall except through a door or opening.
 /// </summary>
 public static class Pathfinding
 {
     public const float MaxEdgeMeters = 18f;
-    public const float PortalClearance = 0.45f;
+    public const float MinEdgeMeters = 0.2f;
+    /// <summary>How far past a door or opening a line may cross that opening's wall.</summary>
+    public const float PortalMatchMeters = 0.15f;
     public const float ZoneTransferCost = 1f;
     public const string ZoneTransferKind = "zone-transfer";
 
@@ -141,6 +145,8 @@ public static class Pathfinding
         public string floorId = "ground";
         public readonly List<Node> Nodes = new List<Node>();
         public readonly List<Edge> Edges = new List<Edge>();
+        /// <summary>RoomPlan walls (plus windows and short corner seals) that neighbor tests cannot cross.</summary>
+        public readonly List<Wall> Walls = new List<Wall>();
         readonly Dictionary<string, List<Edge>> adjacency = new Dictionary<string, List<Edge>>();
         readonly Dictionary<string, Node> nodesById = new Dictionary<string, Node>();
 
@@ -319,7 +325,8 @@ public static class Pathfinding
     /// <summary>
     /// Nodes come from RoomPlan doors, openings, stairs, and room sections.
     /// Recorded mapper taps are only merged when they add a label (entrance/destination).
-    /// Edges are visibility connections that do not cross walls except at portals.
+    /// Same-floor edges, including ones copied from building.json, must be shorter than
+    /// <see cref="MaxEdgeMeters"/> and clear of <see cref="Wall"/> obstacles.
     /// </summary>
     public static Graph Build(ScanFeatures scan, BuildingDocument building, string floorId)
     {
@@ -376,18 +383,42 @@ public static class Pathfinding
                 graph.AddNode(node);
         }
 
-        var walls = Segments(scan?.walls);
-        var portals = Concat(Segments(scan?.doors), Segments(scan?.openings));
+        var walls = BuildWalls(scan?.walls);
+        // A window is a hole in its parent wall, not a way through. Keep it solid.
+        if (scan?.windows != null) walls.AddRange(BuildWalls(scan.windows));
+        var portals = BuildPortals(scan?.doors, scan?.openings);
+        CloseCornerGaps(walls, portals);
+        graph.Walls.AddRange(walls);
         ConnectVisibility(graph, walls, portals);
 
+        var dropped = 0;
         if (building?.edges != null)
         {
             foreach (var edge in building.edges)
             {
-                if (graph.Node(edge.from) != null && graph.Node(edge.to) != null)
+                var from = graph.Node(edge.from);
+                var to = graph.Node(edge.to);
+                if (from == null || to == null) continue;
+                // Stair flights change floors and are not a line across this floor's walls.
+                if (IsCrossFloorStair(from, to, edge))
+                {
                     graph.AddEdge(edge);
+                    continue;
+                }
+                if (!CanConnect(from, to, walls, portals))
+                {
+                    dropped++;
+                    continue;
+                }
+                graph.AddEdge(edge);
             }
         }
+
+        if (scan?.walls != null && scan.walls.Length > 0 && graph.Walls.Count == 0)
+            Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}' listed {scan.walls.Length} walls but none became obstacles.");
+        else if (graph.Walls.Count == 0)
+            Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}' has no walls. Neighbors are limited to {MaxEdgeMeters:0} m and are not blocked by geometry.");
+        Debug.Log($"[Gnarly] Zone '{graph.zoneId}': {graph.Nodes.Count} nodes, {graph.Edges.Count} edges, {graph.Walls.Count} walls. Dropped {dropped} blocked edge(s).");
 
         return graph;
     }
@@ -411,7 +442,7 @@ public static class Pathfinding
         }
     }
 
-    static void ConnectVisibility(Graph graph, List<Segment> walls, List<Segment> portals)
+    static void ConnectVisibility(Graph graph, List<Wall> walls, List<Portal> portals)
     {
         for (var i = 0; i < graph.Nodes.Count; i++)
         {
@@ -419,41 +450,109 @@ public static class Pathfinding
             {
                 var a = graph.Nodes[i];
                 var b = graph.Nodes[j];
-                if (a.floor != b.floor) continue;
-                var meters = Vector3.Distance(Position(a), Position(b));
-                if (meters < 0.2f || meters > MaxEdgeMeters) continue;
-                if (!IsClear(Xz(a.position), Xz(b.position), walls, portals)) continue;
+                if (!CanConnect(a, b, walls, portals)) continue;
                 graph.AddEdge(new Edge
                 {
                     from = a.id,
                     to = b.id,
                     kind = a.type == "stairs" && b.type == "stairs" ? "stairs" : "hallway",
-                    meters = meters,
+                    meters = Vector3.Distance(Position(a), Position(b)),
                     source = "visibility"
                 });
             }
         }
     }
 
-    public static bool IsClear(Vector2 start, Vector2 end, List<Segment> walls, List<Segment> portals)
+    /// <summary>
+    /// Same floor, not too close, not farther than <see cref="MaxEdgeMeters"/>, and the
+    /// floor-plane line does not pass through a wall except at a door or opening.
+    /// </summary>
+    static bool CanConnect(Node a, Node b, List<Wall> walls, List<Portal> portals)
     {
+        if (a?.position == null || b?.position == null || a.position.Length != 3 || b.position.Length != 3)
+            return false;
+        if (a.floor != b.floor) return false;
+        var meters = Vector3.Distance(Position(a), Position(b));
+        if (meters < MinEdgeMeters || meters > MaxEdgeMeters) return false;
+        return IsClear(Xz(a.position), Xz(b.position), walls, portals);
+    }
+
+    static bool IsCrossFloorStair(Node a, Node b, Edge edge) =>
+        a.floor != b.floor &&
+        edge.kind == "stairs" &&
+        a.type == "stairs" &&
+        b.type == "stairs";
+
+    public static bool IsClear(Vector2 start, Vector2 end, List<Wall> walls, List<Portal> portals)
+    {
+        if (walls == null) return true;
         foreach (var wall in walls)
         {
-            if (!wall.TryIntersect(start, end, out var hit)) continue;
-            var nearEndpoint = Vector2.Distance(hit, start) < PortalClearance || Vector2.Distance(hit, end) < PortalClearance;
-            var throughPortal = false;
-            foreach (var portal in portals)
-            {
-                if (portal.DistanceTo(hit) <= PortalClearance)
-                {
-                    throughPortal = true;
-                    break;
-                }
-            }
-            if (nearEndpoint || throughPortal) continue;
-            return false;
+            if (WallBlocks(start, end, wall, portals)) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// A crossing near a node is not a doorway. Recorded points often sit beside a wall,
+    /// and treating that proximity as an opening lets the route walk through the wall.
+    /// </summary>
+    static bool WallBlocks(Vector2 start, Vector2 end, Wall wall, List<Portal> portals)
+    {
+        if (wall.Segment.Length < 1e-4f) return false;
+        if (RunsAlongWall(start, end, wall) && !OpeningCovers(start, end, wall, portals))
+            return true;
+
+        var extended = wall.Extended();
+        if (extended.TryIntersect(start, end, out var hit) && !PortalOpens(hit, wall, portals))
+            return true;
+        return false;
+    }
+
+    static bool RunsAlongWall(Vector2 start, Vector2 end, Wall wall)
+    {
+        var direction = end - start;
+        var span = wall.Segment.B - wall.Segment.A;
+        var directionLength = direction.magnitude;
+        var spanLength = span.magnitude;
+        if (directionLength < 1e-4f || spanLength < 1e-4f) return false;
+        var cross = direction.x * span.y - direction.y * span.x;
+        if (Mathf.Abs(cross) > 0.08f * directionLength * spanLength) return false;
+        if (wall.Segment.DistanceTo(start) > wall.HalfThickness && wall.Segment.DistanceTo(end) > wall.HalfThickness)
+            return false;
+
+        var axis = span / spanLength;
+        var s0 = Vector2.Dot(start - wall.Segment.A, axis);
+        var s1 = Vector2.Dot(end - wall.Segment.A, axis);
+        var low = Mathf.Max(0f, Mathf.Min(s0, s1));
+        var high = Mathf.Min(spanLength, Mathf.Max(s0, s1));
+        return high - low > 0.02f;
+    }
+
+    static bool OpeningCovers(Vector2 start, Vector2 end, Wall wall, List<Portal> portals)
+    {
+        var mid = wall.Segment.ClosestPoint((start + end) * 0.5f);
+        return PortalOpens(mid, wall, portals)
+            && PortalOpens(wall.Segment.ClosestPoint(start), wall, portals)
+            && PortalOpens(wall.Segment.ClosestPoint(end), wall, portals);
+    }
+
+    static bool PortalOpens(Vector2 hit, Wall wall, List<Portal> portals)
+    {
+        if (portals == null) return false;
+        foreach (var portal in portals)
+        {
+            if (!string.IsNullOrEmpty(portal.ParentId))
+            {
+                if (portal.ParentId != wall.Id) continue;
+            }
+            else if (wall.Segment.DistanceTo(portal.Segment.Midpoint) > wall.HalfThickness + 0.3f)
+            {
+                continue;
+            }
+            if (portal.Segment.DistanceTo(hit) <= PortalMatchMeters) return true;
+        }
+        return false;
     }
 
     public static List<string> AStar(Graph graph, string startId, string goalId)
@@ -549,27 +648,122 @@ public static class Pathfinding
         return identifier.Substring(0, Math.Min(8, identifier.Length)).ToLowerInvariant();
     }
 
-    static List<Segment> Segments(Surface[] surfaces)
+    static List<Wall> BuildWalls(Surface[] surfaces)
     {
-        var list = new List<Segment>();
+        var list = new List<Wall>();
         if (surfaces == null) return list;
         foreach (var surface in surfaces)
         {
-            if (surface.transformColumnMajor == null || surface.transformColumnMajor.Length != 16) continue;
-            if (surface.dimensions == null || surface.dimensions.Length < 1) continue;
-            var half = surface.dimensions[0] * 0.5f;
-            var a = TransformPoint(surface.transformColumnMajor, new Vector3(-half, 0f, 0f));
-            var b = TransformPoint(surface.transformColumnMajor, new Vector3(half, 0f, 0f));
-            list.Add(new Segment(new Vector2(a.x, a.z), new Vector2(b.x, b.z)));
+            if (!TrySurfaceSegment(surface, out var segment)) continue;
+            var depth = surface.dimensions != null && surface.dimensions.Length > 2
+                ? Mathf.Abs(surface.dimensions[2])
+                : 0.1f;
+            list.Add(new Wall(surface.identifier, segment, Mathf.Clamp(depth * 0.5f, 0.04f, 0.2f)));
         }
         return list;
     }
 
-    static List<Segment> Concat(List<Segment> a, List<Segment> b)
+    static List<Portal> BuildPortals(Surface[] doors, Surface[] openings)
     {
-        var list = new List<Segment>(a);
-        list.AddRange(b);
+        var list = new List<Portal>();
+        CollectPortals(list, doors);
+        CollectPortals(list, openings);
         return list;
+    }
+
+    static void CollectPortals(List<Portal> list, Surface[] surfaces)
+    {
+        if (surfaces == null) return;
+        foreach (var surface in surfaces)
+        {
+            if (!TrySurfaceSegment(surface, out var segment)) continue;
+            list.Add(new Portal(surface.identifier, surface.parentIdentifier, segment));
+        }
+    }
+
+    /// <summary>
+    /// RoomPlan walls often stop a few centimeters short of a corner or a T-junction.
+    /// Seal that gap so a long edge cannot slip between two segments. Leave doorways open,
+    /// and don't tie two parallel walls together.
+    /// </summary>
+    static void CloseCornerGaps(List<Wall> walls, List<Portal> portals)
+    {
+        const float maxGap = 0.3f;
+        var added = new List<Wall>();
+        for (var i = 0; i < walls.Count; i++)
+        {
+            for (var j = 0; j < walls.Count; j++)
+            {
+                if (i == j) continue;
+                SealEnd(walls[i].Segment.A, walls[i], walls[j], portals, maxGap, added);
+                SealEnd(walls[i].Segment.B, walls[i], walls[j], portals, maxGap, added);
+            }
+        }
+        walls.AddRange(added);
+    }
+
+    static void SealEnd(Vector2 end, Wall from, Wall other, List<Portal> portals, float maxGap, List<Wall> added)
+    {
+        var closest = other.Segment.ClosestPoint(end);
+        var gap = Vector2.Distance(end, closest);
+        if (gap < 0.02f || gap > maxGap) return;
+        var atEnd = Vector2.Distance(closest, other.Segment.A) <= 0.05f
+            || Vector2.Distance(closest, other.Segment.B) <= 0.05f;
+        if (!atEnd && RoughlyParallel(from, other)) return;
+        if (NearPortal(end, portals, 0.4f) || NearPortal(closest, portals, 0.4f)) return;
+        added.Add(new Wall(
+            "corner-seal",
+            new Segment(end, closest),
+            Mathf.Min(from.HalfThickness, other.HalfThickness)));
+    }
+
+    static bool RoughlyParallel(Wall a, Wall b)
+    {
+        var da = a.Segment.B - a.Segment.A;
+        var db = b.Segment.B - b.Segment.A;
+        var la = da.magnitude;
+        var lb = db.magnitude;
+        if (la < 1e-4f || lb < 1e-4f) return false;
+        var cross = da.x * db.y - da.y * db.x;
+        return Mathf.Abs(cross) <= 0.25f * la * lb;
+    }
+
+    static bool NearPortal(Vector2 point, List<Portal> portals, float radius)
+    {
+        foreach (var portal in portals)
+        {
+            if (portal.Segment.DistanceTo(point) <= radius) return true;
+        }
+        return false;
+    }
+
+    static bool TrySurfaceSegment(Surface surface, out Segment segment)
+    {
+        segment = default;
+        if (surface?.dimensions == null || surface.dimensions.Length < 1) return false;
+        var half = Mathf.Abs(surface.dimensions[0]) * 0.5f;
+        if (half < 0.01f) return false;
+
+        Vector3 a;
+        Vector3 b;
+        if (surface.transformColumnMajor != null && surface.transformColumnMajor.Length == 16)
+        {
+            a = TransformPoint(surface.transformColumnMajor, new Vector3(-half, 0f, 0f));
+            b = TransformPoint(surface.transformColumnMajor, new Vector3(half, 0f, 0f));
+        }
+        else if (surface.position != null && surface.position.Length == 3)
+        {
+            // The minimap draws a missing transform as identity, so the wall runs along X.
+            a = new Vector3(surface.position[0] - half, surface.position[1], surface.position[2]);
+            b = new Vector3(surface.position[0] + half, surface.position[1], surface.position[2]);
+        }
+        else
+        {
+            return false;
+        }
+
+        segment = new Segment(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
+        return segment.Length > 0.05f;
     }
 
     static Vector3 TransformPoint(float[] m, Vector3 local)
@@ -579,6 +773,46 @@ public static class Pathfinding
             m[1] * local.x + m[5] * local.y + m[9] * local.z + m[13],
             m[2] * local.x + m[6] * local.y + m[10] * local.z + m[14]
         );
+    }
+
+    /// <summary>A RoomPlan wall in the floor plane. <see cref="HalfThickness"/> matches the drawn slab.</summary>
+    public readonly struct Wall
+    {
+        public readonly string Id;
+        public readonly Segment Segment;
+        public readonly float HalfThickness;
+
+        public Wall(string id, Segment segment, float halfThickness)
+        {
+            Id = id;
+            Segment = segment;
+            HalfThickness = halfThickness;
+        }
+
+        /// <summary>Lengthens the centerline by the slab thickness so a route cannot clip the square end.</summary>
+        public Segment Extended()
+        {
+            var delta = Segment.B - Segment.A;
+            var length = delta.magnitude;
+            if (length < 1e-4f) return Segment;
+            var extra = delta / length * HalfThickness;
+            return new Segment(Segment.A - extra, Segment.B + extra);
+        }
+    }
+
+    /// <summary>A door or opening that is the only place a neighbor line may cross its wall.</summary>
+    public readonly struct Portal
+    {
+        public readonly string Id;
+        public readonly string ParentId;
+        public readonly Segment Segment;
+
+        public Portal(string id, string parentId, Segment segment)
+        {
+            Id = id;
+            ParentId = parentId;
+            Segment = segment;
+        }
     }
 
     public readonly struct Segment
@@ -592,6 +826,10 @@ public static class Pathfinding
             B = b;
         }
 
+        public float Length => Vector2.Distance(A, B);
+
+        public Vector2 Midpoint => (A + B) * 0.5f;
+
         public bool TryIntersect(Vector2 p, Vector2 q, out Vector2 hit)
         {
             hit = default;
@@ -601,20 +839,26 @@ public static class Pathfinding
             if (Mathf.Abs(den) < 1e-5f) return false;
             var qp = p - A;
             var t = (qp.x * s.y - qp.y * s.x) / den;
-            var u = (r.x * qp.y - r.y * qp.x) / den;
-            if (t <= 0.02f || t >= 0.98f || u <= 0.02f || u >= 0.98f) return false;
+            // u is along the route. The previous cross(r, qp) flipped its sign, so real
+            // crossings were ignored and walls never blocked a neighbor.
+            var u = (qp.x * r.y - qp.y * r.x) / den;
+            // Keep hits at the ends. Ignoring the last 2% of a wall let routes slip through corners.
+            const float end = 1e-4f;
+            if (t < -end || t > 1f + end || u < -end || u > 1f + end) return false;
             hit = A + r * t;
             return true;
         }
 
-        public float DistanceTo(Vector2 point)
+        public Vector2 ClosestPoint(Vector2 point)
         {
             var ab = B - A;
-            var length = ab.magnitude;
-            if (length < 1e-5f) return Vector2.Distance(point, A);
-            var t = Mathf.Clamp01(Vector2.Dot(point - A, ab) / (length * length));
-            return Vector2.Distance(point, A + ab * t);
+            var lengthSq = ab.sqrMagnitude;
+            if (lengthSq < 1e-10f) return A;
+            var t = Mathf.Clamp01(Vector2.Dot(point - A, ab) / lengthSq);
+            return A + ab * t;
         }
+
+        public float DistanceTo(Vector2 point) => Vector2.Distance(point, ClosestPoint(point));
     }
 
     static float Horizontal(Vector3 a, Vector3 b)

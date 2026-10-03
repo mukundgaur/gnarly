@@ -6,7 +6,7 @@ import simd
 /// does not cross a wall except at a door or opening.
 enum RoomPlanVisibilityGraph {
     static let maxEdgeMeters: Float = 18
-    static let portalClearance: Float = 0.45
+    static let portalClearance: Float = 0.15
 
     static func edges(nodes: [BuildingNode], room: CapturedRoom) -> [BuildingEdge] {
         let walls = room.walls.map { Segment.xz(from: $0) }
@@ -44,9 +44,9 @@ enum RoomPlanVisibilityGraph {
     static func isClear(from start: SIMD2<Float>, to end: SIMD2<Float>, walls: [Segment], portals: [Segment]) -> Bool {
         for wall in walls {
             guard let hit = wall.intersection(start, end) else { continue }
-            let nearEndpoint = min(simd_distance(hit, start), simd_distance(hit, end)) < portalClearance
+            // A hit near a node is not a doorway. Only a door or opening opens the wall.
             let throughPortal = portals.contains { $0.distance(to: hit) <= portalClearance }
-            if nearEndpoint || throughPortal { continue }
+            if throughPortal { continue }
             return false
         }
         return true
@@ -87,8 +87,10 @@ enum RoomPlanVisibilityGraph {
             if abs(den) < 1e-5 { return nil }
             let qp = p - a
             let t = (qp.x * s.y - qp.y * s.x) / den
-            let u = (r.x * qp.y - r.y * qp.x) / den
-            guard t > 0.02, t < 0.98, u > 0.02, u < 0.98 else { return nil }
+            // u runs along the route. cross(r, qp) flips the sign and misses every real crossing.
+            let u = (qp.x * r.y - qp.y * r.x) / den
+            let end: Float = 0.0001
+            guard t >= -end, t <= 1 + end, u >= -end, u <= 1 + end else { return nil }
             return a + t * r
         }
 
