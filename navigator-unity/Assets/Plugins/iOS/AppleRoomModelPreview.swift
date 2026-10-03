@@ -17,7 +17,8 @@ public func GnarlyShowRoomModel(
     _ modelPath: UnsafePointer<CChar>?,
     _ buildingPath: UnsafePointer<CChar>?,
     _ scanPath: UnsafePointer<CChar>?,
-    _ callbackObjectName: UnsafePointer<CChar>?
+    _ callbackObjectName: UnsafePointer<CChar>?,
+    _ selectionJSON: UnsafePointer<CChar>?
 ) {
     guard let modelPath, let buildingPath, let scanPath, let callbackObjectName else {
         NSLog("[Gnarly] Cannot open the room model because a required native bridge argument is nil.")
@@ -29,6 +30,9 @@ public func GnarlyShowRoomModel(
     let building = String(cString: buildingPath)
     let scan = String(cString: scanPath)
     let callback = String(cString: callbackObjectName)
+    let selection = selectionJSON
+        .map { String(cString: $0) }
+        .flatMap { try? JSONDecoder().decode(MapRouteRequest.self, from: Data($0.utf8)) }
     let missing = [model, building, scan].filter { !FileManager.default.fileExists(atPath: $0) }
     guard missing.isEmpty else {
         NSLog("[Gnarly] Cannot open interactive room model. Missing files: %@", missing.joined(separator: ", "))
@@ -46,7 +50,8 @@ public func GnarlyShowRoomModel(
             modelURL: URL(fileURLWithPath: model),
             buildingURL: URL(fileURLWithPath: building),
             scanURL: URL(fileURLWithPath: scan),
-            callbackObjectName: callback
+            callbackObjectName: callback,
+            initialSelection: selection
         )
         controller.modalPresentationStyle = .fullScreen
         activeRoomModelController = controller
@@ -116,7 +121,8 @@ private struct ScanSection: Decodable {
 private struct NativeRoute: Decodable { let waypoints: [NativeWaypoint] }
 private struct NativeWaypoint: Decodable { let position: [Float] }
 
-private struct MapRouteRequest: Encodable {
+/// Node IDs local to this zone. An empty startId means "start from my location".
+private struct MapRouteRequest: Codable {
     let startId: String
     let destinationId: String
 }
@@ -126,6 +132,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     private let buildingURL: URL
     private let scanURL: URL
     private let callbackObjectName: String
+    private let initialSelection: MapRouteRequest?
     private let arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
     private let modelAnchor = AnchorEntity(world: .zero)
     private let cameraAnchor = AnchorEntity(world: .zero)
@@ -138,6 +145,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     private var nodes = [NavigationNode]()
     private var markers = [String: ModelEntity]()
     private var selectedNode: NavigationNode?
+    /// nil means the route starts from the user's current position.
     private var startNode: NavigationNode?
     private var destinationNode: NavigationNode?
 
@@ -154,12 +162,16 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     private let setStartButton = UIButton(type: .system)
     private let setDestinationButton = UIButton(type: .system)
     private let showRouteButton = UIButton(type: .system)
+    private let myLocationButton = UIButton(type: .system)
+    private let swapButton = UIButton(type: .system)
+    private let clearButton = UIButton(type: .system)
 
-    init(modelURL: URL, buildingURL: URL, scanURL: URL, callbackObjectName: String) {
+    init(modelURL: URL, buildingURL: URL, scanURL: URL, callbackObjectName: String, initialSelection: MapRouteRequest?) {
         self.modelURL = modelURL
         self.buildingURL = buildingURL
         self.scanURL = scanURL
         self.callbackObjectName = callbackObjectName
+        self.initialSelection = initialSelection
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -212,20 +224,23 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         panel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(panel)
 
-        selectedLabel.text = "Tap a room, destination, or navigation point"
+        selectedLabel.text = "Tap a dot to pick a room, door, or destination"
         selectedLabel.textColor = .white
         selectedLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         selectedLabel.numberOfLines = 2
 
         configureActionButton(setStartButton, title: "Set as Start", color: .systemGreen, action: #selector(setSelectedAsStart))
         configureActionButton(setDestinationButton, title: "Set as Destination", color: .systemPink, action: #selector(setSelectedAsDestination))
-        configureActionButton(showRouteButton, title: "Show Route", color: .systemBlue, action: #selector(showRoute))
+        configureActionButton(showRouteButton, title: "Start Navigation", color: .systemTeal, action: #selector(showRoute))
+        configureActionButton(myLocationButton, title: "My Location", color: .systemGray, action: #selector(useMyLocation))
+        configureActionButton(swapButton, title: "Swap", color: .systemGray, action: #selector(swapSelection))
+        configureActionButton(clearButton, title: "Clear", color: .systemGray, action: #selector(clearSelection))
         setStartButton.isEnabled = false
         setDestinationButton.isEnabled = false
         showRouteButton.isEnabled = false
 
         summaryLabel.textColor = .white
-        summaryLabel.font = .monospacedSystemFont(ofSize: 15, weight: .medium)
+        summaryLabel.font = .systemFont(ofSize: 16, weight: .medium)
         summaryLabel.numberOfLines = 2
         updateSummary()
 
@@ -234,7 +249,12 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         selectionActions.spacing = 10
         selectionActions.distribution = .fillEqually
 
-        let controls = UIStackView(arrangedSubviews: [selectedLabel, selectionActions, summaryLabel, showRouteButton])
+        let editActions = UIStackView(arrangedSubviews: [myLocationButton, swapButton, clearButton])
+        editActions.axis = .horizontal
+        editActions.spacing = 10
+        editActions.distribution = .fillEqually
+
+        let controls = UIStackView(arrangedSubviews: [selectedLabel, selectionActions, summaryLabel, editActions, showRouteButton])
         controls.axis = .vertical
         controls.spacing = 10
         controls.translatesAutoresizingMaskIntoConstraints = false
@@ -256,7 +276,8 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             controls.bottomAnchor.constraint(equalTo: panel.contentView.bottomAnchor, constant: -14),
             setStartButton.heightAnchor.constraint(equalToConstant: 44),
             setDestinationButton.heightAnchor.constraint(equalToConstant: 44),
-            showRouteButton.heightAnchor.constraint(equalToConstant: 46)
+            myLocationButton.heightAnchor.constraint(equalToConstant: 38),
+            showRouteButton.heightAnchor.constraint(equalToConstant: 50)
         ])
     }
 
@@ -311,6 +332,11 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             let building = try decoder.decode(BuildingDocument.self, from: Data(contentsOf: buildingURL))
             let scan = try decoder.decode(ScanDocument.self, from: Data(contentsOf: scanURL))
             nodes = mergedNodes(building: building, scan: scan)
+            if let initialSelection {
+                startNode = nodes.first { $0.id == initialSelection.startId }
+                destinationNode = nodes.first { $0.id == initialSelection.destinationId }
+            }
+            updateSummary()
         } catch {
             showError("Could not read building map data.\n\(error.localizedDescription)")
             return
@@ -333,6 +359,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             entity.position = -self.modelCenter
             self.modelAnchor.addChild(entity)
             self.buildNodeMarkers(radius: min(0.14, max(0.055, largestDimension * 0.012)))
+            self.updateMarkerColors()
             self.buildUserMarker(radius: min(0.11, max(0.045, largestDimension * 0.01)))
             self.minimumDistance = max(0.7, largestDimension * 0.35)
             self.maximumDistance = max(8, largestDimension * 6)
@@ -404,9 +431,9 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         do {
             let route = try JSONDecoder().decode(NativeRoute.self, from: Data(json.utf8))
             drawRoute(route)
-            statusLabel.text = "Route ready"
+            statusLabel.text = "Navigation started. Tap Back to follow it in AR."
             statusLabel.isHidden = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.statusLabel.isHidden = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.statusLabel.isHidden = true }
         } catch {
             showError("Could not draw the selected route.\n\(error.localizedDescription)")
         }
@@ -471,6 +498,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     @objc private func setSelectedAsStart() {
         guard let selectedNode else { return }
         startNode = selectedNode
+        if destinationNode?.id == selectedNode.id { destinationNode = nil }
         updateSummary()
         updateMarkerColors()
     }
@@ -478,14 +506,43 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     @objc private func setSelectedAsDestination() {
         guard let selectedNode else { return }
         destinationNode = selectedNode
+        if startNode?.id == selectedNode.id { startNode = nil }
+        updateSummary()
+        updateMarkerColors()
+    }
+
+    @objc private func useMyLocation() {
+        startNode = nil
+        updateSummary()
+        updateMarkerColors()
+    }
+
+    /// Only possible when both ends are map points; "my location" can't become a destination.
+    @objc private func swapSelection() {
+        guard let start = startNode, let destination = destinationNode else { return }
+        startNode = destination
+        destinationNode = start
+        updateSummary()
+        updateMarkerColors()
+    }
+
+    @objc private func clearSelection() {
+        startNode = nil
+        destinationNode = nil
+        selectedNode = nil
+        selectedLabel.text = "Tap a dot to pick a room, door, or destination"
+        setStartButton.isEnabled = false
+        setDestinationButton.isEnabled = false
+        routeRoot.children.removeAll()
         updateSummary()
         updateMarkerColors()
     }
 
     @objc private func showRoute() {
-        guard let startNode, let destinationNode else { return }
+        guard let destinationNode else { return }
         do {
-            let data = try JSONEncoder().encode(MapRouteRequest(startId: startNode.id, destinationId: destinationNode.id))
+            let request = MapRouteRequest(startId: startNode?.id ?? "", destinationId: destinationNode.id)
+            let data = try JSONEncoder().encode(request)
             guard let json = String(data: data, encoding: .utf8) else {
                 throw CocoaError(.fileWriteInapplicableStringEncoding)
             }
@@ -502,10 +559,13 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     }
 
     private func updateSummary() {
-        let start = startNode.map(displayName) ?? "Not selected"
-        let destination = destinationNode.map(displayName) ?? "Not selected"
-        summaryLabel.text = "Start: \(start)\nDestination: \(destination)"
-        showRouteButton.isEnabled = startNode != nil && destinationNode != nil && startNode?.id != destinationNode?.id
+        let start = startNode.map(displayName) ?? "My location"
+        let destination = destinationNode.map(displayName) ?? "Choose a destination"
+        summaryLabel.text = "From:  \(start)\nTo:  \(destination)"
+        showRouteButton.isEnabled = destinationNode != nil && startNode?.id != destinationNode?.id
+        myLocationButton.isEnabled = startNode != nil
+        swapButton.isEnabled = startNode != nil && destinationNode != nil
+        clearButton.isEnabled = startNode != nil || destinationNode != nil
     }
 
     private func updateMarkerColors() {
@@ -531,8 +591,30 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     }
 
     private func displayName(_ node: NavigationNode) -> String {
-        guard let label = node.label, !label.isEmpty else { return node.id }
-        return label
+        switch node.type {
+        case "door": return "Door"
+        case "opening": return "Opening"
+        case "stairs" where node.label == nil || node.label == "stairs": return "Stairs"
+        default: break
+        }
+        guard let label = node.label, !label.isEmpty else { return humanize(node.id) }
+        return node.type == "room" ? humanize(label) : label
+    }
+
+    /// "livingRoom" → "Living room", matching the Unity planner's names.
+    private func humanize(_ raw: String) -> String {
+        var result = ""
+        var previous: Character?
+        for character in raw {
+            if character == "-" || character == "_" {
+                result.append(" ")
+            } else {
+                if character.isUppercase, let previous, previous.isLowercase { result.append(" ") }
+                result += result.isEmpty ? character.uppercased() : character.lowercased()
+            }
+            previous = character
+        }
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     private func vector(_ values: [Float]) -> SIMD3<Float> {

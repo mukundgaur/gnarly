@@ -18,15 +18,15 @@ public class LidarPulseView : MonoBehaviour
     [SerializeField] Color baseColor = new Color(0f, 0.42f, 0.12f);
     [SerializeField] Color pulseColor = new Color(0.2f, 1f, 0.4f);
     [Tooltip("Maximum stored points; the oldest are replaced first.")]
-    [SerializeField] int capacity = 100000;
+    [SerializeField] int capacity = 250000;
     [Tooltip("Edge length (m) of the grid used to keep at most one point per cell.")]
-    [SerializeField] float voxelSize = 0.05f;
+    [SerializeField] float voxelSize = 0.025f;
     [Tooltip("Dot radius (m).")]
-    [SerializeField] float pointSize = 0.012f;
+    [SerializeField] float pointSize = 0.005f;
     [SerializeField] float minDepth = 0.2f;
-    [SerializeField] float maxDepth = 5f;
+    [SerializeField] float maxDepth = 6f;
     [Tooltip("Pixel spacing between samples of the 256×192 depth image.")]
-    [SerializeField] int sampleStep = 3;
+    [SerializeField] int sampleStep = 2;
     [SerializeField] float captureInterval = 0.1f;
     [SerializeField] float pulsePeriod = 1.6f;
     [Tooltip("Pulse front speed (m/s).")]

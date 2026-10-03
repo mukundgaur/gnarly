@@ -77,12 +77,15 @@ public class RelocalizationController : MonoBehaviour
     Text statusEyebrow;
     Image statusIndicator;
     Image retryBackground;
-    RectTransform destinationPanel;
     RectTransform transitionPanel;
     Text transitionHeading;
     Text transitionInstructions;
     Text transitionButtonLabel;
-    readonly List<GameObject> destinationButtons = new List<GameObject>();
+    /// <summary>Planner selection as combined-graph keys; a null start means "from my location".</summary>
+    string selectedStartKey;
+    string selectedDestinationKey;
+    readonly Dictionary<string, string> placeNames = new Dictionary<string, string>();
+    bool arrivalAnnounced;
 #if UNITY_IOS && !UNITY_EDITOR
     ARWorldMap? appliedWorldMap;
 #endif
@@ -123,6 +126,8 @@ public class RelocalizationController : MonoBehaviour
         if (packageLoader == null) packageLoader = gameObject.AddComponent<FirebaseNavigationPackageLoader>();
         if (indoorMap == null) indoorMap = GetComponent<IndoorMapOverlay>();
         if (indoorMap == null) indoorMap = gameObject.AddComponent<IndoorMapOverlay>();
+        indoorMap.RouteSelectionChanged += OnPlannerSelectionChanged;
+        indoorMap.NavigationRequested += (start, destination) => BeginRoute(start, destination);
         if (lidarView == null) lidarView = GetComponent<LidarPulseView>();
         if (lidarView == null) lidarView = gameObject.AddComponent<LidarPulseView>();
         BuildUi();
@@ -193,6 +198,11 @@ public class RelocalizationController : MonoBehaviour
                         AwaitZoneTransition();
                     else
                         SetStatus(LegStatus());
+                    if (navigator.HasArrived && !arrivalAnnounced && (activeLegs == null || activeLegIndex == activeLegs.Count - 1))
+                    {
+                        arrivalAnnounced = true;
+                        indoorMap?.SetCompactCaption($"ARRIVED AT {NameOf(selectedDestinationKey).ToUpperInvariant()}  ·  TAP FOR NEW ROUTE");
+                    }
                 }
                 break;
 
@@ -356,6 +366,13 @@ public class RelocalizationController : MonoBehaviour
             Path.Combine(zone.directory, "building.json"),
             Path.Combine(zone.directory, "scan-features.json"));
 
+        // A start chosen in a previous zone can't be used here: you are physically in this zone now.
+        if (selectedStartKey != null && navigationGraph?.Node(selectedStartKey)?.zone != currentZoneId)
+            selectedStartKey = null;
+        indoorMap?.SetPlaces(currentZoneId, BuildPlaces());
+        indoorMap?.SetSelection(selectedStartKey, selectedDestinationKey);
+        indoorMap?.SetNavigationActive(activeLegs != null);
+
         if (activeLegs != null)
         {
             BeginLeg();
@@ -365,20 +382,19 @@ public class RelocalizationController : MonoBehaviour
         if (navigationGraph != null && navigationGraph.Nodes.Count >= 2)
         {
             var destinations = navigationGraph.Destinations();
-            if (destinations.Count == 1)
-                RouteTo(destinations[0].id);
-            else if (destinations.Count > 1)
-            {
-                ShowDestinations(destinations);
-                SetStatus("Located. Choose a destination.");
-            }
-            else if (fallbackRoute != null && navigator != null)
+            if (destinations.Count == 0 && fallbackRoute != null && navigator != null)
             {
                 navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
                 indoorMap?.SetRoute(fallbackRoute);
+                return;
             }
-            else
-                SetStatus("Located (graph has no destination nodes)");
+            if (destinations.Count == 1 && selectedDestinationKey == null)
+            {
+                selectedDestinationKey = destinations[0].id;
+                indoorMap?.SetSelection(selectedStartKey, selectedDestinationKey);
+            }
+            SetStatus("Located. Choose where to go on the map.");
+            indoorMap?.OpenPlanner(true);
         }
         else if (fallbackRoute != null && navigator != null)
         {
@@ -411,31 +427,18 @@ public class RelocalizationController : MonoBehaviour
         return new Vector3(session.x, session.y, -session.z);
     }
 
-    void RouteTo(string goalId)
-    {
-        if (navigationGraph == null || navigator == null) return;
-        var startId = navigationGraph.NearestNodeId(CameraArkitPosition(), currentZoneId);
-        if (startId == null)
-        {
-            SetStatus($"Located, but zone {currentZoneId} has no graph nodes.");
-            return;
-        }
-
-        BeginRoute(startId, goalId);
-    }
-
-    /// <summary>Called by the native iPhone map after the user chooses map markers.</summary>
+    /// <summary>Called by the native iPhone map after the user chooses map markers. An empty start means "my location".</summary>
     public void OnIndoorMapRouteRequested(string requestJson)
     {
         try
         {
             var request = JsonUtility.FromJson<IndoorMapRouteRequest>(requestJson);
-            if (request == null || string.IsNullOrEmpty(request.startId) || string.IsNullOrEmpty(request.destinationId))
-                throw new FormatException("The map route request did not contain start and destination node IDs.");
+            if (request == null || string.IsNullOrEmpty(request.destinationId))
+                throw new FormatException("The map route request did not contain a destination node ID.");
 
-            var startId = ResolveCurrentZoneNode(request.startId);
+            var startId = string.IsNullOrEmpty(request.startId) ? null : ResolveCurrentZoneNode(request.startId);
             var destinationId = ResolveCurrentZoneNode(request.destinationId);
-            if (startId == null || destinationId == null)
+            if ((startId == null && !string.IsNullOrEmpty(request.startId)) || destinationId == null)
                 throw new KeyNotFoundException(
                     $"The selected map node is not in the navigation graph ({request.startId} -> {request.destinationId}).");
 
@@ -458,33 +461,228 @@ public class RelocalizationController : MonoBehaviour
         return navigationGraph.Node(nodeId) != null ? nodeId : null;
     }
 
-    void BeginRoute(string startId, string goalId)
+    /// <summary>Starts AR navigation. A null start means the graph node nearest to the user.</summary>
+    void BeginRoute(string startKey, string destinationKey)
     {
         if (navigationGraph == null || navigator == null) return;
 
-        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
-        if (path == null)
+        if (!TryPlan(startKey, destinationKey, out var path, out var error))
         {
-            var message = $"No A* path from {startId} to {goalId}. Pick another map point.";
-            indoorMap?.SetExpandedStatus(message);
-            SetStatus(message);
+            indoorMap?.SetExpandedStatus(error);
+            SetStatus(error);
             return;
         }
-        if (path.Count < 2)
-        {
-            const string message = "Start and destination are the same location. Choose two different map points.";
-            indoorMap?.SetExpandedStatus(message);
-            SetStatus(message);
-            return;
-        }
+
+        selectedStartKey = startKey;
+        selectedDestinationKey = destinationKey;
+        indoorMap?.SetSelection(startKey, destinationKey);
+        indoorMap?.SetNavigationActive(true);
+        indoorMap?.SetCompactCaption($"TO {NameOf(destinationKey).ToUpperInvariant()}  ·  TAP TO CHANGE");
+        arrivalAnnounced = false;
 
         activeLegs = Pathfinding.SplitByZone(navigationGraph, path);
         activeLegIndex = 0;
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
-        ClearDestinationButtons();
-        if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         Debug.Log($"[Gnarly] A* {string.Join(" -> ", path)} ({activeLegs.Count} zone leg(s))");
         BeginLeg();
+    }
+
+    void OnPlannerSelectionChanged(string startKey, string destinationKey)
+    {
+        indoorMap?.ShowPreview(PreviewRoute(startKey, destinationKey));
+    }
+
+    bool TryPlan(string startKey, string destinationKey, out List<string> path, out string error)
+    {
+        path = null;
+        error = null;
+        if (navigationGraph == null)
+        {
+            error = "This map has no navigation graph yet.";
+            return false;
+        }
+        if (destinationKey == null || navigationGraph.Node(destinationKey) == null)
+        {
+            error = "Pick a destination on the map.";
+            return false;
+        }
+
+        string startId;
+        if (startKey == null)
+        {
+            startId = navigationGraph.NearestNodeId(CameraArkitPosition(), currentZoneId);
+            if (startId == null)
+            {
+                error = $"{currentZoneId} has no navigation points near you.";
+                return false;
+            }
+        }
+        else
+        {
+            var start = navigationGraph.Node(startKey);
+            if (start == null)
+            {
+                error = "That start point is no longer in the map.";
+                return false;
+            }
+            if (start.zone != currentZoneId)
+            {
+                error = $"The start must be in {currentZoneId}, where you are now.";
+                return false;
+            }
+            startId = startKey;
+        }
+
+        if (startId == destinationKey)
+        {
+            error = startKey == null
+                ? $"You're already at {NameOf(destinationKey)}."
+                : "Start and destination are the same place. Choose two different points.";
+            return false;
+        }
+
+        path = Pathfinding.AStar(navigationGraph, startId, destinationKey);
+        if (path == null)
+        {
+            error = $"No walkable path from {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}. Try another point.";
+            return false;
+        }
+        return true;
+    }
+
+    RoutePreview PreviewRoute(string startKey, string destinationKey)
+    {
+        if (!TryPlan(startKey, destinationKey, out var path, out var error))
+            return new RoutePreview { ok = false, error = error };
+
+        var legs = Pathfinding.SplitByZone(navigationGraph, path);
+        var meters = 0f;
+        if (startKey == null) meters += HorizontalDistance(CameraArkitPosition(), Pathfinding.Position(navigationGraph.Node(path[0])));
+        for (var i = 1; i < path.Count; i++)
+        {
+            var a = navigationGraph.Node(path[i - 1]);
+            var b = navigationGraph.Node(path[i]);
+            if (a.zone == b.zone) meters += HorizontalDistance(Pathfinding.Position(a), Pathfinding.Position(b));
+        }
+
+        Route mapRoute = null;
+        foreach (var leg in legs)
+        {
+            if (leg.zoneId != currentZoneId) continue;
+            mapRoute = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+            break;
+        }
+
+        var minutes = Mathf.CeilToInt(meters / 1.2f / 60f);
+        var summary = $"{meters:0} m  ·  {(minutes <= 1 ? "about 1 min" : $"{minutes} min")} walk";
+        string details;
+        if (legs.Count > 1)
+        {
+            var zones = new List<string>();
+            foreach (var leg in legs) zones.Add(leg.zoneId);
+            summary += $"  ·  {legs.Count - 1} zone change{(legs.Count > 2 ? "s" : "")}";
+            details = "Via " + string.Join(" → ", zones) + ". You'll confirm each new zone on arrival.";
+        }
+        else
+        {
+            details = $"From {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}  ·  {path.Count} waypoints";
+        }
+        return new RoutePreview { ok = true, mapRoute = mapRoute, summary = summary, details = details };
+    }
+
+    static float HorizontalDistance(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
+
+    string NameOf(string key)
+    {
+        if (key != null && placeNames.TryGetValue(key, out var name)) return name;
+        return string.IsNullOrEmpty(key) ? "the destination" : key;
+    }
+
+    /// <summary>Every graph node as a selectable place, with readable names (e.g. "Living room", "Door 2").</summary>
+    List<MapPlace> BuildPlaces()
+    {
+        var places = new List<MapPlace>();
+        placeNames.Clear();
+        if (navigationGraph == null) return places;
+
+        var counters = new Dictionary<string, int>();
+        foreach (var node in navigationGraph.Nodes)
+        {
+            var kind = PlaceKind(node);
+            var name = PlaceName(node, kind, counters);
+            var inCurrentZone = node.zone == currentZoneId;
+            places.Add(new MapPlace
+            {
+                key = node.id,
+                localId = node.localId,
+                zone = node.zone,
+                name = name,
+                kind = kind,
+                major = kind is "destination" or "entrance" or "room" or "stairs" ||
+                        (kind == "waypoint" && !string.IsNullOrEmpty(node.label)),
+                inCurrentZone = inCurrentZone,
+                sessionPosition = inCurrentZone && node.position != null && node.position.Length == 3
+                    ? new Vector3(node.position[0], node.position[1], -node.position[2])
+                    : Vector3.zero
+            });
+            placeNames[node.id] = name;
+        }
+        return places;
+    }
+
+    static string PlaceKind(Pathfinding.Node node)
+    {
+        switch (node.type)
+        {
+            case "destination":
+            case "entrance":
+            case "stairs":
+            case "door":
+            case "opening":
+                return node.type;
+        }
+        return node.localId != null && node.localId.StartsWith("section-", StringComparison.Ordinal) ? "room" : "waypoint";
+    }
+
+    static string PlaceName(Pathfinding.Node node, string kind, Dictionary<string, int> counters)
+    {
+        string Numbered(string baseName)
+        {
+            var counterKey = node.zone + "/" + baseName;
+            counters.TryGetValue(counterKey, out var count);
+            counters[counterKey] = ++count;
+            return count == 1 ? baseName : $"{baseName} {count}";
+        }
+
+        switch (kind)
+        {
+            case "door": return Numbered("Door");
+            case "opening": return Numbered("Opening");
+            case "room": return Numbered(Humanize(node.label ?? node.localId.Substring("section-".Length)));
+            case "stairs":
+                return Numbered(string.IsNullOrEmpty(node.label) || node.label == "stairs" ? "Stairs" : node.label);
+            default:
+                return !string.IsNullOrEmpty(node.label) ? node.label : Numbered(Humanize(node.localId ?? node.id));
+        }
+    }
+
+    /// <summary>"livingRoom" → "Living room", "front_door" → "Front door".</summary>
+    static string Humanize(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "Point";
+        var builder = new System.Text.StringBuilder();
+        for (var i = 0; i < raw.Length; i++)
+        {
+            var c = raw[i];
+            if (c == '-' || c == '_')
+            {
+                builder.Append(' ');
+                continue;
+            }
+            if (char.IsUpper(c) && i > 0 && char.IsLower(raw[i - 1])) builder.Append(' ');
+            builder.Append(builder.Length == 0 ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c));
+        }
+        return builder.ToString().Trim();
     }
 
     /// <summary>Draws the active leg; positions are only valid inside the zone whose map is applied.</summary>
@@ -558,36 +756,6 @@ public class RelocalizationController : MonoBehaviour
         ResetSession($"Entering {nextZoneId}. Look around so ARKit can recognize it.");
     }
 
-    void ShowDestinations(List<Pathfinding.Node> destinations)
-    {
-        if (destinationPanel == null) return;
-        ClearDestinationButtons();
-        destinationPanel.gameObject.SetActive(true);
-        for (var i = 0; i < destinations.Count; i++)
-        {
-            var node = destinations[i];
-            var button = CreateRect($"Dest-{node.id}", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(18, -148 - i * 102), new Vector2(-18, -54 - i * 102));
-            button.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.31f, 0.4f, 0.96f);
-            var captured = node.id;
-            button.gameObject.AddComponent<Button>().onClick.AddListener(() => RouteTo(captured));
-            var label = CreateRect("Label", button, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
-            label.font = statusText.font;
-            label.fontSize = 32;
-            label.fontStyle = FontStyle.Bold;
-            label.alignment = TextAnchor.MiddleCenter;
-            label.color = Color.white;
-            label.text = string.IsNullOrEmpty(node.label) ? node.localId : node.label;
-            if (zonePackages.Count > 1) label.text += $"  ·  {node.zone}";
-            destinationButtons.Add(button.gameObject);
-        }
-    }
-
-    void ClearDestinationButtons()
-    {
-        foreach (var button in destinationButtons) Destroy(button);
-        destinationButtons.Clear();
-    }
-
     /// <summary>Relocalizes in the current zone again; an in-progress multi-zone route resumes afterwards.</summary>
     public void Retry() => ResetSession("Restarting…");
 
@@ -598,8 +766,6 @@ public class RelocalizationController : MonoBehaviour
         if (navigator != null) navigator.Clear();
         indoorMap?.Clear();
         lidarView?.ClearPoints();
-        ClearDestinationButtons();
-        if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
         session.Reset();
@@ -614,6 +780,8 @@ public class RelocalizationController : MonoBehaviour
         packageDirectory = package.DirectoryPath;
         navigationLoaded = false;
         activeLegs = null;
+        selectedStartKey = null;
+        selectedDestinationKey = null;
         state = State.WaitingForSession;
         var source = package.IsOfflineCache ? "offline cache" : "Firebase";
         SetStatus($"Loaded version {package.VersionId} from {source}. Starting camera…");
@@ -715,17 +883,6 @@ public class RelocalizationController : MonoBehaviour
         label.alignment = TextAnchor.MiddleCenter;
         label.color = Color.white;
         label.text = "Reset map";
-
-        destinationPanel = CreateRect("DestinationPanel", canvasObject.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(24, 220), new Vector2(-24, 860));
-        destinationPanel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.9f);
-        var destinationHeading = CreateRect("Heading", destinationPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -60), new Vector2(-24, -12)).gameObject.AddComponent<Text>();
-        destinationHeading.font = font;
-        destinationHeading.fontSize = 26;
-        destinationHeading.fontStyle = FontStyle.Bold;
-        destinationHeading.alignment = TextAnchor.MiddleLeft;
-        destinationHeading.color = new Color(0.44f, 0.78f, 0.92f);
-        destinationHeading.text = "CHOOSE A DESTINATION";
-        destinationPanel.gameObject.SetActive(false);
 
         transitionPanel = CreateRect("ZoneTransitionPanel", canvasObject.transform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(24, -245), new Vector2(-24, 245));
         transitionPanel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.96f);
