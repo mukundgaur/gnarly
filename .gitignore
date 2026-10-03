@@ -20,6 +20,8 @@ Recordings/
 
 # Local test artifacts are device/site-specific and may be large.
 shared/local-packages/
+navigator-unity/Assets/StreamingAssets/zone-a/
+navigator-unity/Assets/StreamingAssets/zone-a.meta
 
 # Secrets and Firebase configuration
 GoogleService-Info.plist
