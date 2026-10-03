@@ -71,7 +71,7 @@ Assets/StreamingAssets/
 The `Zone Id` field on `RelocalizationController` is the zone the user starts in. The app:
 
 1. Builds each zone's graph, merges them under `zoneId/nodeId` keys, and adds every connection as a bidirectional edge with weight 1 (`Pathfinding.ZoneTransferCost`). The A* heuristic is straight-line distance within a zone and 0 across zones, because coordinates from different world maps are not comparable.
-2. Starts A* from the nearest node in the current zone. Destinations from every zone are listed, labeled with their zone.
+2. Starts A* from the chosen start point, or from the node nearest to you when the start is **My location**. The start must be in the current zone. Destinations can be in any zone; the route planner's list includes places from every zone, labeled with their zone.
 3. Splits the path into one leg per zone and draws only the current leg. On arriving at the leg's connector node, it applies the next zone's world map, shows **Entering &lt;zone&gt;… Look around**, and draws the next leg after relocalizing. **Reset map** relocalizes in the current zone and resumes the route.
 
 With Firebase (`useFirebasePackages`, on by default), choosing a scan from the library downloads that zone and also tries every other zone of the same building into the offline cache. Other zones are then read from that cache. Connections are read from `buildings/{buildingId}/{versionId}/zone-connections.json` in Storage when present, otherwise from a bundled `StreamingAssets/zone-connections.json`. A zone that fails to download, for example because its version's `building.json` belongs to another zone, is logged and left out of routing. With Firebase off, every zone is read from `StreamingAssets/<zoneId>/`.
@@ -81,9 +81,19 @@ With Firebase (`useFirebasePackages`, on by default), choosing a scan from the l
 1. Firebase login and active-package download, or selection of a previously downloaded offline package.
 2. **Starting camera…** until ARKit tracks.
 3. **Locating…** after the world map is applied, until ARKit reports it has relocalized.
-4. Unity builds a graph from `building.json`, runs A* from the nearest node to the chosen destination, and draws that path. If a local test anchor exists, its cube is also shown. If tracking is lost, the path is hidden until tracking recovers. **Retry** resets the session and reapplies the cached map.
+4. Once located, the **route planner** opens (see below). After you start navigation, Unity draws the A* path in AR. If a local test anchor exists, its cube is also shown. If tracking is lost, the path is hidden until tracking recovers. **Retry** resets the session and reapplies the cached map.
 
-The compact map card is a real Unity `Button` with raycasts enabled. On iPhone it opens the existing RealityKit RoomPlan view. One finger orbits, pinching zooms, and two fingers pan. Tap a colored map marker, set it as Start or Destination, and tap **Show Route**; the native view returns the original node IDs to `RelocalizationController`, which runs the existing A* graph and sends the resulting route back to the 3D view. Green marks Start, pink marks Destination, and yellow marks the currently tapped node. **Reset View** reframes the building and **Back** closes the view.
+### Route planner (choosing start and destination)
+
+Tap the minimap (top right, below the status card) at any time to open the full-screen planner. It works in the Editor and on iPhone.
+
+- **From / To**: two rows at the top. Tap a row to choose which end the next pick sets; the highlighted row is active. **From** defaults to **My location**. After you pick a start, **My location** switches it back. **×** clears the destination and **SWAP** reverses the route.
+- **Map**: a top-down view of the scan. Tap a dot to assign it to the active row; picking a start moves you on to choosing the destination. Drag to pan, and pinch or scroll to zoom. **+ / −** zoom and **ME** recenters on you. Named places have labels. Colors: mint is you, green is the start, pink is the destination, amber is a recorded destination, violet is a room, blue is stairs, and small teal dots are doors and openings.
+- **Places**: a list of named places (destinations, entrances, rooms, stairs). It includes places in other zones, so you can choose a destination on another floor. A start in another zone is rejected because the start must be where you are now.
+- **Preview**: every change runs A* immediately. The map draws the route in white, and the footer shows distance, walking time and zone changes, or why no route exists. **Start navigation** (or **Update route** while navigating) begins AR guidance; **Clear** resets both ends.
+- **3D view** (iPhone only, when `structure.usdz` is in the package): opens the RealityKit RoomPlan view with the planner's selection. One finger orbits, pinching zooms, and two fingers pan. Tap a dot, then **Set as Start** or **Set as Destination**. **My Location**, **Swap** and **Clear** work as in the planner. **Start Navigation** sends local node IDs back to `RelocalizationController` through `OnIndoorMapRouteRequested`, with an empty `startId` meaning my location.
+
+When you start from a point other than your location, the AR ribbon still guides you from where you are to the nearest point on that route, then along it.
 
 ARKit positions are converted to Unity by negating Z (right-handed to left-handed).
 
@@ -93,7 +103,9 @@ ARKit positions are converted to Unity by negating Z (right-handed to left-hande
 - `Assets/Scripts/FirebaseNavigationPackageRepository.cs`: Firebase email/password authentication, Firestore metadata reads, Storage downloads, path validation, and atomic offline cache.
 - `Assets/Scripts/FirebaseNavigationPackageLoader.cs`: login/building/zone UI and offline-package selection.
 - `Assets/Scripts/RouteNavigator.cs`: path ribbon, waypoint markers, off-screen turn arrow.
-- `Assets/Scripts/LidarPulseView.cs`: **LiDAR** button (bottom left). Turns on ARKit scene depth via an `AROcclusionManager` with occlusion disabled, accumulates a 5 cm voxel point cloud in session space, and draws it as dark green dots (`Assets/Resources/GnarlyLidarPoints.shader`) that brighten as a pulse sweeps out from the user every 1.6 s. Unlike feature points, LiDAR depth works in the dark. The cloud is cleared on relocalization and **Reset map**.
+- `Assets/Scripts/LidarPulseView.cs`: **LiDAR** button (bottom left). Turns on ARKit scene depth via an `AROcclusionManager` with occlusion disabled, accumulates a 2.5 cm voxel point cloud out to 6 m in session space, and draws it as dark green dots (`Assets/Resources/GnarlyLidarPoints.shader`) that brighten as a pulse sweeps out from the user every 1.6 s. Unlike feature points, LiDAR depth works in the dark. The cloud is cleared on relocalization and **Reset map**.
 - `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections, multi-zone graph merging, and A*.
+- `Assets/Scripts/IndoorMapOverlay.cs`: minimap card, top-down map rendering (scan geometry, place markers, start and destination pins, routes), and the bridge to the native 3D view. `IndoorMapOverlay.Planner.cs` holds the route-planner screen; `MapViewportInput.cs` handles tap, pan and pinch on the map; `MapUi.cs` has shared colors and uGUI builders.
+- `Assets/Plugins/iOS/AppleRoomModelPreview.swift`: RealityKit 3D view of `structure.usdz` with marker selection.
 
 Commit `Assets/`, `Packages/`, and `ProjectSettings/` only.

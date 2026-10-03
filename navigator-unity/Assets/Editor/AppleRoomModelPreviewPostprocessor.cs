@@ -13,7 +13,9 @@ public static class AppleRoomModelPreviewPostprocessor
         var projectPath = PBXProject.GetPBXProjectPath(buildPath);
         var project = new PBXProject();
         project.ReadFromFile(projectPath);
-        project.AddFrameworkToProject(project.GetUnityFrameworkTargetGuid(), "RealityKit.framework", false);
+        var frameworkTarget = project.GetUnityFrameworkTargetGuid();
+        project.AddFrameworkToProject(frameworkTarget, "RealityKit.framework", false);
+        project.AddFrameworkToProject(frameworkTarget, "CoreHaptics.framework", false);
         project.WriteToFile(projectPath);
     }
 }

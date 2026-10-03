@@ -11,6 +11,8 @@ using UnityEngine.XR.ARSubsystems;
 /// draws it as dark green dots that brighten as a pulse sweeps outward from the user.
 /// Depth is used instead of ARKit feature points because feature points need visible texture and
 /// disappear in the dark; the LiDAR sensor does not.
+/// While a route is active, the same depth is read even if the point cloud is hidden. Samples that
+/// fall in the walking corridor drive haptics: a closer, denser obstacle vibrates harder.
 /// </summary>
 public class LidarPulseView : MonoBehaviour
 {
@@ -18,15 +20,15 @@ public class LidarPulseView : MonoBehaviour
     [SerializeField] Color baseColor = new Color(0f, 0.42f, 0.12f);
     [SerializeField] Color pulseColor = new Color(0.2f, 1f, 0.4f);
     [Tooltip("Maximum stored points; the oldest are replaced first.")]
-    [SerializeField] int capacity = 100000;
+    [SerializeField] int capacity = 250000;
     [Tooltip("Edge length (m) of the grid used to keep at most one point per cell.")]
-    [SerializeField] float voxelSize = 0.05f;
+    [SerializeField] float voxelSize = 0.025f;
     [Tooltip("Dot radius (m).")]
-    [SerializeField] float pointSize = 0.012f;
+    [SerializeField] float pointSize = 0.005f;
     [SerializeField] float minDepth = 0.2f;
-    [SerializeField] float maxDepth = 5f;
+    [SerializeField] float maxDepth = 6f;
     [Tooltip("Pixel spacing between samples of the 256×192 depth image.")]
-    [SerializeField] int sampleStep = 3;
+    [SerializeField] int sampleStep = 2;
     [SerializeField] float captureInterval = 0.1f;
     [SerializeField] float pulsePeriod = 1.6f;
     [Tooltip("Pulse front speed (m/s).")]
@@ -36,6 +38,27 @@ public class LidarPulseView : MonoBehaviour
     [SerializeField] float pulseTrail = 1.5f;
     [Tooltip("Seconds a newly captured point stays highlighted.")]
     [SerializeField] float freshSeconds = 0.6f;
+    [SerializeField] RouteNavigator navigator;
+    [Header("Path obstacle haptics")]
+    [Tooltip("Half-width (m) of the walking corridor around the route. Depth samples inside it can vibrate.")]
+    [SerializeField] float corridorHalfWidth = 0.4f;
+    [Tooltip("Height above the path (m) where a return counts as an obstacle rather than the floor.")]
+    [SerializeField] float minObstacleHeight = 0.25f;
+    [Tooltip("Returns higher than this above the path (m) are treated as ceiling and ignored.")]
+    [SerializeField] float maxObstacleHeight = 1.75f;
+    [Tooltip("How far ahead along the route (m) obstacles are felt.")]
+    [SerializeField] float pathLookAhead = 3.5f;
+    [Tooltip("LiDAR distance (m) that maps to the strongest vibration. Anything closer stays at full strength.")]
+    [SerializeField] float nearDistance = 0.45f;
+    [Tooltip("LiDAR distance (m) that maps to silence. Farther obstacles do not vibrate.")]
+    [SerializeField] float farDistance = 3.2f;
+
+    const int MinBlockingHits = 16;
+    const int DenseHitCount = 70;
+    const float DensityQuiet = 0.07f;
+    const float DensityFull = 0.32f;
+    const float MaxHapticStrength = 0.9f;
+    const float PathStartSkip = 0.2f;
 
     static readonly int PointsId = Shader.PropertyToID("_Points");
     static readonly int SessionToWorldId = Shader.PropertyToID("_SessionToWorld");
@@ -68,11 +91,26 @@ public class LidarPulseView : MonoBehaviour
     Image buttonBackground;
     Text buttonLabel;
 
+    readonly List<Vector3> upcomingPath = new List<Vector3>();
+    int blockingHits;
+    int clearPathHits;
+    float closenessSum;
+    float peakCloseness;
+    float targetIntensity;
+    float smoothedIntensity;
+    float lastObstacleSampleAt = float.NegativeInfinity;
+    bool hapticsSilent = true;
+    int lastSentHaptic = -1;
+
     public bool IsOn => isOn;
+
+    bool RouteSensing => navigator != null && navigator.IsActive && !navigator.HasArrived;
 
     void Awake()
     {
         if (origin == null) origin = FindAnyObjectByType<XROrigin>();
+        if (navigator == null) navigator = GetComponent<RouteNavigator>();
+        if (navigator == null) navigator = FindAnyObjectByType<RouteNavigator>();
         BuildUi();
         UpdateButton();
     }
@@ -83,17 +121,15 @@ public class LidarPulseView : MonoBehaviour
     {
         if (on && !EnsureResources()) on = false;
         isOn = on;
-        if (occlusion != null) occlusion.enabled = on;
         if (on)
         {
             pulseStartedAt = Time.time;
             pulseIndex = -1;
             nextCaptureAt = 0f;
-            if (occlusion.descriptor == null || occlusion.descriptor.environmentDepthImageSupported == Supported.Unsupported)
+            if (occlusion.descriptor?.environmentDepthImageSupported == Supported.Unsupported)
             {
                 Debug.LogWarning("[Gnarly] LiDAR depth is not supported on this device.");
                 unavailable = true;
-                occlusion.enabled = false;
                 isOn = false;
             }
         }
@@ -111,9 +147,24 @@ public class LidarPulseView : MonoBehaviour
         buffer.SetData(points);
     }
 
-    bool EnsureResources()
+    bool EnsureOcclusion()
     {
         if (origin == null || origin.Camera == null) return false;
+        if (occlusion != null) return true;
+
+        var cameraObject = origin.Camera.gameObject;
+        occlusion = cameraObject.GetComponent<AROcclusionManager>();
+        if (occlusion == null) occlusion = cameraObject.AddComponent<AROcclusionManager>();
+        occlusion.requestedEnvironmentDepthMode = EnvironmentDepthMode.Medium;
+        occlusion.environmentDepthTemporalSmoothingRequested = true;
+        // Depth is only read on the CPU; leave the camera background and route rendering unoccluded.
+        occlusion.requestedOcclusionPreferenceMode = OcclusionPreferenceMode.NoOcclusion;
+        return true;
+    }
+
+    bool EnsureResources()
+    {
+        if (!EnsureOcclusion()) return false;
         if (material == null)
         {
             var shader = Resources.Load<Shader>("GnarlyLidarPoints");
@@ -134,22 +185,43 @@ public class LidarPulseView : MonoBehaviour
             ClearPoints();
         }
 
-        if (occlusion == null)
-        {
-            var cameraObject = origin.Camera.gameObject;
-            occlusion = cameraObject.GetComponent<AROcclusionManager>();
-            if (occlusion == null) occlusion = cameraObject.AddComponent<AROcclusionManager>();
-            occlusion.requestedEnvironmentDepthMode = EnvironmentDepthMode.Medium;
-            occlusion.environmentDepthTemporalSmoothingRequested = true;
-            // Depth is only read on the CPU; leave the camera background and route rendering unoccluded.
-            occlusion.requestedOcclusionPreferenceMode = OcclusionPreferenceMode.NoOcclusion;
-        }
         return true;
     }
 
     void Update()
     {
-        if (!isOn) return;
+        if (unavailable)
+        {
+            StopObstacleHaptics();
+            return;
+        }
+
+        var senseRoute = RouteSensing;
+        if (!isOn && !senseRoute)
+        {
+            if (occlusion != null) occlusion.enabled = false;
+            StopObstacleHaptics();
+            return;
+        }
+
+        if ((isOn && !EnsureResources()) || (!isOn && !EnsureOcclusion()))
+        {
+            StopObstacleHaptics();
+            return;
+        }
+
+        if (occlusion.descriptor?.environmentDepthImageSupported == Supported.Unsupported)
+        {
+            Debug.LogWarning("[Gnarly] LiDAR depth is not supported on this device.");
+            unavailable = true;
+            isOn = false;
+            occlusion.enabled = false;
+            StopObstacleHaptics();
+            UpdateButton();
+            return;
+        }
+
+        occlusion.enabled = true;
 
         if (Time.unscaledTime >= nextCaptureAt)
         {
@@ -158,8 +230,17 @@ public class LidarPulseView : MonoBehaviour
                 Capture();
         }
 
-        UpdatePulse();
-        Render();
+        if (!senseRoute || Time.unscaledTime - lastObstacleSampleAt > 0.35f)
+            targetIntensity = 0f;
+
+        if (isOn)
+        {
+            UpdatePulse();
+            Render();
+        }
+
+        if (senseRoute) ApplyObstacleHaptics();
+        else StopObstacleHaptics();
     }
 
     void UpdatePulse()
@@ -247,6 +328,13 @@ public class LidarPulseView : MonoBehaviour
         var start = next;
         var written = 0;
         var step = Mathf.Max(1, sampleStep);
+        var hasPath = navigator != null && navigator.CopyUpcomingPath(upcomingPath);
+        blockingHits = 0;
+        clearPathHits = 0;
+        closenessSum = 0f;
+        peakCloseness = 0f;
+        var sessionToWorld = hasPath ? origin.TrackablesParent.localToWorldMatrix : default;
+
         for (var y = step / 2; y < height; y += step)
         {
             for (var x = step / 2; x < width; x += step)
@@ -271,6 +359,9 @@ public class LidarPulseView : MonoBehaviour
                     (ndcY + projection.m12) * d / projection.m11,
                     -d);
                 var sessionPoint = cameraToSession.MultiplyPoint3x4(cameraPoint);
+                if (hasPath)
+                    ConsiderPathObstacle(sessionToWorld.MultiplyPoint3x4(sessionPoint), d);
+                if (points == null) continue;
 
                 var key = VoxelKey(sessionPoint);
                 if (voxels.ContainsKey(key)) continue;
@@ -286,10 +377,115 @@ public class LidarPulseView : MonoBehaviour
             }
         }
 
+        PublishObstacleIntensity(hasPath);
+
         if (written == 0) return;
         var firstRun = Mathf.Min(written, capacity - start);
         buffer.SetData(points, start, start, firstRun);
         if (written > firstRun) buffer.SetData(points, 0, 0, written - firstRun);
+    }
+
+    /// <summary>
+    /// Classifies one LiDAR return against the route corridor. Floor returns inside the corridor
+    /// dilute the density; solid obstacles raise it. Closer returns contribute more closeness.
+    /// </summary>
+    void ConsiderPathObstacle(Vector3 world, float depth)
+    {
+        if (upcomingPath.Count < 2) return;
+        var originFlat = new Vector2(upcomingPath[0].x, upcomingPath[0].z);
+        var flat = new Vector2(world.x, world.z) - originFlat;
+        var reach = pathLookAhead + corridorHalfWidth;
+        if (flat.sqrMagnitude > reach * reach) return;
+
+        var bestLateral = float.MaxValue;
+        var bestAlong = 0f;
+        var bestY = 0f;
+        var along = 0f;
+        for (var i = 0; i < upcomingPath.Count - 1; i++)
+        {
+            var a = upcomingPath[i];
+            var b = upcomingPath[i + 1];
+            var ab = new Vector2(b.x - a.x, b.z - a.z);
+            var length = ab.magnitude;
+            if (length < 1e-4f) continue;
+            var t = Mathf.Clamp01(Vector2.Dot(new Vector2(world.x, world.z) - new Vector2(a.x, a.z), ab) / (length * length));
+            var closest = new Vector2(a.x, a.z) + ab * t;
+            var lateral = Vector2.Distance(new Vector2(world.x, world.z), closest);
+            if (lateral < bestLateral)
+            {
+                bestLateral = lateral;
+                bestAlong = along + length * t;
+                bestY = Mathf.Lerp(a.y, b.y, t);
+            }
+            along += length;
+        }
+
+        if (bestLateral > corridorHalfWidth) return;
+        if (bestAlong < PathStartSkip || bestAlong > pathLookAhead) return;
+
+        var height = world.y - bestY;
+        if (height < -0.15f || height > maxObstacleHeight) return;
+        if (height < minObstacleHeight)
+        {
+            clearPathHits++;
+            return;
+        }
+
+        var closeness = Mathf.Clamp01(Mathf.InverseLerp(farDistance, nearDistance, depth));
+        blockingHits++;
+        closenessSum += closeness;
+        if (closeness > peakCloseness) peakCloseness = closeness;
+    }
+
+    void PublishObstacleIntensity(bool hasPath)
+    {
+        lastObstacleSampleAt = Time.unscaledTime;
+        targetIntensity = hasPath
+            ? ObstacleIntensity(blockingHits, clearPathHits, closenessSum, peakCloseness)
+            : 0f;
+    }
+
+    static float ObstacleIntensity(int hits, int clearHits, float closenessSum, float peakCloseness)
+    {
+        if (hits < MinBlockingHits) return 0f;
+        var density = hits / (float)(hits + clearHits);
+        var densityFactor = Mathf.SmoothStep(DensityQuiet, DensityFull, density);
+        var support = Mathf.Clamp01(Mathf.InverseLerp(MinBlockingHits, DenseHitCount, hits));
+        var mean = closenessSum / hits;
+        var closeness = Mathf.Lerp(mean, peakCloseness, 0.65f);
+        return Mathf.Clamp01(closeness * densityFactor * Mathf.Lerp(0.4f, 1f, support)) * MaxHapticStrength;
+    }
+
+    void ApplyObstacleHaptics()
+    {
+        var blend = 1f - Mathf.Exp(-10f * Time.unscaledDeltaTime);
+        smoothedIntensity = Mathf.Lerp(smoothedIntensity, targetIntensity, blend);
+
+        if (hapticsSilent)
+        {
+            if (smoothedIntensity < 0.06f) return;
+            hapticsSilent = false;
+        }
+        else if (smoothedIntensity < 0.03f)
+        {
+            StopObstacleHaptics();
+            return;
+        }
+
+        var milli = Mathf.RoundToInt(smoothedIntensity * 100f);
+        if (milli == lastSentHaptic) return;
+        lastSentHaptic = milli;
+        PathObstacleHaptics.SetIntensity(milli / 100f);
+    }
+
+    void StopObstacleHaptics()
+    {
+        targetIntensity = 0f;
+        smoothedIntensity = 0f;
+        lastSentHaptic = -1;
+        if (hapticsSilent) return;
+        hapticsSilent = true;
+        PathObstacleHaptics.Stop();
     }
 
     long VoxelKey(Vector3 p)
@@ -347,8 +543,14 @@ public class LidarPulseView : MonoBehaviour
 
     void OnDestroy()
     {
+        StopObstacleHaptics();
         buffer?.Release();
         buffer = null;
         if (material != null) Destroy(material);
+    }
+
+    void OnApplicationPause(bool paused)
+    {
+        if (paused) StopObstacleHaptics();
     }
 }
