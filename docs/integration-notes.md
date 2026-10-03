@@ -9,6 +9,7 @@ Record decisions and findings here as the two workstreams meet. This prevents a 
 | 2026-10-02 | Unity | ARKit `[x, y, z]` becomes Unity `(x, y, -z)`, placed under `XROrigin.TrackablesParent`. | Applies to anchor and route positions | — |
 | 2026-10-02 | Unity | Route guidance started ahead of the cube proof: optional `route.json` ([schema](../shared/route.schema.json)) is drawn as a floor path with an off-screen turn arrow. | Mapper must export `route.json` (see `mapper-ios/README.md`) | Mapper: add waypoint recording |
 | 2026-10-02 | Mapper | Mapper records graph nodes during the scan and exports `scan.json`, `scan-features.json`, `building.json`, and `route.json`. RoomPlan doors/openings/stairs are unconnected `roomplan-hint` nodes. | Graph work can start from a LiDAR package without waiting on Unity | Confirm on a LiDAR iPhone; connect remaining edges by hand |
+| 2026-10-03 | Unity | Navigator reads the active version from Firestore and downloads `building.json` plus the zone ARWorldMap from Storage after Firebase email/password authentication. Downloads are staged and cached under `Application.persistentDataPath`; a complete cache can run offline. The client uses Firebase's authenticated HTTPS APIs so no custom backend or additional Unity SDK package is required. | Removes the `StreamingAssets` package-transfer step for normal use while preserving offline navigation | Populate one published building/version/zone and verify on the LiDAR iPhone |
 
 ## Decisions to record
 

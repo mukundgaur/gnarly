@@ -20,6 +20,7 @@ mapper-ios/             Native Swift/Xcode mapper workspace
 navigator-unity/        Unity navigator workspace
 shared/                 Versioned package schema and example data
 docs/                   Setup, handoff, and integration notes
+firebase/               Firestore and Cloud Storage security rules
 ```
 
 ## Getting started
@@ -31,6 +32,6 @@ docs/                   Setup, handoff, and integration notes
 
 ## Guardrail
 
-Do not begin Firebase, graph routing, multi-floor transfers, or production UI until the same map can be captured, saved, loaded in Unity, relocalized, and used to place the test cube in the original physical location.
+Keep Firebase, graph routing, multi-floor transfers, and production UI decoupled from the core relocalization proof. The mapper now has a Firebase data layer, but local capture/export and Unity relocalization must continue to work without it.
 
 Exception: the mapper exports `scan.json`, `scan-features.json`, `building.json`, and optional `route.json` so navigation-graph work can proceed from a LiDAR scan. Automatic hallway inference and A* are still out of the cube-proof scope.

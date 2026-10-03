@@ -27,3 +27,4 @@ navigator-unity/Assets/StreamingAssets/
 GoogleService-Info.plist
 google-services.json
 .env
+navigator-unity/FirebaseConfig/
