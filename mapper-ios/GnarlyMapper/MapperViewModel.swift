@@ -15,12 +15,15 @@ final class MapperViewModel: ObservableObject {
     private weak var captureView: RoomCaptureView?
     private var capturedRoom: CapturedRoom?
     private var testAnchor: TestAnchor?
+    private var pathSamplingTimer: Timer?
+    private var lastSampledPosition: [Float]?
+    private let automaticNodeSpacingMeters: Float = 0.75
 
     var canMarkAnchor: Bool {
         arSession.currentFrame != nil
     }
 
-    var canAddNode: Bool {
+    var canDropManualNode: Bool {
         arSession.currentFrame != nil
     }
 
@@ -39,19 +42,22 @@ final class MapperViewModel: ObservableObject {
             return
         }
 
+        stopPathSampling()
         capturedRoom = nil
         testAnchor = nil
         recordedNodes = []
         exportURL = nil
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
-        statusText = "Scanning. Mark hallway, door, stair, and destination nodes as you walk."
+        statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
+        startPathSampling()
     }
 
     func finishRoom() {
         guard isScanning else { return }
         statusText = "Processing RoomPlan scan…"
         isScanning = false
+        stopPathSampling()
         // Keep ARKit running so its coordinate system remains valid for map export.
         captureView?.captureSession.stop(pauseARSession: false)
     }
@@ -66,35 +72,28 @@ final class MapperViewModel: ObservableObject {
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 capturedRoom = room
-                statusText = "Room ready. Add any remaining graph nodes, mark the cube point, then export."
+                statusText = "Room ready. Mark the cube point, then export the package."
             } catch {
                 showError("Unable to build the captured room: \(error.localizedDescription)")
             }
         }
     }
 
-    func addNode(type: GraphNodeType, label: String) {
+    func dropManualNode() {
         guard let position = currentCameraPosition() else {
             showError("ARKit has no current camera frame. Look around until tracking resumes.")
             return
         }
 
-        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         recordedNodes.append(
             RecordedGraphNode(
-                type: type,
-                label: trimmed.isEmpty ? nil : trimmed,
+                type: .waypoint,
+                label: "Manual point",
                 position: position,
                 capturedAt: ISO8601DateFormatter().string(from: Date())
             )
         )
-        statusText = "Nodes: \(recordedNodes.count). Last: \(trimmed.isEmpty ? type.title : trimmed)."
-    }
-
-    func undoLastNode() {
-        guard !recordedNodes.isEmpty else { return }
-        recordedNodes.removeLast()
-        statusText = recordedNodes.isEmpty ? "No recorded nodes." : "Nodes: \(recordedNodes.count)."
+        statusText = "Manual point added. Path nodes: \(recordedNodes.count)."
     }
 
     func markTestAnchor() {
@@ -163,6 +162,45 @@ final class MapperViewModel: ObservableObject {
         guard let frame = arSession.currentFrame else { return nil }
         let translation = frame.camera.transform.columns.3
         return [translation.x, translation.y, translation.z]
+    }
+
+    private func startPathSampling() {
+        sampleWalkedPathIfNeeded()
+        pathSamplingTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self, self.isScanning else { return }
+            self.sampleWalkedPathIfNeeded()
+        }
+    }
+
+    private func stopPathSampling() {
+        pathSamplingTimer?.invalidate()
+        pathSamplingTimer = nil
+        lastSampledPosition = nil
+    }
+
+    private func sampleWalkedPathIfNeeded() {
+        guard let position = currentCameraPosition() else { return }
+        guard let previous = lastSampledPosition else {
+            appendWalkedNode(at: position)
+            return
+        }
+
+        let horizontalDistance = hypot(position[0] - previous[0], position[2] - previous[2])
+        guard horizontalDistance >= automaticNodeSpacingMeters else { return }
+        appendWalkedNode(at: position)
+    }
+
+    private func appendWalkedNode(at position: [Float]) {
+        recordedNodes.append(
+            RecordedGraphNode(
+                type: .waypoint,
+                label: nil,
+                position: position,
+                capturedAt: ISO8601DateFormatter().string(from: Date())
+            )
+        )
+        lastSampledPosition = position
+        statusText = "Scanning. Walked path: \(recordedNodes.count) nodes."
     }
 
     private func fallbackAnchor() -> TestAnchor {

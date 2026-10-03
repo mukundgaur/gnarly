@@ -5,75 +5,65 @@ struct ContentView: View {
     @StateObject private var mapper = MapperViewModel()
     @State private var zoneID = "zone-a"
     @State private var floorID = "ground"
-    @State private var nodeType: GraphNodeType = .hallway
-    @State private var nodeLabel = ""
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .top) {
             RoomCaptureContainer(mapper: mapper)
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(mapper.statusText)
-                    .font(.headline)
-
-                HStack {
-                    TextField("Zone ID", text: $zoneID)
-                    TextField("Floor ID", text: $floorID)
+            Text(mapper.statusText)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.top, 12)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Zone", text: $zoneID)
+                    TextField("Floor", text: $floorID)
                 }
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
 
-                Picker("Node type", selection: $nodeType) {
-                    ForEach([GraphNodeType.entrance, .hallway, .stairs, .destination]) { type in
-                        Text(type.title).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                TextField("Optional label (Room 204)", text: $nodeLabel)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-
-                HStack {
-                    Button("Finish room") { mapper.finishRoom() }
+                HStack(spacing: 8) {
+                    Button("Finish") { mapper.finishRoom() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!mapper.isScanning)
 
-                    Button("Add node") { mapper.addNode(type: nodeType, label: nodeLabel) }
+                    Button("Drop node") { mapper.dropManualNode() }
                         .buttonStyle(.bordered)
-                        .disabled(!mapper.canAddNode)
+                        .disabled(!mapper.canDropManualNode)
 
-                    Button("Undo") { mapper.undoLastNode() }
-                        .buttonStyle(.bordered)
-                        .disabled(mapper.recordedNodes.isEmpty)
-                }
-
-                HStack {
-                    Button("Mark test anchor") { mapper.markTestAnchor() }
+                    Button("Set cube") { mapper.markTestAnchor() }
                         .buttonStyle(.bordered)
                         .disabled(!mapper.canMarkAnchor)
 
-                    Button("Export package") { mapper.exportPackage(zoneID: zoneID, floorID: floorID) }
+                    Button("Export") { mapper.exportPackage(zoneID: zoneID, floorID: floorID) }
                         .buttonStyle(.borderedProminent)
                         .disabled(!mapper.canExport)
                 }
+                .font(.subheadline)
 
                 if let exportURL = mapper.exportURL {
                     ShareLink(item: exportURL) {
-                        Label("Share exported package", systemImage: "square.and.arrow.up")
+                        Label("Share package", systemImage: "square.and.arrow.up")
                     }
+                    .font(.subheadline)
+                } else {
+                    Text("Walked points save automatically; use Drop node only for a deliberate extra point.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-
-                Text("Scan with a LiDAR iPhone. RoomPlan supplies door, opening, stair, and room-section nodes. Optionally tap Add node only to label an entrance or destination such as Room 204.")
-                    .font(.footnote)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding()
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-            .padding()
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            .background(.ultraThinMaterial)
         }
         .alert("Mapper error", isPresented: $mapper.showsError) {
             Button("OK", role: .cancel) {}

@@ -25,7 +25,7 @@ enum BuildingGraphBuilder {
                     floor: floorID,
                     type: record.type.rawValue,
                     position: record.position,
-                    source: "recorded",
+                    source: "walked-path",
                     label: record.label,
                     roomPlanIdentifier: nil
                 )
@@ -94,7 +94,7 @@ enum BuildingGraphBuilder {
 
         var edges = RoomPlanVisibilityGraph.edges(nodes: nodes, room: room)
 
-        let recordedNodes = nodes.filter { $0.source == "recorded" }
+        let recordedNodes = nodes.filter { $0.source == "walked-path" }
         if recordedNodes.count >= 2 {
             for index in 0 ..< (recordedNodes.count - 1) {
                 let from = recordedNodes[index]
@@ -105,7 +105,7 @@ enum BuildingGraphBuilder {
                         to: to.id,
                         kind: edgeKind(from: from, to: to),
                         meters: distance(from.position, to.position),
-                        source: "recorded"
+                        source: "walked-path"
                     )
                 )
             }
@@ -120,12 +120,12 @@ enum BuildingGraphBuilder {
             floors: [floor],
             nodes: nodes,
             edges: edges,
-            notes: "Primary nodes are RoomPlan doors, openings, stairs, and sections. Visibility edges skip walls except at portals. Optional recorded taps add entrance/destination labels."
+            notes: "Walked-path nodes are sampled automatically as the mapper moves, with optional manual points, in capture order. RoomPlan doors, openings, stairs, and sections use visibility edges that skip walls except at portals."
         )
     }
 
     static func route(from graph: BuildingGraph, recordedCount: Int) -> RouteDocument? {
-        let waypoints = graph.nodes.filter { $0.source == "recorded" }
+        let waypoints = graph.nodes.filter { $0.source == "walked-path" }
         guard waypoints.count >= 2, recordedCount >= 2 else { return nil }
         return RouteDocument(
             schemaVersion: 1,
@@ -134,7 +134,7 @@ enum BuildingGraphBuilder {
             heightReference: graph.heightReference,
             waypoints: waypoints.map { RouteDocument.Waypoint(id: $0.id, position: $0.position) },
             capturedAt: graph.capturedAt,
-            notes: "Fallback walk-order path. Unity prefers A* over visibility edges in building.json / scan-features.json."
+            notes: "Walked path captured in mapper order. Unity can replace it with an A* path over the visibility graph."
         )
     }
 
@@ -142,7 +142,7 @@ enum BuildingGraphBuilder {
         if let label = record.label, let slug = slug(label), !slug.isEmpty {
             return slug
         }
-        return "\(record.type.rawValue)-\(index + 1)"
+        return "walk-\(index + 1)"
     }
 
     private static func slug(_ value: String) -> String? {
