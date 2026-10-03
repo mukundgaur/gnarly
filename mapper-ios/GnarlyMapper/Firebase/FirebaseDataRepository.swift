@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import Foundation
+import OSLog
 
 protocol FirebaseDataRepositoryProtocol {
     func createBuilding(_ building: Building) async throws
@@ -29,6 +30,11 @@ protocol FirebaseDataRepositoryProtocol {
         versionId: String
     ) async throws -> String
 
+    @discardableResult
+    func uploadZoneBuildingJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String
+    @discardableResult
+    func uploadZoneConnections(from localURL: URL, buildingId: String, versionId: String) async throws -> String
+
     func fetchActiveVersion(buildingId: String) async throws -> ActiveBuildingVersion
     func downloadBuildingJSON(buildingId: String, versionId: String) async throws -> URL
     func downloadWorldMap(buildingId: String, versionId: String, zoneId: String) async throws -> URL
@@ -41,6 +47,7 @@ protocol FirebaseDataRepositoryProtocol {
 }
 
 final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
+    private let uploadLogger = Logger(subsystem: "com.gnarly.mapper", category: "FirebaseUpload")
     private let firestore: Firestore
     private let storage: Storage
     private let cache: NavigationFileCache
@@ -178,6 +185,34 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
             to: versionReference(buildingId: buildingId, versionId: versionId),
             operation: "store buildingJsonPath"
         )
+        try await cacheUploadedFile(localURL, storagePath: storagePath)
+        return storagePath
+    }
+
+    @discardableResult
+    func uploadZoneBuildingJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String {
+        try validateNonemptyFile(localURL)
+        let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+        guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
+        let storagePath = try FirebaseStoragePaths.zoneBuildingJSON(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
+        uploadLogger.info("Uploading zone graph (\(jsonData.count) bytes) to Storage")
+        try await uploadData(jsonData, storagePath: storagePath, contentType: "application/json")
+        uploadLogger.info("Zone graph Storage upload completed; saving path in Firestore")
+        let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
+        try await update(["buildingJsonPath": storagePath], to: zoneRef, operation: "store zone buildingJsonPath")
+        uploadLogger.info("Zone graph Firestore path saved; copying to local cache")
+        try await cacheUploadedFile(localURL, storagePath: storagePath)
+        uploadLogger.info("Zone graph upload fully completed")
+        return storagePath
+    }
+
+    @discardableResult
+    func uploadZoneConnections(from localURL: URL, buildingId: String, versionId: String) async throws -> String {
+        try validateNonemptyFile(localURL)
+        let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+        guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
+        let storagePath = try FirebaseStoragePaths.zoneConnections(buildingId: buildingId, versionId: versionId)
+        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
         try await cacheUploadedFile(localURL, storagePath: storagePath)
         return storagePath
     }

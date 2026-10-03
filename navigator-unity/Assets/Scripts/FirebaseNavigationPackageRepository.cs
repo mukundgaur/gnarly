@@ -22,6 +22,7 @@ public sealed class FirebaseNavigationPackageRepository
 
     public string UserId { get; private set; }
     public bool IsAuthenticated => !string.IsNullOrEmpty(idToken);
+    public bool HasSavedSession => FirebaseSessionStore.HasRefreshToken;
     public static string ExpectedConfigPath => Path.Combine(Application.streamingAssetsPath, ConfigFileName);
 
     public FirebaseNavigationPackageRepository(FirebaseNavigatorConfig config)
@@ -89,6 +90,38 @@ public sealed class FirebaseNavigationPackageRepository
         refreshToken = response.refreshToken;
         UserId = response.localId;
         tokenExpiresAtUtc = DateTime.UtcNow.AddSeconds(ParseLifetime(response.expiresIn));
+        FirebaseSessionStore.SaveRefreshToken(refreshToken);
+    }
+
+    public async Task<bool> TryRestoreSessionAsync()
+    {
+        EnsureConfigured();
+        var savedRefreshToken = FirebaseSessionStore.LoadRefreshToken();
+        if (string.IsNullOrEmpty(savedRefreshToken)) return false;
+
+        refreshToken = savedRefreshToken;
+        idToken = null;
+        UserId = null;
+        tokenExpiresAtUtc = DateTime.MinValue;
+        try
+        {
+            await RefreshTokenAsync();
+            return true;
+        }
+        catch
+        {
+            ForgetSavedSession();
+            return false;
+        }
+    }
+
+    public void ForgetSavedSession()
+    {
+        idToken = null;
+        refreshToken = null;
+        UserId = null;
+        tokenExpiresAtUtc = DateTime.MinValue;
+        FirebaseSessionStore.ClearRefreshToken();
     }
 
     public async Task<DownloadedNavigationPackage> DownloadActivePackageAsync(string buildingId, string zoneId)
@@ -105,10 +138,10 @@ public sealed class FirebaseNavigationPackageRepository
         var zonePath = $"{versionPath}/zones/{zoneId}";
         var zone = await GetDocumentAsync(zonePath, "zone metadata");
 
-        var expectedBuildingPath = $"buildings/{buildingId}/{versionId}/building.json";
+        var expectedBuildingPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/building.json";
         var expectedWorldMapPath = $"buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin";
         RequireExpectedPath(expectedBuildingPath,
-            RequiredString(version.fields?.buildingJsonPath, "buildingJsonPath", versionPath), "buildingJsonPath");
+            RequiredString(zone.fields?.buildingJsonPath, "buildingJsonPath", zonePath), "buildingJsonPath");
         RequireExpectedPath(expectedWorldMapPath,
             RequiredString(zone.fields?.worldMapPath, "worldMapPath", zonePath), "worldMapPath");
 
@@ -218,6 +251,13 @@ public sealed class FirebaseNavigationPackageRepository
         if (string.IsNullOrEmpty(refreshToken))
             throw new FirebaseNavigationException("The Firebase session expired. Sign in again.");
 
+        await RefreshTokenAsync();
+    }
+
+    async Task RefreshTokenAsync()
+    {
+        if (string.IsNullOrEmpty(refreshToken))
+            throw new FirebaseNavigationException("The Firebase session expired. Sign in again.");
         EnsureConfigured();
         var url = $"https://securetoken.googleapis.com/v1/token?key={Uri.EscapeDataString(config.apiKey)}";
         var form = "grant_type=refresh_token&refresh_token=" + UnityWebRequest.EscapeURL(refreshToken);
@@ -230,6 +270,7 @@ public sealed class FirebaseNavigationPackageRepository
         if (!string.IsNullOrEmpty(response.refresh_token)) refreshToken = response.refresh_token;
         if (!string.IsNullOrEmpty(response.user_id)) UserId = response.user_id;
         tokenExpiresAtUtc = DateTime.UtcNow.AddSeconds(ParseLifetime(response.expires_in));
+        FirebaseSessionStore.SaveRefreshToken(refreshToken);
     }
 
     async Task<FirestoreDocument> GetDocumentAsync(string documentPath, string operation)

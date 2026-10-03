@@ -7,6 +7,15 @@ enum FirebaseStoragePaths {
         try base(buildingId: buildingId, versionId: versionId) + "/building.json"
     }
 
+    static func zoneBuildingJSON(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try validate(zoneId, field: "zoneId")
+        return try base(buildingId: buildingId, versionId: versionId) + "/zones/\(zoneId)/building.json"
+    }
+
+    static func zoneConnections(buildingId: String, versionId: String) throws -> String {
+        try base(buildingId: buildingId, versionId: versionId) + "/zone-connections.json"
+    }
+
     static func scanJSON(buildingId: String, versionId: String) throws -> String {
         try base(buildingId: buildingId, versionId: versionId) + "/scan.json"
     }

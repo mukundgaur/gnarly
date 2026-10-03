@@ -1,15 +1,18 @@
 import ARKit
 import FirebaseAuth
 import Foundation
+import OSLog
 import RoomPlan
 
 @MainActor
 final class MapperViewModel: ObservableObject {
+    private let uploadLogger = Logger(subsystem: "com.gnarly.mapper", category: "PackageUpload")
     @Published private(set) var statusText = "Preparing AR session…"
     @Published private(set) var isScanning = false
     @Published private(set) var exportURL: URL?
     @Published private(set) var recordedNodes: [RecordedGraphNode] = []
     @Published private(set) var isUploading = false
+    private var uploadAttemptID: UUID?
     @Published var showsError = false
     @Published private(set) var errorMessage = ""
 
@@ -164,36 +167,96 @@ final class MapperViewModel: ObservableObject {
         }
     }
 
-    func uploadPackage(buildingID rawBuildingID: String, zoneID rawZoneID: String, floorID rawFloorID: String) {
+    func uploadPackage(buildingID rawBuildingID: String, versionID rawVersionID: String, zoneID rawZoneID: String, floorID rawFloorID: String, startNextZone: Bool = false, onNextZone: @escaping (String) -> Void = { _ in }) {
         guard let packageURL = exportURL else { showError("Export the scan before uploading it."); return }
         guard Auth.auth().currentUser != nil else { showError("Connect Firebase and sign in before uploading."); return }
         let buildingID = rawBuildingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let versionID = rawVersionID.trimmingCharacters(in: .whitespacesAndNewlines)
         let zoneID = rawZoneID.trimmingCharacters(in: .whitespacesAndNewlines)
         let floorID = rawFloorID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !buildingID.isEmpty, !zoneID.isEmpty, !floorID.isEmpty else { showError("Building, zone, and floor IDs are required."); return }
+        guard !buildingID.isEmpty, !versionID.isEmpty, !zoneID.isEmpty, !floorID.isEmpty else { showError("Building, version, zone, and floor IDs are required."); return }
 
         isUploading = true
-        Task {
+        let attemptID = UUID()
+        uploadAttemptID = attemptID
+        let uploadTask = Task { @MainActor in
             do {
                 let repository = try FirebaseDataRepository()
-                let versionID = "v-\(Int(Date().timeIntervalSince1970))"
                 let buildingJSON = packageURL.appendingPathComponent("building.json")
                 let worldMap = packageURL.appendingPathComponent("worldmap-\(zoneID).bin")
                 guard FileManager.default.fileExists(atPath: buildingJSON.path), FileManager.default.fileExists(atPath: worldMap.path) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
+                statusText = "Checking Firebase building…"
                 do {
                     try await repository.createBuilding(Building(id: buildingID, name: buildingID, activeVersion: nil, status: .draft, createdAt: nil, updatedAt: nil))
                 } catch FirebaseDataError.documentAlreadyExists { }
+                try Task.checkCancellation()
+                statusText = "Saving version \(versionID)…"
                 try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .draft, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: nil), buildingId: buildingID)
+                try Task.checkCancellation()
+                statusText = "Saving floor \(floorID)…"
                 try await repository.saveFloor(Floor(id: floorID, name: floorID, story: 0, elevation: 0), buildingId: buildingID, versionId: versionID)
-                try await repository.saveZone(Zone(id: zoneID, name: zoneID, floorId: floorID, worldMapPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
-                try await repository.uploadBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID)
+                try Task.checkCancellation()
+                statusText = "Saving zone \(zoneID)…"
+                try await repository.saveZone(Zone(id: zoneID, name: zoneID, floorId: floorID, worldMapPath: nil, buildingJsonPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
+                try Task.checkCancellation()
+                statusText = "Uploading zone graph…"
+                try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try Task.checkCancellation()
+                statusText = "Uploading AR world map…"
                 try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try Task.checkCancellation()
+                statusText = "Publishing building version…"
                 try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
+                try Task.checkCancellation()
                 try await repository.updateBuilding(Building(id: buildingID, name: buildingID, activeVersion: versionID, status: .active, createdAt: nil, updatedAt: nil))
-                statusText = "Uploaded \(buildingID)/\(versionID). Navigator can download it now."
-            } catch { showError("Firebase upload failed: \(error.localizedDescription)") }
+                try Task.checkCancellation()
+                guard uploadAttemptID == attemptID else { return }
+                statusText = "Uploaded zone \(zoneID) to \(buildingID)/\(versionID). Add more zones with this same version."
+                if startNextZone {
+                    let nextZone = String((Int(zoneID) ?? 0) + 1)
+                    onNextZone(nextZone)
+                    startScan()
+                }
+            } catch {
+                if uploadAttemptID == attemptID, !(error is CancellationError) {
+                    uploadLogger.error("Package upload failed: \(error.localizedDescription, privacy: .public)")
+                    showError("Firebase upload failed: \(error.localizedDescription)")
+                }
+            }
+            if uploadAttemptID == attemptID {
+                uploadAttemptID = nil
+                isUploading = false
+            }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            guard uploadAttemptID == attemptID else { return }
+            uploadTask.cancel()
+            uploadLogger.error("Package upload timed out at step: \(self.statusText, privacy: .public)")
+            uploadAttemptID = nil
+            isUploading = false
+            showError("Firebase did not finish the upload within 45 seconds. Check the iPhone’s Wi-Fi or cellular connection, then retry. A Firebase write already in progress may finish in the background.")
+        }
+    }
+
+    func uploadZoneConnections(buildingID rawBuildingID: String, versionID rawVersionID: String, json: String) {
+        guard Auth.auth().currentUser != nil else { showError("Connect Firebase and sign in before uploading."); return }
+        let buildingID = rawBuildingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let versionID = rawVersionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !buildingID.isEmpty, !versionID.isEmpty else { showError("Building and version IDs are required."); return }
+        guard let data = json.data(using: .utf8), (try? JSONSerialization.jsonObject(with: data)) != nil else { showError("Zone connections must be valid JSON."); return }
+        isUploading = true
+        Task {
+            do {
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent("zone-connections-\(UUID().uuidString).json")
+                try data.write(to: file, options: .atomic)
+                defer { try? FileManager.default.removeItem(at: file) }
+                let repository = try FirebaseDataRepository()
+                _ = try await repository.uploadZoneConnections(from: file, buildingId: buildingID, versionId: versionID)
+                statusText = "Zone connections uploaded for \(buildingID)/\(versionID)."
+            } catch { showError("Zone connection upload failed: \(error.localizedDescription)") }
             isUploading = false
         }
     }

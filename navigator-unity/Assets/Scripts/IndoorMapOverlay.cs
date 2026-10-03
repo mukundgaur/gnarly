@@ -24,7 +24,6 @@ public class IndoorMapOverlay : MonoBehaviour
     RectTransform expandedCard;
     Transform routeRoot;
     Transform userMarker;
-    Material graphMaterial;
     Material routeMaterial;
     Vector3 center;
     float span = 8f;
@@ -46,7 +45,6 @@ public class IndoorMapOverlay : MonoBehaviour
         arCamera = camera;
         BuildMapRoot();
         CalculateMapBounds(scan);
-        BuildGraph(graph);
         BuildUserMarker();
         FrameCamera();
         BuildUi();
@@ -70,6 +68,18 @@ public class IndoorMapOverlay : MonoBehaviour
         for (var i = 0; i < points.Length; i++)
             points[i] = route.SessionSpacePosition(i) + Vector3.up * 0.08f;
         line.SetPositions(points);
+
+        foreach (var point in points)
+        {
+            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            marker.name = "RoutePoint";
+            marker.transform.SetParent(routeRoot, false);
+            marker.transform.localPosition = point;
+            marker.transform.localScale = Vector3.one * 0.14f;
+            Destroy(marker.GetComponent<Collider>());
+            marker.GetComponent<Renderer>().sharedMaterial = routeMaterial;
+            SetLayer(marker, MapLayer);
+        }
     }
 
     void Update()
@@ -96,7 +106,6 @@ public class IndoorMapOverlay : MonoBehaviour
         routeRoot.SetParent(mapRoot, false);
         SetLayer(routeRoot.gameObject, MapLayer);
 
-        graphMaterial = MakeMaterial(new Color(0.42f, 0.75f, 0.85f, 0.35f));
         routeMaterial = MakeMaterial(new Color(0.08f, 0.95f, 0.82f, 1f));
     }
 
@@ -132,23 +141,6 @@ public class IndoorMapOverlay : MonoBehaviour
         }
         center = (min + max) * 0.5f;
         span = Mathf.Max(4f, Mathf.Max(max.x - min.x, max.z - min.z) + 2f);
-    }
-
-    void BuildGraph(Pathfinding.Graph graph)
-    {
-        if (graph == null) return;
-        foreach (var node in graph.Nodes)
-        {
-            if (node.position == null || node.position.Length != 3) continue;
-            var marker = GameObject.CreatePrimitive(node.type == "destination" ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
-            marker.name = "MapNode-" + node.id;
-            marker.transform.SetParent(mapRoot, false);
-            marker.transform.localPosition = ToUnity(node.position) + Vector3.up * 0.12f;
-            marker.transform.localScale = node.type == "destination" ? new Vector3(0.22f, 0.34f, 0.22f) : Vector3.one * 0.1f;
-            Destroy(marker.GetComponent<Collider>());
-            marker.GetComponent<Renderer>().sharedMaterial = graphMaterial;
-            SetLayer(marker, MapLayer);
-        }
     }
 
     void BuildUserMarker()
@@ -190,15 +182,14 @@ public class IndoorMapOverlay : MonoBehaviour
         scaler.referenceResolution = new Vector2(1170, 2532);
         var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
-        compactCard = CreateRect("MiniMap", canvasObject.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-354, -430), new Vector2(-28, -104));
+        compactCard = CreateRect("MiniMap", canvasObject.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-314, -374), new Vector2(-22, -82));
         compactCard.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.93f);
         AddMapImage(compactCard, new Vector2(12, 12), new Vector2(-12, -50));
         AddText(compactCard, "LIVE POSITION · TAP TO EXPAND", 18, new Vector2(14, 8), new Vector2(-14, 40), new Color(0.45f, 0.83f, 0.95f), font);
         compactCard.gameObject.AddComponent<Button>().onClick.AddListener(OpenExpandedModel);
 
-        expandedCard = CreateRect("ExpandedMap", canvasObject.transform, Vector2.zero, Vector2.one, new Vector2(26, 120), new Vector2(-26, -110));
-        expandedCard.gameObject.AddComponent<Image>().color = new Color(0.015f, 0.035f, 0.06f, 0.98f);
-        AddMapImage(expandedCard, new Vector2(20, 20), new Vector2(-20, -94));
+        expandedCard = CreateRect("ExpandedMap", canvasObject.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-430, -430), new Vector2(430, 430));
+        AddMapImage(expandedCard, Vector2.zero, new Vector2(0, -74));
         AddText(expandedCard, "NAVIGATION MAP  ·  YOUR POSITION IS MINT", 25, new Vector2(28, 14), new Vector2(-190, 74), new Color(0.45f, 0.83f, 0.95f), font);
         var close = CreateRect("Close", expandedCard, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-150, 14), new Vector2(-24, 74));
         close.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.31f, 0.4f, 1f);
@@ -285,7 +276,6 @@ public class IndoorMapOverlay : MonoBehaviour
         if (mapCamera != null) Destroy(mapCamera.gameObject);
         if (compactCard != null) Destroy(compactCard.root.gameObject);
         if (renderTexture != null) renderTexture.Release();
-        if (graphMaterial != null) Destroy(graphMaterial);
         if (routeMaterial != null) Destroy(routeMaterial);
     }
 

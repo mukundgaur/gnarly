@@ -23,6 +23,7 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
     bool visible;
     bool busy;
     bool hasCachedPackage;
+    bool hasSavedSession;
     System.Collections.Generic.List<FirebaseScanChoice> library;
 
     public void Begin(
@@ -40,11 +41,11 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         var configured = FirebaseNavigationPackageRepository.TryLoadConfig(out firebaseConfig, out var configError);
         repository = new FirebaseNavigationPackageRepository(firebaseConfig);
         visible = true;
-        status = configured
-            ? "Sign in to download the active Firebase navigation package."
-            : configError;
+        status = configured ? "Checking saved Firebase session…" : configError;
         RefreshCacheState();
+        hasSavedSession = configured && repository.HasSavedSession;
         ReportStatus(status);
+        if (hasSavedSession) _ = RestoreSavedSessionAsync();
     }
 
     void OnGUI()
@@ -100,6 +101,13 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         GUI.enabled = !busy && hasCachedPackage;
         if (GUILayout.Button("Use downloaded package offline", GUILayout.Height(82)))
             UseCachedPackage();
+        GUI.enabled = !busy && hasSavedSession;
+        if (GUILayout.Button("Forget saved login", GUILayout.Height(56)))
+        {
+            repository.ForgetSavedSession();
+            hasSavedSession = false;
+            SetStatus("Saved Firebase login removed.");
+        }
         GUI.enabled = true;
         GUILayout.EndArea();
 
@@ -119,6 +127,7 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
             SetStatus("Signing in to Firebase…");
             await repository.SignInAsync(email, password);
             password = "";
+            hasSavedSession = repository.HasSavedSession;
             SetStatus($"Signed in as {repository.UserId}. Loading scan library…");
             library = await repository.ListAvailableScansAsync();
             SetStatus(library.Count == 0 ? "No published scans are available." : "Choose a scan to download.");
@@ -135,6 +144,31 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         {
             busy = false;
         }
+    }
+
+    async Task RestoreSavedSessionAsync()
+    {
+        busy = true;
+        try
+        {
+            SetStatus("Restoring saved Firebase session…");
+            if (!await repository.TryRestoreSessionAsync())
+            {
+                hasSavedSession = false;
+                SetStatus("Sign in to download the active Firebase navigation package.");
+                return;
+            }
+
+            SetStatus($"Signed in as {repository.UserId}. Loading scan library…");
+            library = await repository.ListAvailableScansAsync();
+            SetStatus(library.Count == 0 ? "No published scans are available." : "Choose a scan to download.");
+        }
+        catch (Exception exception)
+        {
+            hasSavedSession = false;
+            SetStatus($"Saved session could not be restored: {exception.Message}");
+        }
+        finally { busy = false; }
     }
 
     async Task DownloadSelectionAsync(FirebaseScanChoice scan)

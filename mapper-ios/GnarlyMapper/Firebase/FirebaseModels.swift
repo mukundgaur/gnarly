@@ -41,6 +41,7 @@ struct Zone: Codable, Identifiable {
     var name: String
     var floorId: String
     var worldMapPath: String?
+    var buildingJsonPath: String?
     var relocalizationHint: String
     var startNodeId: String
 }
