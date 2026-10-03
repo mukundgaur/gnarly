@@ -2,7 +2,8 @@ name: GnarlyMapper
 options:
   bundleIdPrefix: com.gnarly
   deploymentTarget:
-    iOS: "16.0"
+    # RoomCaptureView(frame:arSession:) requires iOS 17.
+    iOS: "17.0"
 targets:
   GnarlyMapper:
     type: application

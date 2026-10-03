@@ -10,7 +10,7 @@ This is the native Swift/SwiftUI mapper proof-of-concept app. See [SETUP.md](SET
 - Export one known test position in the same coordinate system.
 - Export a package from the app’s Documents directory and share it with the Unity engineer. After transfer, they may place a copy in `../shared/local-packages/zone-a/` for their local Unity build.
 
-Target a LiDAR-capable iPhone running iOS 16 or later. Before testing, record the selected Xcode/iOS versions in [../docs/integration-notes.md](../docs/integration-notes.md).
+Target a LiDAR-capable iPhone running iOS 17 or later. The shared-`ARSession` RoomPlan integration requires iOS 17. Before testing, record the selected Xcode/iOS versions in [../docs/integration-notes.md](../docs/integration-notes.md).
 
 ## Export checklist
 
