@@ -101,6 +101,8 @@ public class LidarPulseView : MonoBehaviour
     float lastObstacleSampleAt = float.NegativeInfinity;
     bool hapticsSilent = true;
     int lastSentHaptic = -1;
+    float lastHapticSentAt = float.NegativeInfinity;
+    const float HapticKeepAliveInterval = 0.25f;
 
     public bool IsOn => isOn;
 
@@ -473,8 +475,12 @@ public class LidarPulseView : MonoBehaviour
         }
 
         var milli = Mathf.RoundToInt(smoothedIntensity * 100f);
-        if (milli == lastSentHaptic) return;
+        // Core Haptics can stop while the app is interrupted or the engine is reset. Keep sending
+        // a steady obstacle intensity a few times per second so the native player can restart,
+        // even when the measured value has not changed.
+        if (milli == lastSentHaptic && Time.unscaledTime - lastHapticSentAt < HapticKeepAliveInterval) return;
         lastSentHaptic = milli;
+        lastHapticSentAt = Time.unscaledTime;
         PathObstacleHaptics.SetIntensity(milli / 100f);
     }
 
@@ -483,6 +489,7 @@ public class LidarPulseView : MonoBehaviour
         targetIntensity = 0f;
         smoothedIntensity = 0f;
         lastSentHaptic = -1;
+        lastHapticSentAt = float.NegativeInfinity;
         if (hapticsSilent) return;
         hapticsSilent = true;
         PathObstacleHaptics.Stop();

@@ -13,7 +13,7 @@ public class RouteNavigator : MonoBehaviour
     [Tooltip("Height change (m) applied when route.json uses heightReference \"device\", to move phone-height waypoints down to the floor.")]
     [SerializeField] float deviceHeightToFloor = -1.3f;
     [Tooltip("Horizontal distance (m) at which an intermediate waypoint counts as reached.")]
-    [SerializeField] float reachRadius = 1f;
+    [SerializeField] float reachRadius = 0.3f;
     [Tooltip("Horizontal distance (m) to the final waypoint that counts as arrival.")]
     [SerializeField] float arriveRadius = 0.75f;
     [Tooltip("Fraction of the screen edge treated as out of view.")]
@@ -228,6 +228,10 @@ public class RouteNavigator : MonoBehaviour
         for (var i = 0; i <= last; i++)
         {
             var isDestination = i == last;
+            var isGuidancePoint = Route.IsGuidanceWaypoint(route.waypoints[i]);
+            // Interpolated guidance points make the arrow and corridor precise without filling
+            // the room with a visible marble every half metre.
+            if (isGuidancePoint && !isDestination) continue;
             var marker = GameObject.CreatePrimitive(isDestination ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
             marker.name = isDestination ? "RouteDestination" : $"Waypoint-{route.waypoints[i].id}";
             Destroy(marker.GetComponent<Collider>());

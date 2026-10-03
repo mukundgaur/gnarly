@@ -291,7 +291,7 @@ public sealed class FirebaseNavigationPackageRepository
     async Task<FirestoreDocument> GetDocumentAsync(string documentPath, string operation)
     {
         await EnsureFreshTokenAsync();
-        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{documentPath}";
+        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{EscapeFirestorePath(documentPath)}";
         using var request = UnityWebRequest.Get(url);
         request.SetRequestHeader("Authorization", "Bearer " + idToken);
         var responseText = await SendForTextAsync(request, "Firestore " + operation);
@@ -303,7 +303,7 @@ public sealed class FirebaseNavigationPackageRepository
 
     async Task<List<FirestoreDocument>> ListDocumentsAsync(string collectionPath, string operation)
     {
-        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{collectionPath}";
+        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{EscapeFirestorePath(collectionPath)}";
         using var request = UnityWebRequest.Get(url);
         request.SetRequestHeader("Authorization", "Bearer " + idToken);
         var response = JsonUtility.FromJson<FirestoreListResponse>(await SendForTextAsync(request, "Firestore " + operation));
@@ -483,8 +483,17 @@ public sealed class FirebaseNavigationPackageRepository
         if (string.IsNullOrWhiteSpace(value) || value == "." || value == "..")
             throw new ArgumentException($"{field} is required.");
         foreach (var character in value)
-            if (!(char.IsLetterOrDigit(character) || character == '-' || character == '_' || character == '.'))
-                throw new ArgumentException($"{field} may only contain letters, numbers, '.', '-' and '_'.");
+            if (character == '/' || character == '\\' || char.IsControl(character))
+                throw new ArgumentException($"{field} cannot contain '/', '\\', or control characters.");
+    }
+
+    /// <summary>Escapes each Firestore path segment while preserving collection/document separators.</summary>
+    static string EscapeFirestorePath(string path)
+    {
+        var segments = path.Split('/');
+        for (var index = 0; index < segments.Length; index++)
+            segments[index] = Uri.EscapeDataString(segments[index]);
+        return string.Join("/", segments);
     }
 
     void EnsureConfigured()
