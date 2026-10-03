@@ -35,4 +35,14 @@ Do not restart the AR session between scanning, recording nodes, and exporting.
 - The anchor, route, and graph use the same `zoneId` as the world map.
 - Share the generated package directory; do not commit real capture artifacts.
 
+## Multi-zone buildings (floors and stairs)
+
+A zone is one scan with its own ARWorldMap. Scan each floor area as one zone and each staircase as its own zone (for example `floor-1`, `stairs-a`, `floor-2`). The Unity navigator plans A* across zones using `zone-connections.json` ([schema](../shared/zone-connections.schema.json), [example](../shared/examples/zone-connections.example.json)). Each connection links two nodes that are physically next to each other in different zones, and has A* weight 1.
+
+Still to do in the mapper:
+
+- At every place where zones meet, record a labeled node in **both** scans. For example, in `floor-1` add a node labeled `Stairs bottom` beside the staircase, and in `stairs-a` add `Landing bottom` at the same spot. Labels become stable node IDs (`stairs-bottom`, `landing-bottom`); RoomPlan-derived IDs such as `stairs-1a2b3c4d` change on every scan.
+- Export or author `zone-connections.json` that links those IDs. Until the mapper generates it, write it by hand.
+- Firebase stores only one `building.json` per version. Multi-zone navigation through Firebase also needs per-zone `building.json` files and `zone-connections.json` uploaded with the version. Until then, multi-zone navigation works only from local `StreamingAssets` packages.
+
 `building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

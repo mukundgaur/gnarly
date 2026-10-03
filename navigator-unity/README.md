@@ -50,6 +50,26 @@ Both files are downloaded to `Application.persistentDataPath/navigation-cache`. 
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
 
+## Multi-zone routes (floors and stairs)
+
+A zone is one scan with its own ARWorldMap; a staircase is its own zone. To route between zones, place each zone's package in its own folder and add `zone-connections.json` ([schema](../shared/zone-connections.schema.json)):
+
+```text
+Assets/StreamingAssets/
+  zone-connections.json
+  floor-1/   worldmap-floor-1.bin, building.json, scan-features.json, …
+  stairs-a/  worldmap-stairs-a.bin, building.json, …
+  floor-2/   …
+```
+
+The `Zone Id` field on `RelocalizationController` is the zone the user starts in. The app:
+
+1. Builds each zone's graph, merges them under `zoneId/nodeId` keys, and adds every connection as a bidirectional edge with weight 1 (`Pathfinding.ZoneTransferCost`). The A* heuristic is straight-line distance within a zone and 0 across zones, because coordinates from different world maps are not comparable.
+2. Starts A* from the nearest node in the current zone. Destinations from every zone are listed, labeled with their zone.
+3. Splits the path into one leg per zone and draws only the current leg. On arriving at the leg's connector node, it applies the next zone's world map, shows **Entering &lt;zone&gt;… Look around**, and draws the next leg after relocalizing. **Reset map** relocalizes in the current zone and resumes the route.
+
+Multi-zone routing uses local `StreamingAssets` packages. The Firebase package holds one zone, so with `useFirebasePackages` the route stays inside that zone until the mapper uploads per-zone graphs and connections.
+
 ## Behavior
 
 1. Firebase login and active-package download, or selection of a previously downloaded offline package.
@@ -65,6 +85,6 @@ ARKit positions are converted to Unity by negating Z (right-handed to left-hande
 - `Assets/Scripts/FirebaseNavigationPackageRepository.cs`: Firebase email/password authentication, Firestore metadata reads, Storage downloads, path validation, and atomic offline cache.
 - `Assets/Scripts/FirebaseNavigationPackageLoader.cs`: login/building/zone UI and offline-package selection.
 - `Assets/Scripts/RouteNavigator.cs`: path ribbon, waypoint markers, off-screen turn arrow.
-- `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections and A*.
+- `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections, multi-zone graph merging, and A*.
 
 Commit `Assets/`, `Packages/`, and `ProjectSettings/` only.

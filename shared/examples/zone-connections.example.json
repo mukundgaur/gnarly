@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "connections": [
+    {
+      "from": { "zoneId": "floor-1", "nodeId": "stairs-bottom" },
+      "to": { "zoneId": "stairs-a", "nodeId": "landing-bottom" }
+    },
+    {
+      "from": { "zoneId": "stairs-a", "nodeId": "landing-top" },
+      "to": { "zoneId": "floor-2", "nodeId": "stairs-top" }
+    }
+  ],
+  "notes": "Illustrative. floor-1 and floor-2 are floor scans; stairs-a is the staircase scanned as its own zone. Each pair of nodes is physically next to each other."
+}

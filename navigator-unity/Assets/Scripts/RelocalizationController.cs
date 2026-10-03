@@ -18,10 +18,21 @@ using UnityEngine.InputSystem.UI;
 /// <summary>
 /// Loads the mapper's ARWorldMap, waits for ARKit to relocalize, then places the test cube
 /// and routes with A* over the RoomPlan visibility graph (scan-features.json / building.json).
+/// With zone-connections.json, A* spans zones (e.g. floor → stairs → floor); each zone has its own
+/// world map, so the route is followed one zone leg at a time and the map is switched at connectors.
 /// </summary>
 public class RelocalizationController : MonoBehaviour
 {
     enum State { WaitingForPackage, WaitingForSession, Locating, Located, TrackingLost, Failed }
+
+    sealed class ZonePackage
+    {
+        public string directory;
+        public Pathfinding.ScanFeatures scan;
+        public Pathfinding.Graph graph;
+    }
+
+    const string ZoneConnectionsFileName = "zone-connections.json";
 
     [SerializeField] ARSession session;
     [SerializeField] XROrigin origin;
@@ -46,8 +57,13 @@ public class RelocalizationController : MonoBehaviour
     float normalTrackingStartedAt = -1f;
     TestAnchor anchor;
     Route fallbackRoute;
+    string currentZoneId;
+    bool navigationLoaded;
+    readonly Dictionary<string, ZonePackage> zonePackages = new Dictionary<string, ZonePackage>();
+    /// <summary>All zones, keyed by <see cref="Pathfinding.ZoneKey"/>, joined by zone connections.</summary>
     Pathfinding.Graph navigationGraph;
-    Pathfinding.ScanFeatures loadedScan;
+    List<Pathfinding.RouteLeg> activeLegs;
+    int activeLegIndex;
     GameObject cube;
     Text statusText;
     Text statusEyebrow;
@@ -59,7 +75,19 @@ public class RelocalizationController : MonoBehaviour
     ARWorldMap? appliedWorldMap;
 #endif
 
-    string PackageDirectory => packageDirectory ?? Path.Combine(Application.streamingAssetsPath, zoneId);
+    /// <summary>
+    /// The start zone comes from the selected package (Firebase or StreamingAssets). Other zones are
+    /// read from StreamingAssets/&lt;zoneId&gt;/; the Firebase package currently holds one zone only.
+    /// </summary>
+    string ZoneDirectory(string zone)
+    {
+        if (zone == zoneId && packageDirectory != null) return packageDirectory;
+        return useFirebasePackages ? null : Path.Combine(Application.streamingAssetsPath, zone);
+    }
+
+    string ZoneConnectionsPath => useFirebasePackages
+        ? Path.Combine(packageDirectory ?? "", ZoneConnectionsFileName)
+        : Path.Combine(Application.streamingAssetsPath, ZoneConnectionsFileName);
 
     void Awake()
     {
@@ -75,6 +103,7 @@ public class RelocalizationController : MonoBehaviour
 
     void Start()
     {
+        currentZoneId = zoneId;
         if (useFirebasePackages)
         {
             SetStatus("Preparing Firebase navigation package…");
@@ -98,7 +127,7 @@ public class RelocalizationController : MonoBehaviour
                 if (ARSession.state == ARSessionState.Unsupported)
                     Fail("This device does not support ARKit.");
                 else if (ARSession.state == ARSessionState.SessionTracking)
-                    LoadAndApplyMap();
+                    LoadAndApplyZoneMap();
                 break;
 
             case State.Locating:
@@ -133,7 +162,13 @@ public class RelocalizationController : MonoBehaviour
                 }
                 else if (navigator != null && navigator.IsActive)
                 {
-                    SetStatus(navigator.StatusMessage);
+                    if (navigator.HasArrived && activeLegs != null && activeLegIndex < activeLegs.Count - 1)
+                    {
+                        activeLegIndex++;
+                        SwitchZone(activeLegs[activeLegIndex].zoneId);
+                    }
+                    else
+                        SetStatus(LegStatus());
                 }
                 break;
 
@@ -152,37 +187,88 @@ public class RelocalizationController : MonoBehaviour
         ARSession.state == ARSessionState.SessionTracking &&
         ARSession.notTrackingReason == NotTrackingReason.None;
 
-    void LoadAndApplyMap()
+    void LoadNavigationData()
     {
-        try
+        zonePackages.Clear();
+        var connectionsPath = ZoneConnectionsPath;
+        var connections = File.Exists(connectionsPath)
+            ? Pathfinding.ParseConnections(File.ReadAllText(connectionsPath))
+            : null;
+
+        var zoneIds = new List<string> { zoneId };
+        if (connections != null)
         {
-            var anchorPath = Path.Combine(PackageDirectory, "test-anchor.json");
-            anchor = File.Exists(anchorPath)
-                ? TestAnchor.Parse(File.ReadAllText(anchorPath), zoneId)
-                : null;
-            var routePath = Path.Combine(PackageDirectory, "route.json");
-            fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), zoneId) : null;
+            foreach (var connection in connections.connections)
+            {
+                if (!zoneIds.Contains(connection.from.zoneId)) zoneIds.Add(connection.from.zoneId);
+                if (!zoneIds.Contains(connection.to.zoneId)) zoneIds.Add(connection.to.zoneId);
+            }
+        }
+
+        foreach (var zone in zoneIds)
+        {
+            var directory = ZoneDirectory(zone);
+            if (directory == null || !Directory.Exists(directory))
+            {
+                Debug.LogWarning($"[Gnarly] No package directory for zone '{zone}'; routes through it are unavailable.");
+                continue;
+            }
 
             Pathfinding.ScanFeatures scan = null;
             Pathfinding.BuildingDocument building = null;
-            var scanPath = Path.Combine(PackageDirectory, "scan-features.json");
+            var scanPath = Path.Combine(directory, "scan-features.json");
             if (File.Exists(scanPath))
                 scan = Pathfinding.ParseScan(File.ReadAllText(scanPath));
-            var buildingPath = Path.Combine(PackageDirectory, "building.json");
+            var buildingPath = Path.Combine(directory, "building.json");
             if (File.Exists(buildingPath))
                 building = Pathfinding.ParseBuilding(File.ReadAllText(buildingPath));
-            navigationGraph = scan != null || building != null
-                ? Pathfinding.Build(scan, building, floorId)
+            if (building != null && !string.IsNullOrEmpty(building.zoneId) && building.zoneId != zone)
+                throw new FormatException($"building.json in '{zone}' is for zone '{building.zoneId}'.");
+
+            var zoneFloorId = zone == zoneId ? floorId
+                : building?.floors != null && building.floors.Length > 0 ? building.floors[0].id
+                : zone;
+            zonePackages[zone] = new ZonePackage
+            {
+                directory = directory,
+                scan = scan,
+                graph = scan != null || building != null ? Pathfinding.Build(scan, building, zoneFloorId) : null
+            };
+        }
+
+        var zoneGraphs = new Dictionary<string, Pathfinding.Graph>();
+        foreach (var pair in zonePackages)
+            if (pair.Value.graph != null) zoneGraphs[pair.Key] = pair.Value.graph;
+        navigationGraph = zoneGraphs.Count > 0 ? Pathfinding.Combine(zoneGraphs, connections) : null;
+        navigationLoaded = true;
+        Debug.Log($"[Gnarly] Navigation zones loaded: {string.Join(", ", zonePackages.Keys)}; " +
+                  $"{connections?.connections.Length ?? 0} zone connection(s).");
+    }
+
+    void LoadAndApplyZoneMap()
+    {
+        try
+        {
+            if (!navigationLoaded) LoadNavigationData();
+            if (!zonePackages.TryGetValue(currentZoneId, out var package))
+                throw new DirectoryNotFoundException($"No navigation package for zone '{currentZoneId}'.");
+
+            var anchorPath = Path.Combine(package.directory, "test-anchor.json");
+            anchor = File.Exists(anchorPath)
+                ? TestAnchor.Parse(File.ReadAllText(anchorPath), currentZoneId)
                 : null;
-            loadedScan = scan;
+            var routePath = Path.Combine(package.directory, "route.json");
+            fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), currentZoneId) : null;
 
             if (!skipWorldMap)
-                ApplyWorldMap(File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin")));
+                ApplyWorldMap(File.ReadAllBytes(Path.Combine(package.directory, $"worldmap-{currentZoneId}.bin")));
             sawRelocalizing = false;
             lastTrackingSnapshot = null;
             normalTrackingStartedAt = -1f;
             state = State.Locating;
-            SetStatus("Locating… Look around the scanned area.");
+            SetStatus(zonePackages.Count > 1
+                ? $"Locating in {currentZoneId}… Look around the scanned area."
+                : "Locating… Look around the scanned area.");
             ReportTrackingState(force: true);
         }
         catch (Exception e)
@@ -208,7 +294,7 @@ public class RelocalizationController : MonoBehaviour
             throw new InvalidOperationException("The deserialized ARWorldMap is invalid.");
         }
 
-        Debug.Log($"[Gnarly] Applying {mapBytes.Length}-byte world map for {zoneId}.");
+        Debug.Log($"[Gnarly] Applying {mapBytes.Length}-byte world map for {currentZoneId}.");
         arkit.ApplyWorldMap(worldMap);
         DisposeWorldMap();
         appliedWorldMap = worldMap;
@@ -233,8 +319,16 @@ public class RelocalizationController : MonoBehaviour
         state = State.Located;
         // Construct the map UI only after ARKit has accepted the saved world map. Creating a
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
-        indoorMap?.Configure(loadedScan, navigationGraph, origin.TrackablesParent, origin.Camera);
-        indoorMap?.SetAppleModelPath(Path.Combine(PackageDirectory, "structure.usdz"));
+        var zone = zonePackages[currentZoneId];
+        indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera);
+        indoorMap?.SetAppleModelPath(Path.Combine(zone.directory, "structure.usdz"));
+
+        if (activeLegs != null)
+        {
+            BeginLeg();
+            return;
+        }
+
         if (navigationGraph != null && navigationGraph.Nodes.Count >= 2)
         {
             var destinations = navigationGraph.Destinations();
@@ -287,10 +381,10 @@ public class RelocalizationController : MonoBehaviour
     void RouteTo(string goalId)
     {
         if (navigationGraph == null || navigator == null) return;
-        var startId = navigationGraph.NearestNodeId(CameraArkitPosition());
+        var startId = navigationGraph.NearestNodeId(CameraArkitPosition(), currentZoneId);
         if (startId == null)
         {
-            SetStatus("Located, but the graph has no nodes.");
+            SetStatus($"Located, but zone {currentZoneId} has no graph nodes.");
             return;
         }
 
@@ -301,13 +395,51 @@ public class RelocalizationController : MonoBehaviour
             return;
         }
 
-        var route = Pathfinding.ToRoute(navigationGraph, path, zoneId);
-        navigator.Begin(route, origin.TrackablesParent, origin.Camera);
-        indoorMap?.SetRoute(route);
+        activeLegs = Pathfinding.SplitByZone(navigationGraph, path);
+        activeLegIndex = 0;
         ClearDestinationButtons();
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
-        SetStatus(navigator.StatusMessage);
-        Debug.Log($"[Gnarly] A* {string.Join(" -> ", path)}");
+        Debug.Log($"[Gnarly] A* {string.Join(" -> ", path)} ({activeLegs.Count} zone leg(s))");
+        BeginLeg();
+    }
+
+    /// <summary>Draws the active leg; positions are only valid inside the zone whose map is applied.</summary>
+    void BeginLeg()
+    {
+        var leg = activeLegs[activeLegIndex];
+        if (leg.zoneId != currentZoneId)
+        {
+            SwitchZone(leg.zoneId);
+            return;
+        }
+
+        var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+        navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        indoorMap?.SetRoute(route);
+        SetStatus(LegStatus());
+    }
+
+    string LegStatus()
+    {
+        if (activeLegs == null || activeLegIndex >= activeLegs.Count - 1) return navigator.StatusMessage;
+        var leg = activeLegs[activeLegIndex];
+        var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
+        var connectorName = string.IsNullOrEmpty(connector.label) ? connector.localId : connector.label;
+        return $"{navigator.StatusMessage} to {connectorName}, then into {activeLegs[activeLegIndex + 1].zoneId}";
+    }
+
+    /// <summary>Each zone has its own ARWorldMap, so crossing a connection means relocalizing in the next map.</summary>
+    void SwitchZone(string nextZoneId)
+    {
+        if (!zonePackages.ContainsKey(nextZoneId))
+        {
+            Fail($"The route continues into zone '{nextZoneId}', but its package is missing.");
+            return;
+        }
+
+        Debug.Log($"[Gnarly] Switching zone {currentZoneId} -> {nextZoneId}.");
+        currentZoneId = nextZoneId;
+        ResetSession($"Entering {nextZoneId}. Look around so ARKit can recognize it.");
     }
 
     void ShowDestinations(List<Pathfinding.Node> destinations)
@@ -328,7 +460,8 @@ public class RelocalizationController : MonoBehaviour
             label.fontStyle = FontStyle.Bold;
             label.alignment = TextAnchor.MiddleCenter;
             label.color = Color.white;
-            label.text = string.IsNullOrEmpty(node.label) ? node.id : node.label;
+            label.text = string.IsNullOrEmpty(node.label) ? node.localId : node.label;
+            if (zonePackages.Count > 1) label.text += $"  ·  {node.zone}";
             destinationButtons.Add(button.gameObject);
         }
     }
@@ -339,7 +472,10 @@ public class RelocalizationController : MonoBehaviour
         destinationButtons.Clear();
     }
 
-    public void Retry()
+    /// <summary>Relocalizes in the current zone again; an in-progress multi-zone route resumes afterwards.</summary>
+    public void Retry() => ResetSession("Restarting…");
+
+    void ResetSession(string message)
     {
         if (cube != null) Destroy(cube);
         cube = null;
@@ -349,14 +485,17 @@ public class RelocalizationController : MonoBehaviour
         if (destinationPanel != null) destinationPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
         session.Reset();
-        SetStatus("Restarting…");
+        SetStatus(message);
     }
 
     void OnPackageReady(DownloadedNavigationPackage package)
     {
         buildingId = package.BuildingId;
         zoneId = package.ZoneId;
+        currentZoneId = zoneId;
         packageDirectory = package.DirectoryPath;
+        navigationLoaded = false;
+        activeLegs = null;
         state = State.WaitingForSession;
         var source = package.IsOfflineCache ? "offline cache" : "Firebase";
         SetStatus($"Loaded version {package.VersionId} from {source}. Starting camera…");

@@ -11,6 +11,8 @@ public static class Pathfinding
 {
     public const float MaxEdgeMeters = 18f;
     public const float PortalClearance = 0.45f;
+    public const float ZoneTransferCost = 1f;
+    public const string ZoneTransferKind = "zone-transfer";
 
     [Serializable]
     public class ScanFeatures
@@ -89,6 +91,38 @@ public static class Pathfinding
         public string source;
         public string label;
         public string roomPlanIdentifier;
+        /// <summary>Set only in a combined multi-zone graph, where <see cref="id"/> is <see cref="ZoneKey"/>.</summary>
+        public string zone;
+        public string localId;
+    }
+
+    /// <summary>Mirrors shared/zone-connections.schema.json.</summary>
+    [Serializable]
+    public class ZoneConnections
+    {
+        public int schemaVersion;
+        public ZoneConnection[] connections;
+    }
+
+    [Serializable]
+    public class ZoneConnection
+    {
+        public NodeRef from;
+        public NodeRef to;
+    }
+
+    [Serializable]
+    public class NodeRef
+    {
+        public string zoneId;
+        public string nodeId;
+    }
+
+    /// <summary>A contiguous run of path nodes inside one zone's ARKit coordinate system.</summary>
+    public class RouteLeg
+    {
+        public string zoneId;
+        public readonly List<string> nodeIds = new List<string>();
     }
 
     [Serializable]
@@ -108,13 +142,10 @@ public static class Pathfinding
         public readonly List<Node> Nodes = new List<Node>();
         public readonly List<Edge> Edges = new List<Edge>();
         readonly Dictionary<string, List<Edge>> adjacency = new Dictionary<string, List<Edge>>();
+        readonly Dictionary<string, Node> nodesById = new Dictionary<string, Node>();
 
-        public Node Node(string id)
-        {
-            foreach (var node in Nodes)
-                if (node.id == id) return node;
-            return null;
-        }
+        public Node Node(string id) =>
+            id != null && nodesById.TryGetValue(id, out var node) ? node : null;
 
         public IEnumerable<Edge> Neighbors(string id) =>
             adjacency.TryGetValue(id, out var list) ? list : Array.Empty<Edge>();
@@ -123,6 +154,7 @@ public static class Pathfinding
         {
             if (Node(node.id) != null) return;
             Nodes.Add(node);
+            nodesById[node.id] = node;
         }
 
         public void AddEdge(Edge edge)
@@ -155,12 +187,14 @@ public static class Pathfinding
             list.Add(edge);
         }
 
-        public string NearestNodeId(Vector3 arkitPosition)
+        /// <summary>Positions are only comparable within one zone, so pass the zone the user is localized in.</summary>
+        public string NearestNodeId(Vector3 arkitPosition, string zone = null)
         {
             string nearest = null;
             var best = float.MaxValue;
             foreach (var node in Nodes)
             {
+                if (zone != null && node.zone != zone) continue;
                 var p = Position(node);
                 var d = Horizontal(arkitPosition, p);
                 if (d < best)
@@ -188,6 +222,98 @@ public static class Pathfinding
         var building = JsonUtility.FromJson<BuildingDocument>(json);
         if (building == null) throw new FormatException("building.json is empty or invalid.");
         return building;
+    }
+
+    public static ZoneConnections ParseConnections(string json)
+    {
+        var document = JsonUtility.FromJson<ZoneConnections>(json);
+        if (document == null) throw new FormatException("zone-connections.json is empty or invalid.");
+        if (document.schemaVersion != 1)
+            throw new FormatException($"Unsupported zone-connections.json schemaVersion {document.schemaVersion}.");
+        if (document.connections == null) throw new FormatException("zone-connections.json must contain a connections array.");
+        foreach (var connection in document.connections)
+        {
+            if (string.IsNullOrEmpty(connection?.from?.zoneId) || string.IsNullOrEmpty(connection.from.nodeId) ||
+                string.IsNullOrEmpty(connection.to?.zoneId) || string.IsNullOrEmpty(connection.to.nodeId))
+                throw new FormatException("Every zone connection needs from/to zoneId and nodeId.");
+        }
+        return document;
+    }
+
+    public static string ZoneKey(string zoneId, string nodeId) => zoneId + "/" + nodeId;
+
+    /// <summary>
+    /// Merges per-zone graphs into one graph keyed by <see cref="ZoneKey"/>. Each zone keeps its own
+    /// ARKit coordinates; zone connections become bidirectional edges with weight <see cref="ZoneTransferCost"/>.
+    /// </summary>
+    public static Graph Combine(IReadOnlyDictionary<string, Graph> zoneGraphs, ZoneConnections connections)
+    {
+        var combined = new Graph { floorId = null };
+        foreach (var pair in zoneGraphs)
+        {
+            var zone = pair.Key;
+            foreach (var node in pair.Value.Nodes)
+            {
+                combined.AddNode(new Node
+                {
+                    id = ZoneKey(zone, node.id),
+                    localId = node.id,
+                    zone = zone,
+                    floor = node.floor,
+                    type = node.type,
+                    position = node.position,
+                    source = node.source,
+                    label = node.label,
+                    roomPlanIdentifier = node.roomPlanIdentifier
+                });
+            }
+            foreach (var edge in pair.Value.Edges)
+            {
+                combined.AddEdge(new Edge
+                {
+                    from = ZoneKey(zone, edge.from),
+                    to = ZoneKey(zone, edge.to),
+                    kind = edge.kind,
+                    meters = edge.meters,
+                    source = edge.source
+                });
+            }
+        }
+
+        if (connections?.connections == null) return combined;
+        foreach (var connection in connections.connections)
+        {
+            var from = ZoneKey(connection.from.zoneId, connection.from.nodeId);
+            var to = ZoneKey(connection.to.zoneId, connection.to.nodeId);
+            if (combined.Node(from) == null || combined.Node(to) == null)
+            {
+                Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: a node or zone package is missing.");
+                continue;
+            }
+            combined.AddEdge(new Edge
+            {
+                from = from,
+                to = to,
+                kind = ZoneTransferKind,
+                meters = ZoneTransferCost,
+                source = "manual"
+            });
+        }
+        return combined;
+    }
+
+    /// <summary>Splits an A* path wherever it crosses a zone connection.</summary>
+    public static List<RouteLeg> SplitByZone(Graph graph, List<string> nodeIds)
+    {
+        var legs = new List<RouteLeg>();
+        foreach (var id in nodeIds)
+        {
+            var zone = graph.Node(id).zone;
+            if (legs.Count == 0 || legs[legs.Count - 1].zoneId != zone)
+                legs.Add(new RouteLeg { zoneId = zone });
+            legs[legs.Count - 1].nodeIds.Add(id);
+        }
+        return legs;
     }
 
     /// <summary>
@@ -409,7 +535,9 @@ public static class Pathfinding
         return path;
     }
 
-    static float Heuristic(Node a, Node b) => Vector3.Distance(Position(a), Position(b));
+    /// <summary>Straight-line distance is meaningless between two zones' coordinate systems, so it is 0 there.</summary>
+    static float Heuristic(Node a, Node b) =>
+        a.zone == b.zone ? Vector3.Distance(Position(a), Position(b)) : 0f;
 
     public static Vector3 Position(Node node) => new Vector3(node.position[0], node.position[1], node.position[2]);
 

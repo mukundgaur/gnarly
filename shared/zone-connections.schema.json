@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly zone connections",
+  "description": "Building-level links between nodes in different zones (each zone is one ARWorldMap, and a staircase is its own zone). Connections are bidirectional and have A* weight 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "connections"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "$ref": "#/$defs/nodeRef" },
+          "to": { "$ref": "#/$defs/nodeRef" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zoneId", "nodeId"],
+      "properties": {
+        "zoneId": { "type": "string", "minLength": 1, "description": "Zone whose building.json contains the node." },
+        "nodeId": { "type": "string", "minLength": 1, "description": "Node id in that zone's graph (building.json node id, or a RoomPlan-derived id such as stairs-1a2b3c4d)." }
+      }
+    }
+  }
+}
