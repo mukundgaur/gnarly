@@ -179,7 +179,7 @@ final class MapperViewModel: ObservableObject {
         isUploading = true
         let attemptID = UUID()
         uploadAttemptID = attemptID
-        let uploadTask = Task { @MainActor in
+        let uploadTask = Task { @MainActor [self] in
             do {
                 let repository = try FirebaseDataRepository()
                 let buildingJSON = packageURL.appendingPathComponent("building.json")
@@ -212,10 +212,20 @@ final class MapperViewModel: ObservableObject {
                 try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
                 statusText = "Uploading RoomPlan scan…"
-                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID) { [weak self] progress in
+                    guard let progress, progress.totalUnitCount > 0 else { return }
+                    let percent = Int(progress.fractionCompleted * 100)
+                    Task { @MainActor [weak self] in
+                        guard let self, self.uploadAttemptID == attemptID,
+                              self.statusText.hasPrefix("Uploading RoomPlan scan") else { return }
+                        self.statusText = "Uploading RoomPlan scan… \(percent)%"
+                    }
+                }
                 try Task.checkCancellation()
+                statusText = "Uploading scan features…"
                 try await repository.uploadZoneScanFeatures(from: scanFeatures, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
+                statusText = "Uploading 3D room model…"
                 try await repository.uploadZoneStructure(from: structure, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
                 statusText = "Uploading AR world map…"
@@ -245,13 +255,13 @@ final class MapperViewModel: ObservableObject {
             }
         }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            try? await Task.sleep(nanoseconds: 180_000_000_000)
             guard uploadAttemptID == attemptID else { return }
             uploadTask.cancel()
             uploadLogger.error("Package upload timed out at step: \(self.statusText, privacy: .public)")
             uploadAttemptID = nil
             isUploading = false
-            showError("Firebase did not finish the upload within 45 seconds. Check the iPhone’s Wi-Fi or cellular connection, then retry. A Firebase write already in progress may finish in the background.")
+            showError("Firebase did not finish within 3 minutes (last step: \(self.statusText)). Check the iPhone’s connection, then retry. A Firebase write already in progress may finish in the background.")
         }
     }
 

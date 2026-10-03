@@ -92,7 +92,11 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         } catch {
             throw FirebaseDataError.cache(operation: "initialization", underlying: error)
         }
-        self.init(firestore: .firestore(), storage: .storage(), cache: resolvedCache)
+        let storage = Storage.storage()
+        // The SDK otherwise retries a stalled upload for up to ten minutes.
+        // Let the mapper surface an actionable error before its package watchdog fires.
+        storage.maxUploadRetryTime = 90
+        self.init(firestore: .firestore(), storage: storage, cache: resolvedCache)
     }
 
     init(firestore: Firestore, storage: Storage, cache: NavigationFileCache) {
@@ -301,14 +305,23 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
 
     @discardableResult
     func uploadZoneScanJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String {
+        try await uploadZoneScanJSON(from: localURL, buildingId: buildingId, versionId: versionId, zoneId: zoneId, onProgress: { _ in })
+    }
+
+    @discardableResult
+    func uploadZoneScanJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String, onProgress: @escaping (Progress?) -> Void) async throws -> String {
         try validateNonemptyFile(localURL)
         let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
         guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
         let storagePath = try FirebaseStoragePaths.zoneScanJSON(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
-        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
+        uploadLogger.info("Uploading RoomPlan scan (\(jsonData.count) bytes) to Storage")
+        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json", onProgress: onProgress)
+        uploadLogger.info("RoomPlan scan Storage upload completed; saving path in Firestore")
         let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
         try await update(["scanJsonPath": storagePath], to: zoneRef, operation: "store zone scanJsonPath")
+        uploadLogger.info("RoomPlan scan Firestore path saved; copying to local cache")
         try await cacheUploadedFile(localURL, storagePath: storagePath)
+        uploadLogger.info("RoomPlan scan upload fully completed")
         return storagePath
     }
 
@@ -607,13 +620,13 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         }
     }
 
-    private func uploadFile(_ localURL: URL, storagePath: String, contentType: String) async throws {
+    private func uploadFile(_ localURL: URL, storagePath: String, contentType: String, onProgress: ((Progress?) -> Void)? = nil) async throws {
         try requireAuthenticated()
         let metadata = StorageMetadata()
         metadata.contentType = contentType
         do {
             _ = try await storage.reference(withPath: storagePath)
-                .putFileAsync(from: localURL, metadata: metadata)
+                .putFileAsync(from: localURL, metadata: metadata, onProgress: onProgress)
         } catch {
             throw FirebaseDataError.storage(operation: "upload", path: storagePath, underlying: error)
         }

@@ -269,9 +269,9 @@ public partial class IndoorMapOverlay : MonoBehaviour
                 : new[] { surface.dimensions[0], surface.dimensions[1], 0.06f };
             if (floor)
             {
-                // RoomPlan surfaces are nearly planar. Keep the scan footprint visible from oblique angles.
-                dimensions[1] = 0.04f;
-                if (dimensions[2] < 0.1f) dimensions[2] = Math.Max(0.5f, surface.dimensions[1]);
+                // RoomPlan floor surfaces span local X/Y; local Z is the surface normal.
+                // Keeping Y as the scanned depth prevents a floor from becoming a tall slab.
+                dimensions[2] = 0.04f;
             }
             else if (dimensions[2] < 0.04f)
             {
@@ -529,6 +529,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     /// <summary>Opens the RealityKit model with the planner's current selection. Returns an error, or null.</summary>
     string OpenNativeModel(string selectionJson)
     {
+        Debug.Log("[Gnarly] Minimap tapped; opening expanded model.");
 #if UNITY_IOS && !UNITY_EDITOR
         var missing = MissingNativeFiles();
         if (missing.Count > 0)
