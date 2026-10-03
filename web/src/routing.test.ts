@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Graph, ScanFeature, ScanFeatures } from './data.ts';
-import { checkEdge } from './geometry.ts';
+import { canWalkBetween, checkEdge } from './geometry.ts';
 import { addWaypoint, connectWaypoints, deleteWaypoint, updateWaypoint } from './graphEdit.ts';
 import { findRoute } from './routing.ts';
 const matrix = (x: number, y: number, z: number, vertical = false) => vertical
@@ -67,4 +67,46 @@ test('invalid endpoints, disconnected graphs, and unscanned confirmation',()=>{
   assert.equal(findRoute({graph:disconnected,startId:'a',destinationId:'b',options:{scan}}).ok,false);
   assert.equal(checkEdge(graph.edges[1],graph).status,'unverified');
   assert.equal(checkEdge({...graph.edges[1],source:'visibility'},graph).status,'blocked');
+});
+test('walk mode stays on the floor and only crosses walls through doors',()=>{
+  assert.equal(canWalkBetween([-2,0,2],[2,0,2],'ground',graph,scan),false);
+  assert.equal(canWalkBetween([-2,0,0],[2,0,0],'ground',graph,scan),true);
+  assert.equal(canWalkBetween([4.9,0,4.9],[5.2,0,5.2],'ground',graph,scan),false);
+});
+
+test('renaming a waypoint preserves recorded distances and existing connections',()=>{
+  const renamed=updateWaypoint(graph,{...nodes[0],label:'West entrance'},scan);
+  assert.deepEqual(renamed.graph.edges,graph.edges);
+  assert.equal(renamed.removedEdges.length,0);
+  const stairs:Graph={floors:[{id:'ground',story:0,elevation:0},{id:'upper',story:1,elevation:3}],nodes:[
+    {id:'bottom',floor:'ground',type:'stairs',position:[0,0,0]},
+    {id:'top',floor:'upper',type:'stairs',position:[0,3,0]}],edges:[{from:'bottom',to:'top',kind:'stairs',meters:9,source:'manual'}]};
+  assert.equal(updateWaypoint(stairs,{...stairs.nodes[0],label:'North stairs'}).graph.edges[0].meters,9);
+});
+test('movement cannot cut a concave floor corner or jump between separated surfaces',()=>{
+  const cornerScan=structuredClone(scan);cornerScan.walls=[];cornerScan.doors=[];
+  cornerScan.floors[0].polygonCorners=[[-5,-5,0],[5,-5,0],[5,-3,0],[-3,-3,0],[-3,5,0],[-5,5,0]];
+  assert.equal(canWalkBetween([-4,0,4],[4,0,-4],'ground',graph,cornerScan),false);
+  assert.equal(canWalkBetween([-4,0,4],[-4,0,-4],'ground',graph,cornerScan),true);
+  const split={...cornerScan,floors:[feature('left',[2,4,0],[-1.08,0,0]),feature('right',[2,4,0],[1.08,0,0])]};
+  assert.equal(canWalkBetween([-.2,0,0],[.2,0,0],'ground',graph,split),false);
+});
+test('a doorway from a different floor cannot open a wall on this floor',()=>{
+  const wrongDoor={...scan,doors:scan.doors.map(door=>({...door,story:1,parentIdentifier:null}))};
+  assert.equal(checkEdge(graph.edges[2],graph,wrongDoor).status,'blocked');
+  assert.equal(canWalkBetween([-1,0,0],[1,0,0],'ground',graph,wrongDoor),false);
+});
+test('invalid edge weights are excluded and one-way connections stay one-way',()=>{
+  for(const meters of [-1,0,NaN,Infinity]){
+    const invalid={...graph,edges:[{...graph.edges[1],meters}]};
+    assert.equal(findRoute({graph:invalid,startId:'a',destinationId:'left'}).ok,false);
+  }
+  const directed={...graph,edges:[{...graph.edges[1],bidirectional:false}]};
+  assert.equal(findRoute({graph:directed,startId:'a',destinationId:'left'}).ok,true);
+  assert.equal(findRoute({graph:directed,startId:'left',destinationId:'a'}).ok,false);
+});
+test('empty floors can receive a first waypoint and invalid coordinates are rejected',()=>{
+  const empty:Graph={floors:graph.floors,nodes:[],edges:[]};
+  assert.equal(addWaypoint(empty,{id:'first',floor:'ground',type:'waypoint',position:[0,0,0]}).nodes.length,1);
+  assert.throws(()=>addWaypoint(empty,{id:'bad',floor:'ground',type:'waypoint',position:[0,NaN,0]}));
 });

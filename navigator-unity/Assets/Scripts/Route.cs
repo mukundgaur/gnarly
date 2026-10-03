@@ -5,6 +5,9 @@ using UnityEngine;
 [Serializable]
 public class Route
 {
+    /// <summary>Prefix reserved for runtime-only guidance points inserted between graph nodes.</summary>
+    public const string GuidanceWaypointPrefix = "__guide__";
+
     [Serializable]
     public class Waypoint
     {
@@ -20,6 +23,10 @@ public class Route
     public Waypoint[] waypoints;
 
     public bool IsDeviceHeight => heightReference == "device";
+
+    public static bool IsGuidanceWaypoint(Waypoint waypoint) =>
+        waypoint != null && !string.IsNullOrEmpty(waypoint.id) &&
+        waypoint.id.StartsWith(GuidanceWaypointPrefix, StringComparison.Ordinal);
 
     public static Route Parse(string json, string expectedZoneId)
     {

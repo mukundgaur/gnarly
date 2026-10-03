@@ -722,7 +722,7 @@ MonoBehaviour:
   pathColor: {r: 0.1, g: 0.9, b: 1, a: 0.85}
   pathWidth: 0.25
   deviceHeightToFloor: -1.3
-  reachRadius: 1
+  reachRadius: 0.3
   arriveRadius: 0.75
   viewportMargin: 0.1
 --- !u!4 &2072909954

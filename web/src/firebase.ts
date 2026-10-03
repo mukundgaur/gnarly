@@ -327,11 +327,13 @@ export function createFirebaseGraphStore(input: Building): import('./graphStore.
     subscribe(onChange, onError) {
       let disposed = false;
       let lastRevision = '';
+      let request = 0;
       const check = async () => {
+        const currentRequest=++request;
         try {
           const snapshot = await load();
-          if (!disposed && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
-        } catch (error) { if (!disposed) onError(error instanceof Error ? error : Error(String(error))); }
+          if (!disposed && currentRequest===request && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
+        } catch (error) { if (!disposed && currentRequest===request) onError(error instanceof Error ? error : Error(String(error))); }
       };
       const unsubscribe = onSnapshot(documentRef, () => void check(), error => onError(error));
       const interval = window.setInterval(() => void check(), 15000);

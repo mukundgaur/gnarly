@@ -17,7 +17,7 @@ The site opens in a labeled sample mode centered on the Cornell area. The **Nort
 1. In the Google Cloud project associated with Firebase, enable **Maps JavaScript API** and confirm billing is configured.
 2. In **APIs & Services → Credentials**, create or select a browser API key. Restrict it to **Websites** (`http://localhost:5173/*` for local development and your deployed domain later) and to **Maps JavaScript API**.
 3. In **Google Maps Platform → Map Management**, create a **JavaScript vector** map ID. Put the key and map ID in `web/.env` as `VITE_GOOGLE_MAPS_API_KEY` and `VITE_GOOGLE_MAPS_MAP_ID`.
-4. Restart `npm run dev`. The map credit at bottom right should say **Google Maps**. If the map shows a Google error, check browser console, billing, key restrictions, and whether Maps JavaScript API is enabled.
+4. Restart `npm run dev`. The map should show Google’s own attribution along its bottom edge. If the map shows a Google error, check browser console, billing, key restrictions, and whether Maps JavaScript API is enabled.
 
 Browser API keys are visible in the site bundle; HTTP referrer and API restrictions are the relevant protections. Do not use a service-account key here.
 
@@ -52,9 +52,15 @@ The mapper exports `scan-features.json` alongside `structure.usdz`, `scan.json`,
 
 Build check: `npm run build`.
 
+## Drop-to-walk view
+
+In the building explorer, drag **Drop to walk** onto any visible floor. The viewer switches to that floor and places the camera at eye height. Drag inside the scene to look around, use W/S or the up/down arrows to move, and use A/D or the left/right arrows to turn in place. Hold Shift to move faster. The on-screen direction pad provides the same movement and turning controls on touch devices. Choose **Exit** to return to the orbiting overview; the person marker remains at the last walk position and can be dragged somewhere else.
+
+Walk mode stays inside the selected floor boundary. When `scan-features.json` is available, movement is also stopped by scanned walls and can cross them only through a captured door or opening. On graph-only packages, the generated floor bounds are used because wall geometry is not available.
+
 ## Waypoint editor and routing
 
-Open a building and choose **Edit waypoints**. Select, add by clicking a floor, move by clicking a floor or entering XYZ meters, edit name/type/floor, connect two waypoints, or delete a waypoint and its incident edges. The site preserves existing waypoint IDs. Its coordinates are the package's ARKit world coordinates. An affected edge's `meters` is recalculated from 3D endpoint distance when a waypoint moves. The editor validates IDs, endpoints, floors, distances, floor surfaces, walls, and stair transitions before saving. Existing blocked connections are shown and excluded from routes; an unrelated edit may be saved, but newly blocked connections must be fixed. Cancel restores the last saved graph. A dirty draft survives refresh in browser storage and leaving prompts before navigation.
+Open a building and choose **Edit waypoints**. Select, add by clicking a floor, move by clicking a floor or entering XYZ meters, edit name/type/floor, connect two waypoints, or delete a waypoint and its incident edges. The site preserves existing waypoint IDs. Its coordinates are the package's ARKit world coordinates. An affected edge's `meters` is recalculated from 3D endpoint distance when a waypoint moves. The editor validates IDs, endpoints, floors, distances, floor surfaces, walls, and stair transitions before saving. Existing blocked connections are shown and excluded from routes; an unrelated edit may be saved, but newly blocked connections must be fixed. Cancel restores the last saved graph. Unsaved graph edits and unapplied waypoint fields are backed up in session storage for the current tab, so they survive refresh and in-app navigation without replacing a draft in another tab. Closing the tab ends that draft session; save first. Leaving prompts before navigation. Apply waypoint fields before saving the graph. Cancel restores the latest saved graph, including a newer revision received during a conflict.
 
 **Local test · browser only** is available without Firebase credentials. Its graph uses the same `GraphStore` interface as Firebase, saves in browser storage, and is always labeled **not synced**. The Firebase mode requires the authorized account from the existing rules. It writes an immutable `graph-edits/<uuid>.json` object in the zone's existing Storage folder, then atomically moves that zone's Firestore `buildingJsonPath` pointer if the pointer has not changed. Other open web clients reload through a Firestore listener and periodic check. A changed pointer while a local draft exists raises a conflict and keeps the draft. The previous graph object remains in Storage. The Unity navigator and mapper package download now accept that pointer path; installed iOS/Unity builds need rebuilding to pick up the change. The mapper can still publish another package and move the pointer again.
 
@@ -65,3 +71,11 @@ Firebase writes need the existing admin Auth UID and Storage/Firestore rules to 
 Wall safety depends on `scan-features.json`: a connection must stay on scanned floor polygons and cross a wall only where a matched door or opening exists. Cross-floor edges must explicitly connect stair waypoints. Where scan features are missing, only `manual`, `recorded`, or `walked-path` edges are usable, and the UI labels them **unverified**. Such edges have no automatic wall guarantee; an operator must confirm them against the actual space. Other edges without scan data are blocked. If no approved graph path exists, the viewer says **No walkable route found.**
 
 Run `node --experimental-strip-types --test src/routing.test.ts` from `web/` for the wall, doorway, corner, stairs, and edit checks.
+
+## Website polish verification
+
+Run `npm test` and `npm run build` from `web/`. Regression tests cover walls and door detours, concave floors and small gaps, portals on another story, directed edges, invalid distances, empty-floor placement, and preserving recorded distances during a rename.
+
+Browser checks cover local save/refresh, unapplied-field leave warnings, two-tab conflicts and Cancel, route selection, typing while walking, and a 390px-wide editing/route layout. The data browser now filters documents, reports load errors without requiring a selected record, and warns before discarding JSON changes through header navigation or reload. Firebase graph writes and device consumption still need an authorized live end-to-end check.
+
+The 3D workspace and Firebase document editor load on demand. Large Three/Firebase bundles still produce Vite’s size advisory, but opening the map no longer downloads the 3D workspace.
