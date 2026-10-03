@@ -25,7 +25,8 @@ targets:
         product: FirebaseStorage
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gnarly.mapper
+        PRODUCT_BUNDLE_IDENTIFIER: com.grantlin.gnarly.mapper
+        CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: GnarlyMapper/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"

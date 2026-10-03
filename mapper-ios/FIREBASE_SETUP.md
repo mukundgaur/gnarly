@@ -6,7 +6,7 @@ The mapper uses Cloud Firestore for building metadata and Cloud Storage for pack
 
 You do **not** need another Google or Firebase account if you already own the Firebase project.
 
-1. In **Firebase Console → Project settings → Your apps**, register an iOS app with bundle ID `com.gnarly.mapper` if that exact app is not already registered.
+1. In **Firebase Console → Project settings → Your apps**, register an iOS app with bundle ID `com.grantlin.gnarly.mapper` if that exact app is not already registered.
 2. Download `GoogleService-Info.plist` and place it at `mapper-ios/GnarlyMapper/GoogleService-Info.plist`. It is intentionally ignored by Git. After regenerating the project, verify that it belongs to the `GnarlyMapper` target.
 3. In **Build → Firestore Database**, create the database. Pick the production location carefully because it cannot be changed later.
 4. Upgrade the project to the **Blaze** pay-as-you-go plan and configure a billing budget alert. Firebase requires Blaze for Cloud Storage access as of February 3, 2026, although no-cost Storage usage is still available within its allowance.

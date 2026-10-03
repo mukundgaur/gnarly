@@ -17,6 +17,7 @@
 		2D03FEE4307B9BA40AB4988C /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 08AE56EC505D125D2438FCB2 /* GoogleService-Info.plist */; };
 		3FECBE80805A7440F6A4C8B8 /* NavigationFileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689A113367066A5B0CBDA816 /* NavigationFileCacheTests.swift */; };
 		541F20659AF051D63F8C34D8 /* RoomPlanScanExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */; };
+		61770C565FA848405823A808 /* StairZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835CEE17A191B42BCF3DE668 /* StairZones.swift */; };
 		6D2E9C1ADCB9B1FA07EFA596 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DF0A16D504843C4278D0B87 /* FirebaseCore */; };
 		6ED8806A7F5C62CA278780A6 /* FirebaseModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2505E055555618BFB65FBE74 /* FirebaseModelsTests.swift */; };
 		6F47328752E6F8C59C253480 /* FirebaseConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C3D4151438BA4F447447710 /* FirebaseConnectionView.swift */; };
@@ -28,11 +29,10 @@
 		9546AE9215D9D2C6B3512618 /* FirebaseStoragePathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F451C51052FBE715F12ADAAB /* FirebaseStoragePathsTests.swift */; };
 		9F404F6AE54F7FA4C5D1C488 /* FirebaseDiagnosticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6F2AC5B0FD1CB36020899F /* FirebaseDiagnosticsViewModel.swift */; };
 		B44AEA9378BF26AC2C9B2843 /* FirebaseDataError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A30FE85C0D530BDB17A0FB /* FirebaseDataError.swift */; };
+		B94D7AD17FE8F7769BC8FE4D /* ScanMinimap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */; };
 		CB6E7724F62CE73F33BDCB2B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D2E5B8845E0C57FB4607372 /* FirebaseFirestore */; };
 		E4D0995FEAC9F6DA2641D966 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 0EE55C11AA7DD4B19B0AB40B /* FirebaseStorage */; };
 		E5B0EE8BFADA89D82419742D /* RoomPlanVisibilityGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5847A14C25A4071F5D257E0 /* RoomPlanVisibilityGraph.swift */; };
-		6F5E4D3C2B1A091827364554 /* StairZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5E4D3C2B1A091827364555 /* StairZones.swift */; };
-		A17C3E90B4D24F6A8C1E5520 /* ScanMinimap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17C3E90B4D24F6A8C1E5521 /* ScanMinimap.swift */; };
 		F3089579CC30875CC04D23B2 /* FirebaseStoragePaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD65EB9C58042936F0E3342 /* FirebaseStoragePaths.swift */; };
 		F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */; };
 		F522136BDE4675AA61905C9D /* FirebaseAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF87955CE6DF0975E926FC70 /* FirebaseAuthSession.swift */; };
@@ -56,18 +56,18 @@
 		1C3D4151438BA4F447447710 /* FirebaseConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseConnectionView.swift; sourceTree = "<group>"; };
 		2505E055555618BFB65FBE74 /* FirebaseModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseModelsTests.swift; sourceTree = "<group>"; };
 		37865E09DF2725742DB2E99E /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
-		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanScanExtractor.swift; sourceTree = "<group>"; };
 		63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnarlyMapperApp.swift; sourceTree = "<group>"; };
 		689A113367066A5B0CBDA816 /* NavigationFileCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationFileCacheTests.swift; sourceTree = "<group>"; };
 		6D440F1C28719F9733CB931B /* NavigationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationModels.swift; sourceTree = "<group>"; };
 		81A30FE85C0D530BDB17A0FB /* FirebaseDataError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseDataError.swift; sourceTree = "<group>"; };
+		835CEE17A191B42BCF3DE668 /* StairZones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StairZones.swift; sourceTree = "<group>"; };
 		91ACB86ADB606FF64E86368B /* FirebaseDataRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseDataRepository.swift; sourceTree = "<group>"; };
 		99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureContainer.swift; sourceTree = "<group>"; };
+		B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanMinimap.swift; sourceTree = "<group>"; };
 		C4D827387048369EEAE055B7 /* FirebaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseModels.swift; sourceTree = "<group>"; };
 		C5847A14C25A4071F5D257E0 /* RoomPlanVisibilityGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanVisibilityGraph.swift; sourceTree = "<group>"; };
-		6F5E4D3C2B1A091827364555 /* StairZones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StairZones.swift; sourceTree = "<group>"; };
-		A17C3E90B4D24F6A8C1E5521 /* ScanMinimap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanMinimap.swift; sourceTree = "<group>"; };
 		CBD65EB9C58042936F0E3342 /* FirebaseStoragePaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseStoragePaths.swift; sourceTree = "<group>"; };
 		D1F5776EC864193C022D27BE /* GnarlyMapperTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GnarlyMapperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D8347DA1557345E040D2FA42 /* MapperViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapperViewModel.swift; sourceTree = "<group>"; };
@@ -126,8 +126,8 @@
 				99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */,
 				5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */,
 				C5847A14C25A4071F5D257E0 /* RoomPlanVisibilityGraph.swift */,
-				A17C3E90B4D24F6A8C1E5521 /* ScanMinimap.swift */,
-				6F5E4D3C2B1A091827364555 /* StairZones.swift */,
+				B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */,
+				835CEE17A191B42BCF3DE668 /* StairZones.swift */,
 				A62468E057F7EFF0F18E86F7 /* Firebase */,
 			);
 			path = GnarlyMapper;
@@ -222,6 +222,11 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0106C645E108D0FA124A3102 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = 5CC4943C8789A91871AF823A /* Build configuration list for PBXProject "GnarlyMapper" */;
 			developmentRegion = en;
@@ -280,8 +285,8 @@
 				0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */,
 				541F20659AF051D63F8C34D8 /* RoomPlanScanExtractor.swift in Sources */,
 				E5B0EE8BFADA89D82419742D /* RoomPlanVisibilityGraph.swift in Sources */,
-				A17C3E90B4D24F6A8C1E5520 /* ScanMinimap.swift in Sources */,
-				6F5E4D3C2B1A091827364554 /* StairZones.swift in Sources */,
+				B94D7AD17FE8F7769BC8FE4D /* ScanMinimap.swift in Sources */,
+				61770C565FA848405823A808 /* StairZones.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -400,13 +405,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = X2TL847865;
+				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.gnarly.mapper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.grantlin.gnarly.mapper;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -482,13 +487,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = X2TL847865;
+				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.gnarly.mapper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.grantlin.gnarly.mapper;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
