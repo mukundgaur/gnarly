@@ -1,9 +1,12 @@
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Text } from '@react-three/drei';
 import { useEffect, useMemo, useRef } from 'react';
-import { Box3, DoubleSide, Matrix4, Shape, ShapeGeometry, Vector2, Vector3 } from 'three';
+import { Box3, DoubleSide, Matrix4, PerspectiveCamera, Shape, ShapeGeometry, Vector2, Vector3 } from 'three';
 import type { Graph, Node, ScanFeature, ScanFeatures } from './data';
-import { checkEdge } from './geometry';
+import { canWalkBetween, checkEdge } from './geometry';
+
+export type WalkLocation = { position: [number, number, number]; floorId: string };
+export type DropRequest = { clientX: number; clientY: number; id: number };
 
 type ViewerProps = {
   graph: Graph;
@@ -17,6 +20,11 @@ type ViewerProps = {
   reset: number;
   editing?: boolean;
   onFloorPick?: (position: [number, number, number], floorId: string) => void;
+  walker?: WalkLocation | null;
+  walking?: boolean;
+  dropRequest?: DropRequest | null;
+  onWalkerDrop?: (location: WalkLocation | null) => void;
+  onWalkerMove?: (location: WalkLocation) => void;
 };
 
 function featureMatrix(feature: ScanFeature) {
@@ -40,7 +48,7 @@ function FeatureBox({ feature, color, opacity = 1 }: {
   </group>;
 }
 
-function ScannedFloor({ feature, onPick }: { feature: ScanFeature; onPick?: (position: [number, number, number]) => void }) {
+function ScannedFloor({ feature, floorId, onPick }: { feature: ScanFeature; floorId: string; onPick?: (position: [number, number, number]) => void }) {
   const outline = feature.polygonCorners?.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const geometry = useMemo(() => {
     if (!outline || outline.length < 3) return null;
@@ -48,9 +56,9 @@ function ScannedFloor({ feature, onPick }: { feature: ScanFeature; onPick?: (pos
     return new ShapeGeometry(shape);
   }, [feature]);
   const matrix = useMemo(() => featureMatrix(feature), [feature]);
-  if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh onClick={event=>{if(onPick){event.stopPropagation();onPick(event.point.toArray() as [number,number,number])}}}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
+  if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh userData={{ walkableFloor: true, floorId }} onClick={event=>{if(onPick){event.stopPropagation();onPick(event.point.toArray() as [number,number,number])}}}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
   return <group matrix={matrix} matrixAutoUpdate={false}>
-    <mesh geometry={geometry} onClick={event => { if (onPick) { event.stopPropagation(); onPick(event.point.toArray() as [number, number, number]); } }}>
+    <mesh geometry={geometry} userData={{ walkableFloor: true, floorId }} onClick={event => { if (onPick) { event.stopPropagation(); onPick(event.point.toArray() as [number, number, number]); } }}>
       <meshStandardMaterial color="#d4e5e1" side={DoubleSide} />
     </mesh>
     <Line points={[...outline, outline[0]].map(([x, y]) => [x, y, .015])} color="#6faaa1" lineWidth={1.5} />
@@ -107,10 +115,10 @@ function ScannedGeometry({ scan, graph, floor, onFloorPick }: { scan: ScanFeatur
   const visible = (item: ScanFeature) => floor === 'all' || item.story == null || item.story === story;
   const portals = [...scan.doors, ...scan.openings, ...scan.windows].filter(visible);
   return <>
-    {scan.floors.filter(visible).map(item => <ScannedFloor key={item.identifier} feature={item} onPick={onFloorPick ? position => {
+    {scan.floors.filter(visible).map(item => {
       const floorId = graph.floors.find(candidate => candidate.story === item.story)?.id || graph.floors[0]?.id;
-      if (floorId) onFloorPick(position, floorId);
-    } : undefined} />)}
+      return floorId ? <ScannedFloor key={item.identifier} feature={item} floorId={floorId} onPick={onFloorPick ? position => onFloorPick(position, floorId) : undefined} /> : null;
+    })}
     {scan.walls.filter(visible).map(item => <Wall key={item.identifier} wall={item} portals={portals.filter(portal => portal.parentIdentifier === item.identifier)} />)}
     {scan.windows.filter(visible).map(item => <FeatureBox key={item.identifier} feature={item} color="#8fbfce" opacity={.32} />)}
     {scan.doors.filter(visible).filter(item => item.category === 'door-closed').map(item =>
@@ -133,7 +141,7 @@ function GraphFloor({ graph, floor, illustrative, onFloorPick }: { graph: Graph;
     const width = Math.max(4, maxX - minX);
     const depth = Math.max(4, maxZ - minZ);
     return <group key={item.id}>
-      <mesh position={[cx, item.elevation - .08, cz]} onClick={event => { if (onFloorPick) { event.stopPropagation(); onFloorPick(event.point.toArray() as [number, number, number], item.id); } }}>
+      <mesh position={[cx, item.elevation - .08, cz]} userData={{ walkableFloor: true, floorId: item.id }} onClick={event => { if (onFloorPick) { event.stopPropagation(); onFloorPick(event.point.toArray() as [number, number, number], item.id); } }}>
         <boxGeometry args={[width, .12, depth]} />
         <meshStandardMaterial color={item.story ? '#e7edf0' : '#edf1f2'} />
       </mesh>
@@ -183,8 +191,170 @@ function CameraRig({ graph, scan, floor, reset }: Pick<ViewerProps, 'graph' | 's
   return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={200} maxPolarAngle={Math.PI / 2.05} />;
 }
 
+function DropController({ request, onDrop }: { request?: DropRequest | null; onDrop?: ViewerProps['onWalkerDrop'] }) {
+  const { camera, gl, raycaster, scene } = useThree();
+  const handled = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || !onDrop || handled.current === request.id) return;
+    handled.current = request.id;
+    const bounds = gl.domElement.getBoundingClientRect();
+    const pointer = new Vector2(
+      ((request.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((request.clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObjects(scene.children, true)
+      .find(item => item.object.userData.walkableFloor === true && typeof item.object.userData.floorId === 'string');
+    onDrop(hit ? { position: hit.point.toArray() as [number, number, number], floorId: hit.object.userData.floorId as string } : null);
+  }, [camera, gl, onDrop, raycaster, request, scene]);
+  return null;
+}
+
+function WalkerMarker({ location }: { location: WalkLocation }) {
+  return <group position={[location.position[0], location.position[1] + .02, location.position[2]]}>
+    <mesh position={[0, 1.42, 0]} castShadow>
+      <sphereGeometry args={[.18, 18, 18]} />
+      <meshStandardMaterial color="#f3b33d" />
+    </mesh>
+    <mesh position={[0, .92, 0]} castShadow>
+      <capsuleGeometry args={[.2, .55, 8, 16]} />
+      <meshStandardMaterial color="#267ac7" />
+    </mesh>
+    <mesh position={[-.12, .35, 0]} rotation={[0, 0, -.08]} castShadow>
+      <capsuleGeometry args={[.075, .55, 6, 10]} />
+      <meshStandardMaterial color="#163d5a" />
+    </mesh>
+    <mesh position={[.12, .35, 0]} rotation={[0, 0, .08]} castShadow>
+      <capsuleGeometry args={[.075, .55, 6, 10]} />
+      <meshStandardMaterial color="#163d5a" />
+    </mesh>
+    <mesh position={[0, .02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[.28, .4, 28]} />
+      <meshBasicMaterial color="#247aca" transparent opacity={.7} side={DoubleSide} />
+    </mesh>
+    <Html position={[0, 1.92, 0]} center distanceFactor={12}>
+      <span className="walker-label">Walk from here</span>
+    </Html>
+  </group>;
+}
+
+function WalkCamera({ location, graph, scan, onMove }: {
+  location: WalkLocation;
+  graph: Graph;
+  scan?: ScanFeatures;
+  onMove?: ViewerProps['onWalkerMove'];
+}) {
+  const { camera, gl } = useThree();
+  const keys = useRef(new Set<string>());
+  const dragging = useRef(false);
+  const lastPointer = useRef<[number, number]>([0, 0]);
+  const yaw = useRef(0);
+  const pitch = useRef(0);
+  const feet = useRef(new Vector3(...location.position));
+  const lastUpdate = useRef(0);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const perspective = camera as PerspectiveCamera;
+    const nearest = graph.nodes
+      .filter(node => node.floor === location.floorId && Math.hypot(node.position[0] - location.position[0], node.position[2] - location.position[2]) > .3)
+      .sort((a, b) => Math.hypot(a.position[0] - location.position[0], a.position[2] - location.position[2]) - Math.hypot(b.position[0] - location.position[0], b.position[2] - location.position[2]))[0];
+    feet.current.set(...location.position);
+    if (nearest) yaw.current = Math.atan2(location.position[0] - nearest.position[0], location.position[2] - nearest.position[2]);
+    pitch.current = 0;
+    camera.position.set(location.position[0], location.position[1] + 1.62, location.position[2]);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.set(0, yaw.current, 0);
+    if (perspective.isPerspectiveCamera) {
+      perspective.fov = 68;
+      perspective.updateProjectionMatrix();
+    }
+    canvas.tabIndex = 0;
+    canvas.style.cursor = 'grab';
+    canvas.focus();
+
+    const movementCodes = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
+    const keyDown = (event: KeyboardEvent) => {
+      if (movementCodes.has(event.code)) {
+        event.preventDefault();
+        keys.current.add(event.code);
+      }
+    };
+    const keyUp = (event: KeyboardEvent) => keys.current.delete(event.code);
+    const pointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      dragging.current = true;
+      lastPointer.current = [event.clientX, event.clientY];
+      canvas.style.cursor = 'grabbing';
+      canvas.setPointerCapture(event.pointerId);
+      canvas.focus();
+    };
+    const pointerMove = (event: PointerEvent) => {
+      if (!dragging.current) return;
+      const [x, y] = lastPointer.current;
+      yaw.current -= (event.clientX - x) * .004;
+      pitch.current = Math.max(-1.35, Math.min(1.35, pitch.current - (event.clientY - y) * .004));
+      lastPointer.current = [event.clientX, event.clientY];
+    };
+    const pointerUp = (event: PointerEvent) => {
+      dragging.current = false;
+      canvas.style.cursor = 'grab';
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+    const clear = () => { keys.current.clear(); dragging.current = false; canvas.style.cursor = 'grab'; };
+    window.addEventListener('keydown', keyDown, { passive: false });
+    window.addEventListener('keyup', keyUp);
+    window.addEventListener('blur', clear);
+    canvas.addEventListener('pointerdown', pointerDown);
+    canvas.addEventListener('pointermove', pointerMove);
+    canvas.addEventListener('pointerup', pointerUp);
+    canvas.addEventListener('pointercancel', pointerUp);
+    return () => {
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+      window.removeEventListener('blur', clear);
+      canvas.removeEventListener('pointerdown', pointerDown);
+      canvas.removeEventListener('pointermove', pointerMove);
+      canvas.removeEventListener('pointerup', pointerUp);
+      canvas.removeEventListener('pointercancel', pointerUp);
+      canvas.style.cursor = '';
+      if (perspective.isPerspectiveCamera) {
+        perspective.fov = 42;
+        perspective.updateProjectionMatrix();
+      }
+    };
+  }, [camera, gl, graph, location.floorId]);
+
+  useFrame((_, delta) => {
+    camera.rotation.set(pitch.current, yaw.current, 0);
+    const forward = Number(keys.current.has('KeyW') || keys.current.has('ArrowUp')) - Number(keys.current.has('KeyS') || keys.current.has('ArrowDown'));
+    const sideways = Number(keys.current.has('KeyD') || keys.current.has('ArrowRight')) - Number(keys.current.has('KeyA') || keys.current.has('ArrowLeft'));
+    if (!forward && !sideways) return;
+    const length = Math.hypot(forward, sideways);
+    const speed = (keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') ? 3.7 : 1.9) * Math.min(delta, .05);
+    const dx = ((-Math.sin(yaw.current) * forward) + (Math.cos(yaw.current) * sideways)) / length * speed;
+    const dz = ((-Math.cos(yaw.current) * forward) + (-Math.sin(yaw.current) * sideways)) / length * speed;
+    const current = feet.current.toArray() as [number, number, number];
+    let next: [number, number, number] = [current[0] + dx, current[1], current[2] + dz];
+    if (!canWalkBetween(current, next, location.floorId, graph, scan)) {
+      const alongX: [number, number, number] = [current[0] + dx, current[1], current[2]];
+      const alongZ: [number, number, number] = [current[0], current[1], current[2] + dz];
+      if (canWalkBetween(current, alongX, location.floorId, graph, scan)) next = alongX;
+      else if (canWalkBetween(current, alongZ, location.floorId, graph, scan)) next = alongZ;
+      else return;
+    }
+    feet.current.set(...next);
+    camera.position.set(next[0], next[1] + 1.62, next[2]);
+    if (onMove && performance.now() - lastUpdate.current > 180) {
+      lastUpdate.current = performance.now();
+      onMove({ position: next, floorId: location.floorId });
+    }
+  });
+  return null;
+}
+
 function Scene(props: ViewerProps) {
-  const { graph, scan, illustrative, floor, selected, onSelect, path, step, editing, onFloorPick } = props;
+  const { graph, scan, illustrative, floor, selected, onSelect, path, step, editing, onFloorPick, walker, walking } = props;
   const visibleNodes = graph.nodes.filter(node => floor === 'all' || node.floor === floor);
   const routeSegments = path.slice(1).map((node, index) => [path[index], node] as const)
     .filter(([from, to]) => floor === 'all' || (from.floor === floor && to.floor === floor));
@@ -217,12 +387,16 @@ function Scene(props: ViewerProps) {
       <sphereGeometry args={[.14, 12, 12]} />
       <meshBasicMaterial color="#2583df" />
     </mesh>)}
+    {walker && !walking && (floor === 'all' || floor === walker.floorId) && <WalkerMarker location={walker} />}
   </>;
 }
 
 export default function Viewer(props: ViewerProps) {
   return <Canvas camera={{ position: [24, 23, 27], fov: 42 }} gl={{ antialias: true }}>
     <Scene {...props} />
-    <CameraRig graph={props.graph} scan={props.scan} floor={props.floor} reset={props.reset} />
+    <DropController request={props.dropRequest} onDrop={props.onWalkerDrop} />
+    {props.walking && props.walker
+      ? <WalkCamera location={props.walker} graph={props.graph} scan={props.scan} onMove={props.onWalkerMove} />
+      : <CameraRig graph={props.graph} scan={props.scan} floor={props.floor} reset={props.reset} />}
   </Canvas>;
 }
