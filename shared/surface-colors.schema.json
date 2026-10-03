@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly surface colors",
+  "description": "Real-world colors for one zone, projected from scan photos onto RoomPlan surfaces. Identifiers match scan-features.json. The texture atlas is the sibling file named by `atlas`.",
+  "type": "object",
+  "required": ["schemaVersion", "zoneId", "atlas", "atlasWidth", "atlasHeight", "surfaces"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "zoneId": { "type": "string", "minLength": 1 },
+    "coordinateSystem": { "const": "arkit-world-meters" },
+    "capturedAt": { "type": "string" },
+    "atlas": { "type": "string", "description": "JPEG atlas file name, normally surface-colors.jpg." },
+    "atlasWidth": { "type": "integer", "minimum": 0 },
+    "atlasHeight": { "type": "integer", "minimum": 0 },
+    "texelMeters": { "type": "number", "description": "Approximate size of one atlas texel on the surface." },
+    "keyframeCount": { "type": "integer", "minimum": 0 },
+    "usedLidarDepth": { "type": "boolean", "description": "True when LiDAR depth was used to reject occluded photo samples." },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["identifier", "kind", "faces"],
+        "properties": {
+          "identifier": { "type": "string", "description": "RoomPlan identifier, as in scan-features.json." },
+          "kind": { "enum": ["wall", "door", "window", "opening", "floor", "object"] },
+          "faces": { "type": "array", "items": { "$ref": "#/$defs/face" } }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "face": {
+      "type": "object",
+      "required": ["face", "color", "coverage"],
+      "description": "Faces use three.js BoxGeometry names in the feature's local frame. Planar surfaces (walls, doors, windows, floors) have only pz and nz; objects also have px, nx and py. U/V axes: pz U=+x V=+y, nz U=-x V=+y, px U=-z V=+y, nx U=+z V=+y, py U=+x V=-z.",
+      "properties": {
+        "face": { "enum": ["px", "nx", "py", "pz", "nz"] },
+        "color": {
+          "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 3, "maxItems": 3,
+          "description": "Average sRGB color of the face."
+        },
+        "coverage": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of the face seen in at least one photo." },
+        "rect": {
+          "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 4, "maxItems": 4,
+          "description": "Atlas pixels [x, y, width, height] from the top-left. The rect's top row is v = 1 and u runs along the face's U axis. Absent when coverage was too low for a texture; use `color` instead."
+        }
+      }
+    }
+  }
+}

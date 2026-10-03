@@ -360,7 +360,7 @@ public class RelocalizationController : MonoBehaviour
         // Construct the map UI only after ARKit has accepted the saved world map. Creating a
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
-        indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera);
+        indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera, SurfaceColors.Load(zone.directory));
         indoorMap?.SetPackagePaths(
             Path.Combine(zone.directory, "structure.usdz"),
             Path.Combine(zone.directory, "building.json"),

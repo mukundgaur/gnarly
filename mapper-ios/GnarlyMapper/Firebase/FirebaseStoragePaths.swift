@@ -40,6 +40,14 @@ enum FirebaseStoragePaths {
         try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/structure.usdz"
     }
 
+    static func zoneSurfaceColors(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/surface-colors.json"
+    }
+
+    static func zoneSurfaceColorAtlas(buildingId: String, versionId: String, zoneId: String) throws -> String {
+        try zoneBase(buildingId: buildingId, versionId: versionId, zoneId: zoneId) + "/surface-colors.jpg"
+    }
+
     static func worldMap(buildingId: String, versionId: String, zoneId: String) throws -> String {
         try validate(zoneId, field: "zoneId")
         return try base(buildingId: buildingId, versionId: versionId) + "/worldmaps/\(zoneId).bin"
