@@ -68,7 +68,7 @@ The `Zone Id` field on `RelocalizationController` is the zone the user starts in
 2. Starts A* from the nearest node in the current zone. Destinations from every zone are listed, labeled with their zone.
 3. Splits the path into one leg per zone and draws only the current leg. On arriving at the leg's connector node, it applies the next zone's world map, shows **Entering &lt;zone&gt;… Look around**, and draws the next leg after relocalizing. **Reset map** relocalizes in the current zone and resumes the route.
 
-Multi-zone routing uses local `StreamingAssets` packages. The Firebase package holds one zone, so with `useFirebasePackages` the route stays inside that zone until the mapper uploads per-zone graphs and connections.
+With Firebase (`useFirebasePackages`, on by default), choosing a scan from the library downloads that zone and also tries every other zone of the same building into the offline cache. Other zones are then read from that cache. Connections are read from `buildings/{buildingId}/{versionId}/zone-connections.json` in Storage when present, otherwise from a bundled `StreamingAssets/zone-connections.json`. A zone that fails to download, for example because its version's `building.json` belongs to another zone, is logged and left out of routing. With Firebase off, every zone is read from `StreamingAssets/<zoneId>/`.
 
 ## Behavior
 

@@ -43,6 +43,6 @@ Still to do in the mapper:
 
 - At every place where zones meet, record a labeled node in **both** scans. For example, in `floor-1` add a node labeled `Stairs bottom` beside the staircase, and in `stairs-a` add `Landing bottom` at the same spot. Labels become stable node IDs (`stairs-bottom`, `landing-bottom`); RoomPlan-derived IDs such as `stairs-1a2b3c4d` change on every scan.
 - Export or author `zone-connections.json` that links those IDs. Until the mapper generates it, write it by hand.
-- Firebase stores only one `building.json` per version. Multi-zone navigation through Firebase also needs per-zone `building.json` files and `zone-connections.json` uploaded with the version. Until then, multi-zone navigation works only from local `StreamingAssets` packages.
+- Firebase stores only one `building.json` per version (`buildings/{buildingId}/{versionId}/building.json`), and the navigator requires its `zoneId` to match the zone being downloaded. A building with several zones therefore needs per-zone graphs in Firebase before every zone downloads. Also upload `zone-connections.json` to `buildings/{buildingId}/{versionId}/zone-connections.json`; the navigator downloads it when present.
 
 `building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

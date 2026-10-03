@@ -40,7 +40,7 @@ public class RelocalizationController : MonoBehaviour
     [SerializeField] FirebaseNavigationPackageLoader packageLoader;
     [SerializeField] string buildingId = "";
     [Tooltip("Enable after Firebase is configured. Disabled uses the packaged local scan so ARKit can relocalize immediately.")]
-    [SerializeField] bool useFirebasePackages;
+    [SerializeField] bool useFirebasePackages = true;
     [SerializeField] IndoorMapOverlay indoorMap;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] string floorId = "ground";
@@ -76,18 +76,31 @@ public class RelocalizationController : MonoBehaviour
 #endif
 
     /// <summary>
-    /// The start zone comes from the selected package (Firebase or StreamingAssets). Other zones are
-    /// read from StreamingAssets/&lt;zoneId&gt;/; the Firebase package currently holds one zone only.
+    /// The start zone comes from the selected package. Other zones come from the Firebase offline
+    /// cache for the same building, or from StreamingAssets/&lt;zoneId&gt;/ when Firebase is off.
     /// </summary>
     string ZoneDirectory(string zone)
     {
         if (zone == zoneId && packageDirectory != null) return packageDirectory;
-        return useFirebasePackages ? null : Path.Combine(Application.streamingAssetsPath, zone);
+        if (!useFirebasePackages) return Path.Combine(Application.streamingAssetsPath, zone);
+        return packageLoader != null && packageLoader.TryGetCachedZoneDirectory(buildingId, zone, out var directory)
+            ? directory
+            : null;
     }
 
-    string ZoneConnectionsPath => useFirebasePackages
-        ? Path.Combine(packageDirectory ?? "", ZoneConnectionsFileName)
-        : Path.Combine(Application.streamingAssetsPath, ZoneConnectionsFileName);
+    /// <summary>Prefers the connections downloaded with the Firebase version, then a bundled file.</summary>
+    string ZoneConnectionsPath
+    {
+        get
+        {
+            if (useFirebasePackages && packageDirectory != null)
+            {
+                var downloaded = Path.Combine(packageDirectory, ZoneConnectionsFileName);
+                if (File.Exists(downloaded)) return downloaded;
+            }
+            return Path.Combine(Application.streamingAssetsPath, ZoneConnectionsFileName);
+        }
+    }
 
     void Awake()
     {

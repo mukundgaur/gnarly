@@ -23,6 +23,7 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
     bool visible;
     bool busy;
     bool hasCachedPackage;
+    System.Collections.Generic.List<FirebaseScanChoice> library;
 
     public void Begin(
         string defaultBuildingId,
@@ -92,6 +93,10 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         if (GUILayout.Button(busy ? "Working…" : "Sign in and download", GUILayout.Height(82)))
             _ = SignInAndDownloadAsync();
 
+        if (library != null)
+            foreach (var scan in library)
+                if (GUILayout.Button($"{scan.BuildingId} / {scan.ZoneId}", GUILayout.Height(64))) _ = DownloadSelectionAsync(scan);
+
         GUI.enabled = !busy && hasCachedPackage;
         if (GUILayout.Button("Use downloaded package offline", GUILayout.Height(82)))
             UseCachedPackage();
@@ -114,9 +119,9 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
             SetStatus("Signing in to Firebase…");
             await repository.SignInAsync(email, password);
             password = "";
-            SetStatus($"Signed in as {repository.UserId}. Downloading active version…");
-            var package = await repository.DownloadActivePackageAsync(buildingId, zoneId);
-            Complete(package);
+            SetStatus($"Signed in as {repository.UserId}. Loading scan library…");
+            library = await repository.ListAvailableScansAsync();
+            SetStatus(library.Count == 0 ? "No published scans are available." : "Choose a scan to download.");
         }
         catch (Exception exception)
         {
@@ -130,6 +135,58 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         {
             busy = false;
         }
+    }
+
+    async Task DownloadSelectionAsync(FirebaseScanChoice scan)
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            buildingId = scan.BuildingId;
+            zoneId = scan.ZoneId;
+            RememberSelection();
+            SetStatus($"Downloading {buildingId}/{zoneId}…");
+            var package = await repository.DownloadActivePackageAsync(buildingId, zoneId);
+            await DownloadOtherZonesAsync(scan);
+            Complete(package);
+        }
+        catch (Exception exception)
+        {
+            SetStatus(exception.Message);
+            Debug.LogError($"[Gnarly] Firebase scan download failed: {exception}");
+        }
+        finally { busy = false; }
+    }
+
+    /// <summary>
+    /// Multi-zone routes (floor → stairs → floor) relocalize in each zone's own map, so the
+    /// building's other zones are cached too. A zone that fails is only unavailable for routing.
+    /// </summary>
+    async Task DownloadOtherZonesAsync(FirebaseScanChoice selected)
+    {
+        foreach (var other in library)
+        {
+            if (other.BuildingId != selected.BuildingId || other.ZoneId == selected.ZoneId) continue;
+            try
+            {
+                SetStatus($"Downloading connected zone {other.ZoneId}…");
+                await repository.DownloadActivePackageAsync(other.BuildingId, other.ZoneId);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[Gnarly] Zone {other.ZoneId} is unavailable for multi-zone routes: {exception.Message}");
+            }
+        }
+    }
+
+    public bool TryGetCachedZoneDirectory(string cachedBuildingId, string cachedZoneId, out string directory)
+    {
+        directory = null;
+        if (repository == null || !repository.TryGetCachedPackage(cachedBuildingId, cachedZoneId, out var package))
+            return false;
+        directory = package.DirectoryPath;
+        return true;
     }
 
     void UseCachedPackage()

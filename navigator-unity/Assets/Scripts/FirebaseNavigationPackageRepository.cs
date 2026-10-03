@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using System.Xml;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -122,6 +123,9 @@ public sealed class FirebaseNavigationPackageRepository
             await DownloadStorageObjectAsync(expectedBuildingPath, buildingFile, "building.json");
             await DownloadStorageObjectAsync(expectedWorldMapPath, worldMapFile, "ARWorldMap");
             ValidatePackageFiles(buildingFile, worldMapFile, zoneId);
+            await TryDownloadZoneConnectionsAsync(
+                $"buildings/{buildingId}/{versionId}/zone-connections.json",
+                Path.Combine(staging, "zone-connections.json"));
             File.WriteAllText(Path.Combine(staging, "package.json"), JsonUtility.ToJson(new CacheManifest
             {
                 buildingId = buildingId,
@@ -143,6 +147,24 @@ public sealed class FirebaseNavigationPackageRepository
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
             throw;
         }
+    }
+
+    public async Task<List<FirebaseScanChoice>> ListAvailableScansAsync()
+    {
+        await EnsureFreshTokenAsync();
+        var result = new List<FirebaseScanChoice>();
+        foreach (var building in await ListDocumentsAsync("buildings", "scan library buildings"))
+        {
+            var buildingId = LastPathComponent(building.name);
+            var versionId = building.fields?.activeVersion?.stringValue;
+            if (string.IsNullOrEmpty(buildingId) || string.IsNullOrEmpty(versionId)) continue;
+            foreach (var zone in await ListDocumentsAsync($"buildings/{buildingId}/versions/{versionId}/zones", "scan library zones"))
+            {
+                var zoneId = LastPathComponent(zone.name);
+                if (!string.IsNullOrEmpty(zoneId)) result.Add(new FirebaseScanChoice(buildingId, versionId, zoneId));
+            }
+        }
+        return result;
     }
 
     public bool TryGetCachedPackage(string buildingId, string zoneId, out DownloadedNavigationPackage package)
@@ -222,6 +244,32 @@ public sealed class FirebaseNavigationPackageRepository
             throw new FirebaseNavigationException($"Firestore {operation} returned no fields.");
         return document;
     }
+
+    async Task<List<FirestoreDocument>> ListDocumentsAsync(string collectionPath, string operation)
+    {
+        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{collectionPath}";
+        using var request = UnityWebRequest.Get(url);
+        request.SetRequestHeader("Authorization", "Bearer " + idToken);
+        var response = JsonUtility.FromJson<FirestoreListResponse>(await SendForTextAsync(request, "Firestore " + operation));
+        return response?.documents == null ? new List<FirestoreDocument>() : new List<FirestoreDocument>(response.documents);
+    }
+
+    /// <summary>zone-connections.json is optional; a missing or invalid file leaves the package single-zone.</summary>
+    async Task TryDownloadZoneConnectionsAsync(string objectPath, string destination)
+    {
+        try
+        {
+            await DownloadStorageObjectAsync(objectPath, destination, "zone-connections.json");
+            Pathfinding.ParseConnections(File.ReadAllText(destination));
+        }
+        catch (Exception exception)
+        {
+            if (File.Exists(destination)) File.Delete(destination);
+            Debug.Log($"[Gnarly] No zone connections at {objectPath}: {exception.Message}");
+        }
+    }
+
+    static string LastPathComponent(string path) => string.IsNullOrEmpty(path) ? "" : path.Substring(path.LastIndexOf('/') + 1);
 
     async Task DownloadStorageObjectAsync(string objectPath, string destination, string label)
     {
@@ -420,8 +468,10 @@ public sealed class FirebaseNavigationPackageRepository
 
     [Serializable] sealed class FirestoreDocument
     {
+        public string name;
         public FirestoreFields fields;
     }
+    [Serializable] sealed class FirestoreListResponse { public FirestoreDocument[] documents; }
 
     [Serializable] sealed class FirestoreFields
     {
@@ -497,6 +547,15 @@ public sealed class DownloadedNavigationPackage
         DirectoryPath = directoryPath;
         IsOfflineCache = isOfflineCache;
     }
+}
+
+public sealed class FirebaseScanChoice
+{
+    public string BuildingId { get; }
+    public string VersionId { get; }
+    public string ZoneId { get; }
+    public FirebaseScanChoice(string buildingId, string versionId, string zoneId)
+    { BuildingId = buildingId; VersionId = versionId; ZoneId = zoneId; }
 }
 
 public sealed class FirebaseNavigationException : Exception
