@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "zoneId": "zone-a",
+  "position": [0.0, 0.0, -2.0],
+  "coordinateSystem": "arkit-world-meters",
+  "capturedAt": "2026-10-02T00:00:00Z",
+  "notes": "Illustrative coordinates only; not captured from a physical environment."
+}

@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode / Swift
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+
+# Unity generated files
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+MemoryCaptures/
+Recordings/
+
+# Local test artifacts are device/site-specific and may be large.
+shared/local-packages/
+
+# Secrets and Firebase configuration
+GoogleService-Info.plist
+google-services.json
+.env
