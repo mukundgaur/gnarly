@@ -6,6 +6,9 @@ struct ContentView: View {
     @StateObject private var mapper = MapperViewModel()
     @State private var zoneID = "1"
     @State private var floorID = "ground"
+    @State private var floorZoneID = "1"
+    @State private var stairID = ""
+    @State private var floorIsBelow = true
     @State private var buildingID = "main-building"
     @State private var versionID = "v1"
     @State private var zoneConnectionsJSON = "{\n  \"schemaVersion\": 1,\n  \"connections\": []\n}"
@@ -79,11 +82,29 @@ struct ContentView: View {
                         .disabled(!mapper.canMarkAnchor)
 
                     Button {
-                        mapper.exportPackage(zoneID: zoneID, floorID: floorID)
+                        mapper.exportPackage(
+                            zoneID: zoneID,
+                            floorID: floorID,
+                            asStairs: mapper.isStairScan,
+                            stairID: stairID,
+                            linkedFloorZoneID: floorZoneID,
+                            floorIsBelow: floorIsBelow
+                        )
                     } label: {
                         CaptureActionLabel(title: "Export", systemImage: "square.and.arrow.down", highlighted: false)
                     }
                         .disabled(!mapper.canExport)
+
+                    Button {
+                        let id = stairID.isEmpty ? (mapper.detectedStairs.first?.id ?? "") : stairID
+                        stairID = id
+                        floorZoneID = mapper.isStairScan ? floorZoneID : zoneID
+                        mapper.beginStairScan(stairID: id)
+                        if !id.isEmpty { zoneID = id }
+                    } label: {
+                        CaptureActionLabel(title: "Stairs", systemImage: "figure.stairs", highlighted: mapper.isStairScan)
+                    }
+                        .disabled(mapper.isScanning || (stairID.isEmpty && mapper.detectedStairs.isEmpty && mapper.catalog.stairs.isEmpty))
                 }
             }
             .frame(maxWidth: 500)
@@ -91,6 +112,14 @@ struct ContentView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+        }
+        .onAppear { zoneConnectionsJSON = mapper.zoneConnectionsJSON }
+        .onChange(of: mapper.zoneConnectionsJSON) { _, newValue in
+            zoneConnectionsJSON = newValue
+        }
+        .onChange(of: mapper.detectedStairs.map(\.id)) { _, ids in
+            guard stairID.isEmpty, let first = ids.first else { return }
+            stairID = first
         }
         .alert("Mapper error", isPresented: $mapper.showsError) {
             Button("OK", role: .cancel) {}
@@ -154,8 +183,20 @@ struct ContentView: View {
                     }
 
                     Section("Stair and zone links") {
-                        Text("Use node IDs from each exported zone’s building.json. Connections are bidirectional.")
+                        Text("RoomPlan stair objects fill these links. A floor node connects to landing-below or landing-above in the stair zone. Publish the JSON so the navigator can cross floors.")
                             .font(.caption)
+                        Picker("This floor is", selection: $floorIsBelow) {
+                            Text("Below the stairs").tag(true)
+                            Text("Above the stairs").tag(false)
+                        }
+                        if !mapper.detectedStairs.isEmpty || !mapper.catalog.stairs.isEmpty {
+                            Picker("Stair zone", selection: $stairID) {
+                                Text("Detected stair").tag("")
+                                ForEach(Array(Set(mapper.detectedStairs.map(\.id) + mapper.catalog.stairs.map(\.id))).sorted(), id: \.self) { id in
+                                    Text(id).tag(id)
+                                }
+                            }
+                        }
                         TextEditor(text: $zoneConnectionsJSON)
                             .font(.system(.caption, design: .monospaced))
                             .frame(minHeight: 150)

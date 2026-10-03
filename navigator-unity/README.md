@@ -53,6 +53,7 @@ All five files are downloaded to `Application.persistentDataPath/navigation-cach
 | `building.json` | Yes | Graph nodes/edges plus destination labels ([schema](../shared/building.schema.json)) |
 | `structure.usdz` | Yes | Original RoomPlan building geometry rendered in the expanded iPhone map |
 | `route.json` | No | Fallback polyline if A* has no destination ([schema](../shared/route.schema.json)) |
+| `stairs.json` | No | Separate stair zones, with `prev`/`next` floors and the floor lookup ([schema](../shared/stairs.schema.json)) |
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
 
@@ -94,6 +95,8 @@ Tap the minimap (top right, below the status card) at any time to open the full-
 - **3D view** (iPhone only, when `structure.usdz` is in the package): opens the RealityKit RoomPlan view with the planner's selection. One finger orbits, pinching zooms, and two fingers pan. Tap a dot, then **Set as Start** or **Set as Destination**. **My Location**, **Swap** and **Clear** work as in the planner. **Start Navigation** sends local node IDs back to `RelocalizationController` through `OnIndoorMapRouteRequested`, with an empty `startId` meaning my location.
 
 When you start from a point other than your location, the AR ribbon still guides you from where you are to the nearest point on that route, then along it.
+
+A stair on the floor is a portal into another world map. Choosing it, or arriving there, opens that stair zone only when `StreamingAssets/<stair-zone>/worldmap-<stair-zone>.bin` exists. The stair map draws the landing below and the landing above. **Down** and **Up** follow `prev` and `next`, and the floor you land on comes from `floorIndex`. Each of those floors is its own scanned map.
 
 ARKit positions are converted to Unity by negating Z (right-handed to left-handed).
 

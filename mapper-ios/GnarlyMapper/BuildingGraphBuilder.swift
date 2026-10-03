@@ -63,7 +63,10 @@ enum BuildingGraphBuilder {
         }
 
         for object in room.objects where object.category == .stairs {
-            let id = uniqueID(preferred: "stairs-\(shortID(object.identifier))", used: &usedIDs)
+            let id = uniqueID(
+                preferred: StairZoneID.make(roomPlanIdentifier: object.identifier.uuidString),
+                used: &usedIDs
+            )
             nodes.append(
                 BuildingNode(
                     id: id,
@@ -120,7 +123,131 @@ enum BuildingGraphBuilder {
             floors: [floor],
             nodes: nodes,
             edges: edges,
-            notes: "Walked-path nodes are sampled automatically as the mapper moves, with optional manual points, in capture order. RoomPlan doors, openings, stairs, and sections use visibility edges that skip walls except at portals."
+            notes: "Walked-path nodes are sampled automatically as the mapper moves, with optional manual points, in capture order. RoomPlan doors, openings, stairs, and sections use visibility edges that skip walls except at portals. Stairs nodes are portals into a separate stair-zone world map."
+        )
+    }
+
+    /// Graph for a stair zone's own world map: one landing on the floor below and one on the floor above.
+    static func buildStairZone(
+        stair: StairZoneNode,
+        capturedAt: String,
+        recorded: [RecordedGraphNode],
+        landingBelow: [Float],
+        landingAbove: [Float]
+    ) -> BuildingGraph {
+        let belowFloorID = stair.prev?.floorID ?? "below"
+        let aboveFloorID = stair.next?.floorID ?? "above"
+        var floors = [
+            BuildingFloor(id: belowFloorID, story: stair.prev?.story ?? 0, elevation: landingBelow.count == 3 ? landingBelow[1] : 0),
+            BuildingFloor(id: aboveFloorID, story: stair.next?.story ?? 1, elevation: landingAbove.count == 3 ? landingAbove[1] : 0)
+        ]
+        if !floors.contains(where: { $0.id == "stairs" }) {
+            floors.append(BuildingFloor(id: "stairs", story: stair.prev?.story ?? 0, elevation: landingBelow.count == 3 ? landingBelow[1] : 0))
+        }
+
+        var usedIDs = Set<String>()
+        var nodes: [BuildingNode] = [
+            BuildingNode(
+                id: uniqueID(preferred: "landing-below", used: &usedIDs),
+                floor: belowFloorID,
+                type: GraphNodeType.stairs.rawValue,
+                position: landingBelow,
+                source: "roomplan-hint",
+                label: "floor below",
+                roomPlanIdentifier: stair.roomPlanIdentifier
+            ),
+            BuildingNode(
+                id: uniqueID(preferred: "landing-above", used: &usedIDs),
+                floor: aboveFloorID,
+                type: GraphNodeType.stairs.rawValue,
+                position: landingAbove,
+                source: "roomplan-hint",
+                label: "floor above",
+                roomPlanIdentifier: stair.roomPlanIdentifier
+            )
+        ]
+
+        for (index, record) in recorded.enumerated() {
+            let id = uniqueID(preferred: recordedID(record, index: index), used: &usedIDs)
+            nodes.append(
+                BuildingNode(
+                    id: id,
+                    floor: "stairs",
+                    type: record.type.rawValue,
+                    position: record.position,
+                    source: "walked-path",
+                    label: record.label,
+                    roomPlanIdentifier: nil
+                )
+            )
+        }
+
+        var edges: [BuildingEdge] = []
+        if let below = nodes.first(where: { $0.id == "landing-below" }),
+           let above = nodes.first(where: { $0.id == "landing-above" }) {
+            edges.append(
+                BuildingEdge(
+                    from: below.id,
+                    to: above.id,
+                    kind: "stairs",
+                    meters: distance(below.position, above.position),
+                    source: "manual"
+                )
+            )
+        }
+
+        let recordedNodes = nodes.filter { $0.source == "walked-path" }
+        if recordedNodes.count >= 2 {
+            for index in 0 ..< (recordedNodes.count - 1) {
+                let from = recordedNodes[index]
+                let to = recordedNodes[index + 1]
+                edges.append(
+                    BuildingEdge(
+                        from: from.id,
+                        to: to.id,
+                        kind: "hallway",
+                        meters: distance(from.position, to.position),
+                        source: "walked-path"
+                    )
+                )
+            }
+        }
+
+        if let below = nodes.first(where: { $0.id == "landing-below" }),
+           let lowest = recordedNodes.min(by: { $0.position[1] < $1.position[1] }) {
+            edges.append(
+                BuildingEdge(
+                    from: below.id,
+                    to: lowest.id,
+                    kind: "stairs",
+                    meters: distance(below.position, lowest.position),
+                    source: "manual"
+                )
+            )
+        }
+        if let above = nodes.first(where: { $0.id == "landing-above" }),
+           let highest = recordedNodes.max(by: { $0.position[1] < $1.position[1] }) {
+            edges.append(
+                BuildingEdge(
+                    from: highest.id,
+                    to: above.id,
+                    kind: "stairs",
+                    meters: distance(highest.position, above.position),
+                    source: "manual"
+                )
+            )
+        }
+
+        return BuildingGraph(
+            schemaVersion: 1,
+            zoneID: stair.zoneID,
+            coordinateSystem: "arkit-world-meters",
+            heightReference: "device",
+            capturedAt: capturedAt,
+            floors: floors,
+            nodes: nodes,
+            edges: edges,
+            notes: "Stair zone map, separate from the floor maps it links. landing-below is prev (the floor below) and landing-above is next (the floor above)."
         )
     }
 

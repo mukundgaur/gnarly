@@ -8,7 +8,9 @@ enum POCPackageExporter {
         worldMap: ARWorldMap,
         anchor: TestAnchor,
         recordedNodes: [RecordedGraphNode],
-        floorID: String
+        floorID: String,
+        map: ExportedMap = .floor,
+        stairs: StairCatalog? = nil
     ) throws -> URL {
         let documentsDirectory = try FileManager.default.url(
             for: .documentDirectory,
@@ -47,14 +49,25 @@ enum POCPackageExporter {
         let features = RoomPlanScanExtractor.features(from: room, zoneID: safeZoneID, capturedAt: capturedAt)
         try encoder.encode(features).write(to: packageURL.appendingPathComponent("scan-features.json"), options: .atomic)
 
-        let graph = BuildingGraphBuilder.build(
+        let graph = graph(
+            map: map,
             zoneID: safeZoneID,
             floorID: floorID,
             capturedAt: capturedAt,
             room: room,
-            recorded: recordedNodes
+            recordedNodes: recordedNodes,
+            stairs: stairs
         )
         try encoder.encode(graph).write(to: packageURL.appendingPathComponent("building.json"), options: .atomic)
+
+        if let stairs, !stairs.stairs.isEmpty {
+            let document = stairs.document(capturedAt: capturedAt)
+            try encoder.encode(document).write(to: packageURL.appendingPathComponent("stairs.json"), options: .atomic)
+            let zoneConnections = stairs.navigatorZoneConnections()
+            if !zoneConnections.connections.isEmpty {
+                try encoder.encode(zoneConnections).write(to: packageURL.appendingPathComponent("zone-connections.json"), options: .atomic)
+            }
+        }
 
         if let route = BuildingGraphBuilder.route(from: graph, recordedCount: recordedNodes.count) {
             try encoder.encode(route).write(to: packageURL.appendingPathComponent("route.json"), options: .atomic)
@@ -76,6 +89,12 @@ enum POCPackageExporter {
         if recordedNodes.count >= 2 {
             files.append("route.json")
         }
+        if let stairs, !stairs.stairs.isEmpty {
+            files.append("stairs.json")
+            if !stairs.navigatorZoneConnections().connections.isEmpty {
+                files.append("zone-connections.json")
+            }
+        }
 
         let manifest = PackageManifest(
             schemaVersion: 1,
@@ -87,5 +106,66 @@ enum POCPackageExporter {
         try encoder.encode(manifest).write(to: packageURL.appendingPathComponent("manifest.json"), options: .atomic)
 
         return packageURL
+    }
+
+    private static func graph(
+        map: ExportedMap,
+        zoneID: String,
+        floorID: String,
+        capturedAt: String,
+        room: CapturedRoom,
+        recordedNodes: [RecordedGraphNode],
+        stairs: StairCatalog?
+    ) -> BuildingGraph {
+        switch map {
+        case .floor:
+            let floorGraph = BuildingGraphBuilder.build(
+                zoneID: zoneID,
+                floorID: floorID,
+                capturedAt: capturedAt,
+                room: room,
+                recorded: recordedNodes
+            )
+            guard let stairs else { return floorGraph }
+            return StairPortalAlignment.align(graph: floorGraph, catalog: stairs, floorID: floorID)
+        case .stairZone(let id):
+            let stair = stairs?.stair(id: id) ?? StairZoneNode(
+                id: id,
+                zoneID: id,
+                roomPlanIdentifier: nil,
+                detectedOnFloorID: nil,
+                detectedOnZoneID: nil,
+                position: [0, 0, 0],
+                prev: nil,
+                next: nil,
+                scanned: true,
+                landingBelow: nil,
+                landingAbove: nil
+            )
+            let landings = landings(for: stair, recorded: recordedNodes)
+            return BuildingGraphBuilder.buildStairZone(
+                stair: stair,
+                capturedAt: capturedAt,
+                recorded: recordedNodes,
+                landingBelow: stair.landingBelow ?? landings.below,
+                landingAbove: stair.landingAbove ?? landings.above
+            )
+        }
+    }
+
+    private static func landings(
+        for stair: StairZoneNode,
+        recorded: [RecordedGraphNode]
+    ) -> (below: [Float], above: [Float]) {
+        if let below = stair.landingBelow, let above = stair.landingAbove {
+            return (below, above)
+        }
+        let center = recorded.first?.position ?? stair.position
+        return StairLandings.positions(
+            center: center,
+            dimensions: [1.2, 3, 2.5],
+            up: [0, 1, 0],
+            forward: [0, 0, 1]
+        )
     }
 }

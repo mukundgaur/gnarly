@@ -28,6 +28,21 @@ enum RoomPlanScanExtractor {
         )
     }
 
+    static func detectedStairs(in room: CapturedRoom) -> [DetectedStair] {
+        room.objects.compactMap { object in
+            guard object.category == .stairs else { return nil }
+            return DetectedStair(
+                id: StairZoneID.make(roomPlanIdentifier: object.identifier.uuidString),
+                roomPlanIdentifier: object.identifier.uuidString,
+                position: translation(object.transform),
+                dimensions: vector3(object.dimensions),
+                up: [object.transform.columns.1.x, object.transform.columns.1.y, object.transform.columns.1.z],
+                forward: [object.transform.columns.2.x, object.transform.columns.2.y, object.transform.columns.2.z],
+                story: object.story
+            )
+        }
+    }
+
     private static func surfaceFeature(_ surface: CapturedRoom.Surface) -> ScanFeatureSurface {
         ScanFeatureSurface(
             identifier: surface.identifier.uuidString,
