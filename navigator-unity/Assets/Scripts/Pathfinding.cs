@@ -147,6 +147,13 @@ public static class Pathfinding
         public readonly List<Edge> Edges = new List<Edge>();
         /// <summary>RoomPlan walls (plus windows and short corner seals) that neighbor tests cannot cross.</summary>
         public readonly List<Wall> Walls = new List<Wall>();
+        /// <summary>
+        /// Floor surface height (ARKit y) keyed by floor id, or <see cref="AnyFloor"/> for the zone's default.
+        /// In a combined graph the keys are <see cref="ZoneKey"/>(zone, floor).
+        /// </summary>
+        public readonly Dictionary<string, float> FloorHeights = new Dictionary<string, float>();
+        /// <summary>Zones whose building.json places nodes at phone height and has no known floor height.</summary>
+        public readonly HashSet<string> DeviceHeightZones = new HashSet<string>();
         readonly Dictionary<string, List<Edge>> adjacency = new Dictionary<string, List<Edge>>();
         readonly Dictionary<string, Node> nodesById = new Dictionary<string, Node>();
 
@@ -214,7 +221,16 @@ public static class Pathfinding
 
         public List<Node> Destinations() =>
             Nodes.FindAll(n => n.type == "destination");
+
+        public bool TryFloorHeight(Node node, out float height)
+        {
+            var prefix = node.zone == null ? "" : node.zone + "/";
+            return (node.floor != null && FloorHeights.TryGetValue(prefix + node.floor, out height)) ||
+                   FloorHeights.TryGetValue(prefix + AnyFloor, out height);
+        }
     }
+
+    public const string AnyFloor = "*";
 
     public static ScanFeatures ParseScan(string json)
     {
@@ -258,6 +274,9 @@ public static class Pathfinding
         foreach (var pair in zoneGraphs)
         {
             var zone = pair.Key;
+            foreach (var height in pair.Value.FloorHeights)
+                combined.FloorHeights[ZoneKey(zone, height.Key)] = height.Value;
+            if (pair.Value.DeviceHeightZones.Count > 0) combined.DeviceHeightZones.Add(zone);
             foreach (var node in pair.Value.Nodes)
             {
                 combined.AddNode(new Node
@@ -383,6 +402,8 @@ public static class Pathfinding
                 graph.AddNode(node);
         }
 
+        AddFloorHeights(graph, scan, building);
+
         var walls = BuildWalls(scan?.walls);
         // A window is a hole in its parent wall, not a way through. Keep it solid.
         if (scan?.windows != null) walls.AddRange(BuildWalls(scan.windows));
@@ -421,6 +442,53 @@ public static class Pathfinding
         Debug.Log($"[Gnarly] Zone '{graph.zoneId}': {graph.Nodes.Count} nodes, {graph.Edges.Count} edges, {graph.Walls.Count} walls. Dropped {dropped} blocked edge(s).");
 
         return graph;
+    }
+
+    /// <summary>
+    /// Node heights are not floor heights: walked nodes are at phone height and RoomPlan doors,
+    /// openings, objects and sections are at their centers. A zone with several floors (a stairwell)
+    /// uses building.json's per-floor elevations; otherwise the scanned floor surface is preferred,
+    /// then the lowest wall bottom, then building.json's single floor elevation.
+    /// </summary>
+    static void AddFloorHeights(Graph graph, ScanFeatures scan, BuildingDocument building)
+    {
+        var floors = building?.floors;
+        if (floors != null && floors.Length > 1)
+        {
+            foreach (var floor in floors)
+                if (!string.IsNullOrEmpty(floor.id)) graph.FloorHeights[floor.id] = floor.elevation;
+        }
+
+        var scanned = ScannedFloorHeight(scan);
+        if (scanned.HasValue)
+            graph.FloorHeights[AnyFloor] = scanned.Value;
+        else if (floors != null && floors.Length == 1)
+            graph.FloorHeights[AnyFloor] = floors[0].elevation;
+
+        if (graph.FloorHeights.Count == 0 && building?.heightReference == "device")
+            graph.DeviceHeightZones.Add(graph.zoneId ?? "");
+    }
+
+    static float? ScannedFloorHeight(ScanFeatures scan)
+    {
+        float? lowest = null;
+        if (scan?.floors != null)
+        {
+            foreach (var floor in scan.floors)
+            {
+                if (floor.position == null || floor.position.Length != 3) continue;
+                lowest = Mathf.Min(lowest ?? float.MaxValue, floor.position[1]);
+            }
+        }
+        if (lowest.HasValue || scan?.walls == null) return lowest;
+
+        foreach (var wall in scan.walls)
+        {
+            if (wall.position == null || wall.position.Length != 3) continue;
+            var height = wall.dimensions != null && wall.dimensions.Length > 1 ? wall.dimensions[1] : 2.4f;
+            lowest = Mathf.Min(lowest ?? float.MaxValue, wall.position[1] - height * 0.5f);
+        }
+        return lowest;
     }
 
     static void AddPortals(Graph graph, Surface[] surfaces, string type, string floorId)
@@ -609,7 +677,10 @@ public static class Pathfinding
         for (var i = 0; i < nodeIds.Count; i++)
         {
             var node = graph.Node(nodeIds[i]);
-            waypoints[i] = new Route.Waypoint { id = node.id, position = node.position };
+            var position = node.position;
+            if (graph.TryFloorHeight(node, out var floorHeight))
+                position = new[] { position[0], floorHeight, position[2] };
+            waypoints[i] = new Route.Waypoint { id = node.id, position = position };
         }
 
         return new Route
@@ -617,9 +688,19 @@ public static class Pathfinding
             schemaVersion = 1,
             zoneId = zoneId,
             coordinateSystem = "arkit-world-meters",
-            heightReference = "floor",
+            heightReference = graph.DeviceHeightZones.Contains(zoneId ?? "") ? "device" : "floor",
             waypoints = waypoints
         };
+    }
+
+    /// <summary>Puts a route.json polyline on the zone's floor when the floor height is known.</summary>
+    public static void SnapToFloor(Route route, Graph zoneGraph)
+    {
+        if (route?.waypoints == null || zoneGraph == null) return;
+        if (!zoneGraph.FloorHeights.TryGetValue(AnyFloor, out var floorHeight)) return;
+        foreach (var waypoint in route.waypoints)
+            waypoint.position = new[] { waypoint.position[0], floorHeight, waypoint.position[2] };
+        route.heightReference = "floor";
     }
 
     static List<string> Reconstruct(Dictionary<string, string> cameFrom, string current)

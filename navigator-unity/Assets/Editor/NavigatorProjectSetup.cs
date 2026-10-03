@@ -49,6 +49,13 @@ public static class NavigatorProjectSetup
         PlayerSettings.iOS.targetOSVersionString = "16.0";
         PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneOnly;
         PlayerSettings.iOS.sdkVersion = iOSSdkVersion.DeviceSDK;
+        // The AR camera pose, projection and background are each derived from the interface
+        // orientation; autorotation lets them disagree for a frame or more and the UI is portrait-only.
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+        PlayerSettings.allowedAutorotateToPortrait = false;
+        PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+        PlayerSettings.allowedAutorotateToLandscapeLeft = false;
+        PlayerSettings.allowedAutorotateToLandscapeRight = false;
 
         var playerSettings = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset")[0]);
         playerSettings.FindProperty("iOSRequireARKit").boolValue = true;

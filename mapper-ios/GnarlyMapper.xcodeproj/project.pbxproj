@@ -56,7 +56,7 @@
 		1C3D4151438BA4F447447710 /* FirebaseConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseConnectionView.swift; sourceTree = "<group>"; };
 		2505E055555618BFB65FBE74 /* FirebaseModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseModelsTests.swift; sourceTree = "<group>"; };
 		37865E09DF2725742DB2E99E /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
-		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanScanExtractor.swift; sourceTree = "<group>"; };
 		63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnarlyMapperApp.swift; sourceTree = "<group>"; };
 		689A113367066A5B0CBDA816 /* NavigationFileCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationFileCacheTests.swift; sourceTree = "<group>"; };
@@ -406,6 +406,7 @@
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YVPR732M4U;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -488,6 +489,7 @@
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YVPR732M4U;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

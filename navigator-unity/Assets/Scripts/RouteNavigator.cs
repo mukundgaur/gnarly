@@ -246,7 +246,7 @@ public class RouteNavigator : MonoBehaviour
             else
             {
                 marker.transform.localScale = Vector3.one * 0.12f;
-                marker.transform.localPosition = basePosition;
+                marker.transform.localPosition = basePosition + Vector3.up * 0.06f;
             }
 
             var renderer = marker.GetComponent<Renderer>();
