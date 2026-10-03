@@ -23,6 +23,7 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
     bool visible;
     bool busy;
     bool hasCachedPackage;
+    System.Collections.Generic.List<FirebaseScanChoice> library;
 
     public void Begin(
         string defaultBuildingId,
@@ -92,6 +93,10 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         if (GUILayout.Button(busy ? "Working…" : "Sign in and download", GUILayout.Height(82)))
             _ = SignInAndDownloadAsync();
 
+        if (library != null)
+            foreach (var scan in library)
+                if (GUILayout.Button($"{scan.BuildingId} / {scan.ZoneId}", GUILayout.Height(64))) _ = DownloadSelectionAsync(scan);
+
         GUI.enabled = !busy && hasCachedPackage;
         if (GUILayout.Button("Use downloaded package offline", GUILayout.Height(82)))
             UseCachedPackage();
@@ -114,9 +119,9 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
             SetStatus("Signing in to Firebase…");
             await repository.SignInAsync(email, password);
             password = "";
-            SetStatus($"Signed in as {repository.UserId}. Downloading active version…");
-            var package = await repository.DownloadActivePackageAsync(buildingId, zoneId);
-            Complete(package);
+            SetStatus($"Signed in as {repository.UserId}. Loading scan library…");
+            library = await repository.ListAvailableScansAsync();
+            SetStatus(library.Count == 0 ? "No published scans are available." : "Choose a scan to download.");
         }
         catch (Exception exception)
         {
@@ -130,6 +135,15 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         {
             busy = false;
         }
+    }
+
+    async Task DownloadSelectionAsync(FirebaseScanChoice scan)
+    {
+        if (busy) return;
+        busy = true;
+        try { buildingId = scan.BuildingId; zoneId = scan.ZoneId; RememberSelection(); Complete(await repository.DownloadActivePackageAsync(buildingId, zoneId)); }
+        catch (Exception exception) { SetStatus(exception.Message); }
+        finally { busy = false; }
     }
 
     void UseCachedPackage()
