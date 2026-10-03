@@ -19,6 +19,10 @@ public class RouteNavigator : MonoBehaviour
     [Tooltip("Fraction of the screen edge treated as out of view.")]
     [SerializeField] float viewportMargin = 0.1f;
 
+    // Old scenes serialized this at 1 m. Never allow a saved value to make the generated
+    // sub-metre guidance points get skipped at runtime.
+    const float MaximumIntermediateReachRadius = 0.35f;
+
     Route route;
     Transform sessionSpace;
     Camera arCamera;
@@ -131,7 +135,8 @@ public class RouteNavigator : MonoBehaviour
     void AdvanceTarget(Vector3 cameraPosition)
     {
         var last = route.waypoints.Length - 1;
-        while (targetIndex < last && HorizontalDistance(cameraPosition, WaypointWorld(targetIndex)) < reachRadius)
+        var intermediateReachRadius = Mathf.Clamp(reachRadius, 0.1f, MaximumIntermediateReachRadius);
+        while (targetIndex < last && HorizontalDistance(cameraPosition, WaypointWorld(targetIndex)) < intermediateReachRadius)
             targetIndex++;
 
         if (targetIndex == last && HorizontalDistance(cameraPosition, WaypointWorld(last)) < arriveRadius)
