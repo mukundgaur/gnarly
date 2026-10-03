@@ -27,11 +27,15 @@ public class RelocalizationController : MonoBehaviour
     [SerializeField] RouteNavigator navigator;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] float cubeSize = 0.2f;
+    [Tooltip("ARKit can complete a fast relocalization without reporting the Relocalizing reason. Accept stable normal tracking after this delay.")]
+    [SerializeField] float normalTrackingConfirmationSeconds = 1.5f;
     [Tooltip("Debug only: skip the world map so coordinates are relative to where the app starts.")]
     [SerializeField] bool skipWorldMap;
 
     State state = State.WaitingForSession;
     bool sawRelocalizing;
+    string lastTrackingSnapshot;
+    float normalTrackingStartedAt = -1f;
     TestAnchor anchor;
     Route route;
     GameObject cube;
@@ -64,10 +68,26 @@ public class RelocalizationController : MonoBehaviour
                 break;
 
             case State.Locating:
+                ReportTrackingState();
                 if (ARSession.notTrackingReason == NotTrackingReason.Relocalizing)
                     sawRelocalizing = true;
-                if ((sawRelocalizing || skipWorldMap) && IsTrackingNormally())
-                    OnLocated();
+                if (IsTrackingNormally())
+                {
+                    if (normalTrackingStartedAt < 0f)
+                        normalTrackingStartedAt = Time.unscaledTime;
+
+                    // ARKit often switches straight from Initializing to normal tracking when
+                    // it recognizes a small room. Unity then never emits Relocalizing, even
+                    // though the initialWorldMap was applied. Waiting for that transient state
+                    // made the POC remain on "Locating" indefinitely.
+                    if (sawRelocalizing || skipWorldMap ||
+                        Time.unscaledTime - normalTrackingStartedAt >= normalTrackingConfirmationSeconds)
+                        OnLocated();
+                }
+                else
+                {
+                    normalTrackingStartedAt = -1f;
+                }
                 break;
 
             case State.Located:
@@ -108,8 +128,11 @@ public class RelocalizationController : MonoBehaviour
             if (!skipWorldMap)
                 ApplyWorldMap(File.ReadAllBytes(Path.Combine(PackageDirectory, $"worldmap-{zoneId}.bin")));
             sawRelocalizing = false;
+            lastTrackingSnapshot = null;
+            normalTrackingStartedAt = -1f;
             state = State.Locating;
             SetStatus("Locating… Look around the scanned area.");
+            ReportTrackingState(force: true);
         }
         catch (Exception e)
         {
@@ -157,6 +180,7 @@ public class RelocalizationController : MonoBehaviour
     {
         PlaceCube();
         state = State.Located;
+        Debug.Log("[Gnarly] ARKit relocalization confirmed; placing test cube.");
         if (route != null && navigator != null)
             navigator.Begin(route, origin.TrackablesParent, origin.Camera);
         else
@@ -184,6 +208,9 @@ public class RelocalizationController : MonoBehaviour
         if (cube != null) Destroy(cube);
         cube = null;
         if (navigator != null) navigator.Clear();
+        sawRelocalizing = false;
+        lastTrackingSnapshot = null;
+        normalTrackingStartedAt = -1f;
         state = State.WaitingForSession;
         session.Reset();
         SetStatus("Restarting…");
@@ -199,6 +226,23 @@ public class RelocalizationController : MonoBehaviour
     void SetStatus(string message)
     {
         if (statusText != null) statusText.text = message;
+    }
+
+    void ReportTrackingState(bool force = false)
+    {
+        var snapshot = $"{ARSession.state} / {ARSession.notTrackingReason}";
+        if (!force && snapshot == lastTrackingSnapshot) return;
+        lastTrackingSnapshot = snapshot;
+        Debug.Log($"[Gnarly] ARKit tracking state: {snapshot}; sawRelocalizing={sawRelocalizing}.");
+
+        if (state != State.Locating) return;
+        if (IsTrackingNormally() && !sawRelocalizing)
+        {
+            SetStatus("ARKit is tracking normally, but has not reported relocalization. Look around the scanned area.");
+            return;
+        }
+
+        SetStatus($"Locating… ARKit: {snapshot}. Look around the scanned area.");
     }
 
     void BuildUi()
