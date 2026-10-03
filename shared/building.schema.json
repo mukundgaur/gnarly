@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly building navigation graph",
+  "description": "Nodes and edges in ARKit world meters for one mapped zone. Recorded nodes are walk-order semantics; RoomPlan hints are unconnected until confirmed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "zoneId", "coordinateSystem", "floors", "nodes", "edges"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "zoneId": { "type": "string", "minLength": 1 },
+    "coordinateSystem": { "const": "arkit-world-meters" },
+    "heightReference": {
+      "enum": ["floor", "device"],
+      "default": "device"
+    },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "floors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "story", "elevation"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "story": { "type": "integer" },
+          "elevation": { "type": "number" }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "floor", "type", "position", "source"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "floor": { "type": "string", "minLength": 1 },
+          "type": {
+            "enum": ["entrance", "hallway", "stairs", "destination", "door", "opening", "waypoint"]
+          },
+          "position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "source": { "enum": ["recorded", "roomplan-hint"] },
+          "label": { "type": ["string", "null"] },
+          "roomPlanIdentifier": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "kind", "meters"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["hallway", "stairs"] },
+          "meters": { "type": "number", "minimum": 0 },
+          "source": { "enum": ["recorded", "manual"] }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

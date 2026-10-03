@@ -24,10 +24,15 @@ The app writes each capture to its own sandboxed Documents folder:
 
 ```text
 Documents/POCExports/<timestamp>-<zone-id>/
+  manifest.json
   worldmap-zone-a.bin
   test-anchor.json
+  scan.json
+  scan-features.json
+  building.json
+  route.json                 if two or more nodes were recorded
   structure.usdz
-  route.json          planned; see "Still to do" in README.md
+  structure-metadata.json
 ```
 
 Use the app’s share action to transfer that directory to the Unity engineer. Do not commit a real `ARWorldMap` to this repository.

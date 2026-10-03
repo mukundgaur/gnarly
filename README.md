@@ -33,4 +33,4 @@ docs/                   Setup, handoff, and integration notes
 
 Do not begin Firebase, graph routing, multi-floor transfers, or production UI until the same map can be captured, saved, loaded in Unity, relocalized, and used to place the test cube in the original physical location.
 
-Exception: the Unity app already draws a path from an optional, hand-written `route.json`. The mapper still needs to record waypoints and export that file; see [mapper-ios/README.md](mapper-ios/README.md).
+Exception: the mapper exports `scan.json`, `scan-features.json`, `building.json`, and optional `route.json` so navigation-graph work can proceed from a LiDAR scan. Automatic hallway inference and A* are still out of the cube-proof scope.

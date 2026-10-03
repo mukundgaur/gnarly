@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */; };
+		2B71C90A1A2B4C5D6E7F8091 /* NavigationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B71C90B1A2B4C5D6E7F8091 /* NavigationModels.swift */; };
+		3C82DA1B2B3C5D6E7F8091A2 /* RoomPlanScanExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C82DA1C2B3C5D6E7F8091A2 /* RoomPlanScanExtractor.swift */; };
+		4D93EB2C3C4D6E7F8091A2B3 /* BuildingGraphBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D93EB2D3C4D6E7F8091A2B3 /* BuildingGraphBuilder.swift */; };
 		8102E37CD7E2FCC3E27760B6 /* POCPackageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */; };
 		8C6F595ECF77D1D4E37826D6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */; };
 		94921150B67B0E6EE3FB799C /* MapperViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8347DA1557345E040D2FA42 /* MapperViewModel.swift */; };
@@ -18,6 +21,9 @@
 		0127B0AED13A0DCD415DE987 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GnarlyMapper.entitlements; sourceTree = "<group>"; };
 		1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = POCPackageExporter.swift; sourceTree = "<group>"; };
+		2B71C90B1A2B4C5D6E7F8091 /* NavigationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationModels.swift; sourceTree = "<group>"; };
+		3C82DA1C2B3C5D6E7F8091A2 /* RoomPlanScanExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanScanExtractor.swift; sourceTree = "<group>"; };
+		4D93EB2D3C4D6E7F8091A2B3 /* BuildingGraphBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingGraphBuilder.swift; sourceTree = "<group>"; };
 		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnarlyMapperApp.swift; sourceTree = "<group>"; };
 		99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureContainer.swift; sourceTree = "<group>"; };
@@ -37,13 +43,16 @@
 		4F1387E5B38DEC0928289847 /* GnarlyMapper */ = {
 			isa = PBXGroup;
 			children = (
+				4D93EB2D3C4D6E7F8091A2B3 /* BuildingGraphBuilder.swift */,
 				E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */,
 				07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */,
 				63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */,
 				0127B0AED13A0DCD415DE987 /* Info.plist */,
 				D8347DA1557345E040D2FA42 /* MapperViewModel.swift */,
+				2B71C90B1A2B4C5D6E7F8091 /* NavigationModels.swift */,
 				1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */,
 				99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */,
+				3C82DA1C2B3C5D6E7F8091A2 /* RoomPlanScanExtractor.swift */,
 			);
 			path = GnarlyMapper;
 			sourceTree = "<group>";
@@ -109,11 +118,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4D93EB2C3C4D6E7F8091A2B3 /* BuildingGraphBuilder.swift in Sources */,
 				8C6F595ECF77D1D4E37826D6 /* ContentView.swift in Sources */,
 				F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */,
 				94921150B67B0E6EE3FB799C /* MapperViewModel.swift in Sources */,
+				2B71C90A1A2B4C5D6E7F8091 /* NavigationModels.swift in Sources */,
 				8102E37CD7E2FCC3E27760B6 /* POCPackageExporter.swift in Sources */,
 				0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */,
+				3C82DA1B2B3C5D6E7F8091A2 /* RoomPlanScanExtractor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
