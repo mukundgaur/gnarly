@@ -26,7 +26,7 @@ shared/local-packages/
 - `test-anchor.json`: schema described in [test-anchor.schema.json](test-anchor.schema.json).
 - `scan.json`: wrapped RoomPlan `CapturedRoom` JSON in the same ARKit coordinate system.
 - `scan-features.json`: normalized walls, doors, openings, windows, floors, objects, and sections. Schema: [scan-features.schema.json](scan-features.schema.json). Example: [examples/scan-features.example.json](examples/scan-features.example.json).
-- `building.json`: navigation graph. Recorded nodes are walk order; RoomPlan doors/openings/stairs are unconnected hints. Schema: [building.schema.json](building.schema.json). Example: [examples/building.example.json](examples/building.example.json).
+- `building.json`: navigation graph. RoomPlan doors/openings/stairs/sections plus visibility edges; optional recorded entrance/destination labels. Schema: [building.schema.json](building.schema.json). Example: [examples/building.example.json](examples/building.example.json).
 - `route.json`: ordered waypoints from recorded nodes, described in [route.schema.json](route.schema.json). See [examples/route.example.json](examples/route.example.json).
 - `structure.usdz` / `structure-metadata.json`: RoomPlan mesh plus identifier mapping for later minimap work.
 - Positions are in meters in the **restored ARKit world coordinate system** used during capture.

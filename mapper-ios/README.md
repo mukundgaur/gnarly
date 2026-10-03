@@ -17,7 +17,7 @@ Target a LiDAR-capable iPhone running iOS 17 or later. Before testing, record th
 ## Scan workflow
 
 1. Start a scan in a distinctive room or hallway.
-2. As you walk, tap **Add node** at the entrance, turns, stairs, and destinations. Set the node type and an optional label such as `Room 204`.
+2. As you walk, RoomPlan captures doors, openings, stairs, and room sections. Optionally tap **Add node** only to label an entrance or a destination such as `Room 204`.
 3. Tap **Finish room** when RoomPlan has the space.
 4. Stand at the Unity cube test point and tap **Mark test anchor** (optional if you already recorded a node).
 5. Export and share the package.
@@ -35,4 +35,4 @@ Do not restart the AR session between scanning, recording nodes, and exporting.
 - The anchor, route, and graph use the same `zoneId` as the world map.
 - Share the generated package directory; do not commit real capture artifacts.
 
-`building.json` edges are only the walked recorded-node order. RoomPlan doors, openings, and stairs are added as `roomplan-hint` nodes with no edges so you can confirm destinations and connect the graph without auto-inferred hallways.
+`building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

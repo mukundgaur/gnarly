@@ -67,7 +67,7 @@ struct ContentView: View {
                     }
                 }
 
-                Text("Scan with a LiDAR iPhone. Tap Add node at the entrance, turns, stairs, and destinations. Finish the RoomPlan scan, optionally mark the Unity cube point, then export scan.json and building.json.")
+                Text("Scan with a LiDAR iPhone. RoomPlan supplies door, opening, stair, and room-section nodes. Optionally tap Add node only to label an entrance or destination such as Room 204.")
                     .font(.footnote)
                     .fixedSize(horizontal: false, vertical: true)
             }
