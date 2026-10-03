@@ -29,7 +29,7 @@ public class RelocalizationController : MonoBehaviour
     [SerializeField] FirebaseNavigationPackageLoader packageLoader;
     [SerializeField] string buildingId = "";
     [Tooltip("Enable after Firebase is configured. Disabled uses the packaged local scan so ARKit can relocalize immediately.")]
-    [SerializeField] bool useFirebasePackages;
+    [SerializeField] bool useFirebasePackages = true;
     [SerializeField] IndoorMapOverlay indoorMap;
     [SerializeField] string zoneId = "zone-a";
     [SerializeField] string floorId = "ground";
