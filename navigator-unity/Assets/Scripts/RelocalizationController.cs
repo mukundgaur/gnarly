@@ -32,6 +32,13 @@ public class RelocalizationController : MonoBehaviour
         public Pathfinding.Graph graph;
     }
 
+    [Serializable]
+    sealed class IndoorMapRouteRequest
+    {
+        public string startId;
+        public string destinationId;
+    }
+
     const string ZoneConnectionsFileName = "zone-connections.json";
 
     [SerializeField] ARSession session;
@@ -338,7 +345,10 @@ public class RelocalizationController : MonoBehaviour
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
         indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera);
-        indoorMap?.SetAppleModelPath(Path.Combine(zone.directory, "structure.usdz"));
+        indoorMap?.SetPackagePaths(
+            Path.Combine(zone.directory, "structure.usdz"),
+            Path.Combine(zone.directory, "building.json"),
+            Path.Combine(zone.directory, "scan-features.json"));
 
         if (activeLegs != null)
         {
@@ -405,10 +415,60 @@ public class RelocalizationController : MonoBehaviour
             return;
         }
 
-        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
-        if (path == null || path.Count < 2)
+        BeginRoute(startId, goalId);
+    }
+
+    /// <summary>Called by the native iPhone map after the user chooses map markers.</summary>
+    public void OnIndoorMapRouteRequested(string requestJson)
+    {
+        try
         {
-            SetStatus($"No A* path from {startId} to {goalId}. Look around or pick another destination.");
+            var request = JsonUtility.FromJson<IndoorMapRouteRequest>(requestJson);
+            if (request == null || string.IsNullOrEmpty(request.startId) || string.IsNullOrEmpty(request.destinationId))
+                throw new FormatException("The map route request did not contain start and destination node IDs.");
+
+            var startId = ResolveCurrentZoneNode(request.startId);
+            var destinationId = ResolveCurrentZoneNode(request.destinationId);
+            if (startId == null || destinationId == null)
+                throw new KeyNotFoundException(
+                    $"The selected map node is not in the navigation graph ({request.startId} -> {request.destinationId}).");
+
+            BeginRoute(startId, destinationId);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[Gnarly] Interactive map route selection failed: {exception}");
+            var message = "Could not create the selected map route: " + exception.Message;
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
+        }
+    }
+
+    string ResolveCurrentZoneNode(string nodeId)
+    {
+        if (navigationGraph == null) return null;
+        var zoneKey = Pathfinding.ZoneKey(currentZoneId, nodeId);
+        if (navigationGraph.Node(zoneKey) != null) return zoneKey;
+        return navigationGraph.Node(nodeId) != null ? nodeId : null;
+    }
+
+    void BeginRoute(string startId, string goalId)
+    {
+        if (navigationGraph == null || navigator == null) return;
+
+        var path = Pathfinding.AStar(navigationGraph, startId, goalId);
+        if (path == null)
+        {
+            var message = $"No A* path from {startId} to {goalId}. Pick another map point.";
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
+            return;
+        }
+        if (path.Count < 2)
+        {
+            const string message = "Start and destination are the same location. Choose two different map points.";
+            indoorMap?.SetExpandedStatus(message);
+            SetStatus(message);
             return;
         }
 

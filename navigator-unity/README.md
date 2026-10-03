@@ -1,6 +1,6 @@
 # Unity navigator
 
-Unity 6000.6.0f1 iOS app (URP, AR Foundation 6.6.2, Apple ARKit XR Plug-in 6.6.2). It signs in to Firebase, downloads the active `building.json` and zone ARWorldMap, caches them for offline use, relocalizes, and draws a path to the destination.
+Unity 6000.6.0f1 iOS app (URP, AR Foundation 6.6.2, Apple ARKit XR Plug-in 6.6.2). It signs in to Firebase, downloads the active building graph, normalized RoomPlan scan, USDZ structure, and zone ARWorldMap, caches them for offline use, relocalizes, and draws a path to the destination.
 
 ## Project setup
 
@@ -27,16 +27,20 @@ The navigator reads:
 
 - `buildings/{buildingId}.activeVersion`
 - `buildings/{buildingId}/versions/{versionId}.buildingJsonPath`
+- `buildings/{buildingId}/versions/{versionId}.structurePath`
 - `buildings/{buildingId}/versions/{versionId}/zones/{zoneId}.worldMapPath`
 
 It requires the paths to match:
 
 - `buildings/{buildingId}/{versionId}/building.json`
+- `buildings/{buildingId}/{versionId}/scan.json`
+- `buildings/{buildingId}/{versionId}/scan-features.json`
+- `buildings/{buildingId}/{versionId}/structure.usdz`
 - `buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin`
 
-Both files are downloaded to `Application.persistentDataPath/navigation-cache`. A staging directory and cache manifest prevent incomplete downloads from replacing the last complete package. Firestore and Storage are never accessed before email/password authentication succeeds.
+All five files are downloaded to `Application.persistentDataPath/navigation-cache`. A staging directory and cache manifest prevent incomplete downloads from replacing the last complete package. Firestore and Storage are never accessed before email/password authentication succeeds. Versions uploaded before the interactive-map change do not contain the scan-features/USDZ pair and must be uploaded again from the mapper.
 
-`test-anchor.json`, `scan-features.json`, and `route.json` remain optional local development inputs. The Firebase package requires only `building.json` and the ARWorldMap.
+`scan.json` remains the raw wrapped RoomPlan `CapturedRoom`; `scan-features.json` is its normalized geometry for Unity and selectable map nodes. `test-anchor.json` and `route.json` remain optional local development inputs.
 
 ## Package files
 
@@ -44,8 +48,10 @@ Both files are downloaded to `Application.persistentDataPath/navigation-cache`. 
 | --- | --- | --- |
 | `worldmap-zone-a.bin` | Yes | Downloaded from Storage and applied to ARKit for relocalization |
 | `test-anchor.json` | No | Optional POC cube position ([schema](../shared/test-anchor.schema.json)) |
-| `scan-features.json` | No | RoomPlan walls/doors used to build the visibility graph |
+| `scan.json` | Yes | Raw wrapped RoomPlan `CapturedRoom` retained for package fidelity |
+| `scan-features.json` | Yes | Normalized RoomPlan walls/doors/rooms used for the compact map and selectable nodes |
 | `building.json` | Yes | Graph nodes/edges plus destination labels ([schema](../shared/building.schema.json)) |
+| `structure.usdz` | Yes | Original RoomPlan building geometry rendered in the expanded iPhone map |
 | `route.json` | No | Fallback polyline if A* has no destination ([schema](../shared/route.schema.json)) |
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
@@ -76,6 +82,8 @@ With Firebase (`useFirebasePackages`, on by default), choosing a scan from the l
 2. **Starting camera…** until ARKit tracks.
 3. **Locating…** after the world map is applied, until ARKit reports it has relocalized.
 4. Unity builds a graph from `building.json`, runs A* from the nearest node to the chosen destination, and draws that path. If a local test anchor exists, its cube is also shown. If tracking is lost, the path is hidden until tracking recovers. **Retry** resets the session and reapplies the cached map.
+
+The compact map card is a real Unity `Button` with raycasts enabled. On iPhone it opens the existing RealityKit RoomPlan view. One finger orbits, pinching zooms, and two fingers pan. Tap a colored map marker, set it as Start or Destination, and tap **Show Route**; the native view returns the original node IDs to `RelocalizationController`, which runs the existing A* graph and sends the resulting route back to the 3D view. Green marks Start, pink marks Destination, and yellow marks the currently tapped node. **Reset View** reframes the building and **Back** closes the view.
 
 ARKit positions are converted to Unity by negating Z (right-handed to left-handed).
 

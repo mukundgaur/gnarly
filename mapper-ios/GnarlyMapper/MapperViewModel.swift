@@ -178,8 +178,15 @@ final class MapperViewModel: ObservableObject {
                 let repository = try FirebaseDataRepository()
                 let versionID = "v-\(Int(Date().timeIntervalSince1970))"
                 let buildingJSON = packageURL.appendingPathComponent("building.json")
+                let scanJSON = packageURL.appendingPathComponent("scan.json")
+                let scanFeatures = packageURL.appendingPathComponent("scan-features.json")
+                let structure = packageURL.appendingPathComponent("structure.usdz")
                 let worldMap = packageURL.appendingPathComponent("worldmap-\(zoneID).bin")
-                guard FileManager.default.fileExists(atPath: buildingJSON.path), FileManager.default.fileExists(atPath: worldMap.path) else {
+                guard FileManager.default.fileExists(atPath: buildingJSON.path),
+                      FileManager.default.fileExists(atPath: scanJSON.path),
+                      FileManager.default.fileExists(atPath: scanFeatures.path),
+                      FileManager.default.fileExists(atPath: structure.path),
+                      FileManager.default.fileExists(atPath: worldMap.path) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
                 do {
@@ -189,6 +196,9 @@ final class MapperViewModel: ObservableObject {
                 try await repository.saveFloor(Floor(id: floorID, name: floorID, story: 0, elevation: 0), buildingId: buildingID, versionId: versionID)
                 try await repository.saveZone(Zone(id: zoneID, name: zoneID, floorId: floorID, worldMapPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
                 try await repository.uploadBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID)
+                try await repository.uploadScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID)
+                try await repository.uploadScanFeatures(from: scanFeatures, buildingId: buildingID, versionId: versionID)
+                try await repository.uploadStructure(from: structure, buildingId: buildingID, versionId: versionID)
                 try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
                 try await repository.updateBuilding(Building(id: buildingID, name: buildingID, activeVersion: versionID, status: .active, createdAt: nil, updatedAt: nil))

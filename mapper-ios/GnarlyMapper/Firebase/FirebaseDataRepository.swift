@@ -29,6 +29,27 @@ protocol FirebaseDataRepositoryProtocol {
         versionId: String
     ) async throws -> String
 
+    @discardableResult
+    func uploadScanJSON(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String
+
+    @discardableResult
+    func uploadScanFeatures(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String
+
+    @discardableResult
+    func uploadStructure(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String
+
     func fetchActiveVersion(buildingId: String) async throws -> ActiveBuildingVersion
     func downloadBuildingJSON(buildingId: String, versionId: String) async throws -> URL
     func downloadWorldMap(buildingId: String, versionId: String, zoneId: String) async throws -> URL
@@ -177,6 +198,60 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
             ["buildingJsonPath": storagePath],
             to: versionReference(buildingId: buildingId, versionId: versionId),
             operation: "store buildingJsonPath"
+        )
+        try await cacheUploadedFile(localURL, storagePath: storagePath)
+        return storagePath
+    }
+
+    @discardableResult
+    func uploadScanJSON(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String {
+        try validateNonemptyFile(localURL)
+        let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+        guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else {
+            throw FirebaseDataError.invalidJSON
+        }
+
+        let storagePath = try FirebaseStoragePaths.scanJSON(buildingId: buildingId, versionId: versionId)
+        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
+        try await cacheUploadedFile(localURL, storagePath: storagePath)
+        return storagePath
+    }
+
+    @discardableResult
+    func uploadScanFeatures(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String {
+        try validateNonemptyFile(localURL)
+        let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+        guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else {
+            throw FirebaseDataError.invalidJSON
+        }
+
+        let storagePath = try FirebaseStoragePaths.scanFeatures(buildingId: buildingId, versionId: versionId)
+        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
+        try await cacheUploadedFile(localURL, storagePath: storagePath)
+        return storagePath
+    }
+
+    @discardableResult
+    func uploadStructure(
+        from localURL: URL,
+        buildingId: String,
+        versionId: String
+    ) async throws -> String {
+        try validateNonemptyFile(localURL)
+        let storagePath = try FirebaseStoragePaths.structure(buildingId: buildingId, versionId: versionId)
+        try await uploadFile(localURL, storagePath: storagePath, contentType: "model/vnd.usdz+zip")
+        try await update(
+            ["structurePath": storagePath],
+            to: versionReference(buildingId: buildingId, versionId: versionId),
+            operation: "store structurePath"
         )
         try await cacheUploadedFile(localURL, storagePath: storagePath)
         return storagePath
