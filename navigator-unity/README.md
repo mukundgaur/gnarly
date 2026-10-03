@@ -2,6 +2,24 @@
 
 Unity 6000.6.0f1 iOS app (URP, AR Foundation 6.6.2, Apple ARKit XR Plug-in 6.6.2). It loads the mapper's ARWorldMap, relocalizes, places the test cube, and—if a route is supplied—draws a path to the destination.
 
+## Project setup
+
+Run **Gnarly → Configure Navigator Project** once after cloning, or after changing settings by hand. It can be re-run safely; it rebuilds the scene from scratch. It:
+
+- builds `Assets/Scenes/Navigator.unity` with an AR Session, an XR Origin whose camera has the AR camera manager, background, and tracked pose driver, an EventSystem, and a `Navigator` object holding `RelocalizationController` and `RouteNavigator`. This becomes the only scene in the build. `SampleScene` is left from the template and is not used.
+- turns on the Apple ARKit loader for iOS and sets ARKit to **Required** (`iOSRequireARKit`).
+- sets bundle ID `com.gnarly.navigator`, the camera usage description, iOS 16.0 minimum, iPhone only, and Device SDK.
+- adds the AR Background Renderer Feature to the URP renderers so the camera feed is visible.
+- creates the Git-ignored `Assets/StreamingAssets/zone-a/` folder.
+
+Batch mode: `Unity -batchmode -quit -projectPath navigator-unity -executeMethod NavigatorProjectSetup.ConfigureAll`.
+
+Then build:
+
+1. Copy the mapper package into `Assets/StreamingAssets/zone-a/`. Do not commit it.
+2. In **File → Build Profiles**, choose **iOS**, click **Switch Platform**, then **Build**. This requires the iOS Build Support module.
+3. On a Mac, open `Unity-iPhone.xcodeproj`. Under **Signing & Capabilities**, choose your Personal Team and change the bundle ID if it is already taken. Run on the LiDAR iPhone, and watch the Xcode console for `[Gnarly]` lines.
+
 ## Inputs
 
 Copy the mapper's files into `Assets/StreamingAssets/zone-a/` before building. The folder is Git-ignored because real maps encode building imagery.
