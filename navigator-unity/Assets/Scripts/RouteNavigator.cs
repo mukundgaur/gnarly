@@ -65,6 +65,18 @@ public class RouteNavigator : MonoBehaviour
         if (!isVisible) SetArrowActive(false);
     }
 
+    /// <summary>
+    /// Copies the world-space polyline still ahead of the user, starting at their position on the path.
+    /// Empty when navigation is inactive or the destination has been reached.
+    /// </summary>
+    public bool CopyUpcomingPath(List<Vector3> destination)
+    {
+        destination.Clear();
+        if (route == null || !visible || HasArrived || linePoints.Count < 2) return false;
+        destination.AddRange(linePoints);
+        return true;
+    }
+
     public void Clear()
     {
         route = null;
