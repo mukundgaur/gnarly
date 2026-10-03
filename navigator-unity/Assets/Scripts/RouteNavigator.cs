@@ -13,11 +13,15 @@ public class RouteNavigator : MonoBehaviour
     [Tooltip("Height change (m) applied when route.json uses heightReference \"device\", to move phone-height waypoints down to the floor.")]
     [SerializeField] float deviceHeightToFloor = -1.3f;
     [Tooltip("Horizontal distance (m) at which an intermediate waypoint counts as reached.")]
-    [SerializeField] float reachRadius = 1f;
+    [SerializeField] float reachRadius = 0.3f;
     [Tooltip("Horizontal distance (m) to the final waypoint that counts as arrival.")]
     [SerializeField] float arriveRadius = 0.75f;
     [Tooltip("Fraction of the screen edge treated as out of view.")]
     [SerializeField] float viewportMargin = 0.1f;
+
+    // Old scenes serialized this at 1 m. Never allow a saved value to make the generated
+    // sub-metre guidance points get skipped at runtime.
+    const float MaximumIntermediateReachRadius = 0.35f;
 
     Route route;
     Transform sessionSpace;
@@ -135,7 +139,8 @@ public class RouteNavigator : MonoBehaviour
     void AdvanceTarget(Vector3 cameraPosition)
     {
         var last = route.waypoints.Length - 1;
-        while (targetIndex < last && HorizontalDistance(cameraPosition, WaypointWorld(targetIndex)) < reachRadius)
+        var intermediateReachRadius = Mathf.Clamp(reachRadius, 0.1f, MaximumIntermediateReachRadius);
+        while (targetIndex < last && HorizontalDistance(cameraPosition, WaypointWorld(targetIndex)) < intermediateReachRadius)
             targetIndex++;
 
         if (targetIndex == last && HorizontalDistance(cameraPosition, WaypointWorld(last)) < arriveRadius)
@@ -232,6 +237,10 @@ public class RouteNavigator : MonoBehaviour
         for (var i = 0; i <= last; i++)
         {
             var isDestination = i == last;
+            var isGuidancePoint = Route.IsGuidanceWaypoint(route.waypoints[i]);
+            // Interpolated guidance points make the arrow and corridor precise without filling
+            // the room with a visible marble every half metre.
+            if (isGuidancePoint && !isDestination) continue;
             var marker = GameObject.CreatePrimitive(isDestination ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
             marker.name = isDestination ? "RouteDestination" : $"Waypoint-{route.waypoints[i].id}";
             Destroy(marker.GetComponent<Collider>());

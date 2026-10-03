@@ -65,6 +65,9 @@ public class RelocalizationController : MonoBehaviour
     float normalTrackingStartedAt = -1f;
     TestAnchor anchor;
     Route fallbackRoute;
+    [Header("Guidance")]
+    [Tooltip("Maximum gap between runtime route targets. Graph and map selection nodes remain unchanged.")]
+    [SerializeField, Range(0.2f, 1f)] float guidanceWaypointSpacingMeters = 0.45f;
     string currentZoneId;
     bool navigationLoaded;
     readonly Dictionary<string, ZonePackage> zonePackages = new Dictionary<string, ZonePackage>();
@@ -387,7 +390,7 @@ public class RelocalizationController : MonoBehaviour
             var destinations = navigationGraph.Destinations();
             if (destinations.Count == 0 && fallbackRoute != null && navigator != null)
             {
-                navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
+                navigator.Begin(GuidanceRoute(fallbackRoute), origin.TrackablesParent, origin.Camera);
                 indoorMap?.SetRoute(fallbackRoute);
                 return;
             }
@@ -401,7 +404,7 @@ public class RelocalizationController : MonoBehaviour
         }
         else if (fallbackRoute != null && navigator != null)
         {
-            navigator.Begin(fallbackRoute, origin.TrackablesParent, origin.Camera);
+            navigator.Begin(GuidanceRoute(fallbackRoute), origin.TrackablesParent, origin.Camera);
             indoorMap?.SetRoute(fallbackRoute);
         }
         else
@@ -699,10 +702,12 @@ public class RelocalizationController : MonoBehaviour
         }
 
         var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
-        navigator.Begin(route, origin.TrackablesParent, origin.Camera);
+        navigator.Begin(GuidanceRoute(route), origin.TrackablesParent, origin.Camera);
         indoorMap?.SetRoute(route);
         SetStatus(LegStatus());
     }
+
+    Route GuidanceRoute(Route route) => Pathfinding.DensifyRoute(route, guidanceWaypointSpacingMeters);
 
     string LegStatus()
     {

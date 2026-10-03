@@ -693,6 +693,61 @@ public static class Pathfinding
         };
     }
 
+    /// <summary>
+    /// Adds runtime-only points between graph nodes so AR guidance progresses in small, reliable
+    /// steps. This deliberately does not change the navigation graph or selectable map places.
+    /// </summary>
+    public static Route DensifyRoute(Route route, float maximumSpacingMeters)
+    {
+        if (route?.waypoints == null || route.waypoints.Length < 2) return route;
+
+        var spacing = Mathf.Max(0.1f, maximumSpacingMeters);
+        var dense = new List<Route.Waypoint> { CloneWaypoint(route.waypoints[0]) };
+
+        for (var i = 1; i < route.waypoints.Length; i++)
+        {
+            var from = route.waypoints[i - 1];
+            var to = route.waypoints[i];
+            var fromPosition = Position(from);
+            var toPosition = Position(to);
+            var steps = Mathf.Max(1, Mathf.CeilToInt(Vector3.Distance(fromPosition, toPosition) / spacing));
+
+            for (var step = 1; step <= steps; step++)
+            {
+                if (step == steps)
+                {
+                    dense.Add(CloneWaypoint(to));
+                    continue;
+                }
+
+                var position = Vector3.Lerp(fromPosition, toPosition, step / (float)steps);
+                dense.Add(new Route.Waypoint
+                {
+                    id = Route.GuidanceWaypointPrefix + i + "-" + step,
+                    position = new[] { position.x, position.y, position.z }
+                });
+            }
+        }
+
+        return new Route
+        {
+            schemaVersion = route.schemaVersion,
+            zoneId = route.zoneId,
+            coordinateSystem = route.coordinateSystem,
+            heightReference = route.heightReference,
+            waypoints = dense.ToArray()
+        };
+    }
+
+    static Route.Waypoint CloneWaypoint(Route.Waypoint waypoint) => new Route.Waypoint
+    {
+        id = waypoint.id,
+        position = new[] { waypoint.position[0], waypoint.position[1], waypoint.position[2] }
+    };
+
+    static Vector3 Position(Route.Waypoint waypoint) =>
+        new Vector3(waypoint.position[0], waypoint.position[1], waypoint.position[2]);
+
     /// <summary>Puts a route.json polyline on the zone's floor when the floor height is known.</summary>
     public static void SnapToFloor(Route route, Graph zoneGraph)
     {

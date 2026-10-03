@@ -60,6 +60,9 @@ final class GnarlyHapticPlayer {
             engineStarted = false
             playing = false
             player = nil
+            // A stopped Core Haptics engine is not always restartable (for example after an audio
+            // session interruption), so recreate it on the next keep-alive from Unity.
+            engine = nil
         }
     }
 
