@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -20,14 +21,16 @@ public class LidarPulseView : MonoBehaviour
     [SerializeField] Color baseColor = new Color(0f, 0.42f, 0.12f);
     [SerializeField] Color pulseColor = new Color(0.2f, 1f, 0.4f);
     [Tooltip("Maximum stored points; the oldest are replaced first.")]
-    [SerializeField] int capacity = 250000;
-    [Tooltip("Edge length (m) of the grid used to keep at most one point per cell.")]
-    [SerializeField] float voxelSize = 0.025f;
+    [SerializeField] int capacity = 300000;
+    [Tooltip("Random rays cast into each depth frame. Rays are uniform across the view, so near surfaces collect dense points and far ones stay sparse.")]
+    [SerializeField] int raysPerCapture = 1200;
     [Tooltip("Dot radius (m).")]
-    [SerializeField] float pointSize = 0.005f;
+    [SerializeField] float pointSize = 0.003f;
+    [Tooltip("Smallest dot radius in screen pixels, so distant points stay visible.")]
+    [SerializeField] float minPixelRadius = 0.8f;
     [SerializeField] float minDepth = 0.2f;
     [SerializeField] float maxDepth = 6f;
-    [Tooltip("Pixel spacing between samples of the 256×192 depth image.")]
+    [Tooltip("Pixel spacing of the depth grid sampled for path obstacle haptics.")]
     [SerializeField] int sampleStep = 2;
     [SerializeField] float captureInterval = 0.1f;
     [SerializeField] float pulsePeriod = 1.6f;
@@ -69,10 +72,15 @@ public class LidarPulseView : MonoBehaviour
     static readonly int PulseWidthId = Shader.PropertyToID("_PulseWidth");
     static readonly int PulseTrailId = Shader.PropertyToID("_PulseTrail");
     static readonly int PointSizeId = Shader.PropertyToID("_PointSize");
+    static readonly int MinPixelRadiusId = Shader.PropertyToID("_MinPixelRadius");
     static readonly int NowId = Shader.PropertyToID("_Now");
     static readonly int FreshSecondsId = Shader.PropertyToID("_FreshSeconds");
 
     AROcclusionManager occlusion;
+    ARCameraManager cameraManager;
+    Matrix4x4 displayMatrix;
+    bool hasDisplayMatrix;
+    ScreenOrientation loggedOrientation = ScreenOrientation.AutoRotation;
     bool isOn;
     bool unavailable;
     float nextCaptureAt;
@@ -83,8 +91,6 @@ public class LidarPulseView : MonoBehaviour
     Material material;
     GraphicsBuffer buffer;
     Vector4[] points;
-    long[] slotKeys;
-    readonly Dictionary<long, int> voxels = new Dictionary<long, int>();
     int count;
     int next;
 
@@ -113,8 +119,29 @@ public class LidarPulseView : MonoBehaviour
         if (origin == null) origin = FindAnyObjectByType<XROrigin>();
         if (navigator == null) navigator = GetComponent<RouteNavigator>();
         if (navigator == null) navigator = FindAnyObjectByType<RouteNavigator>();
+        if (origin != null && origin.Camera != null) cameraManager = origin.Camera.GetComponent<ARCameraManager>();
         BuildUi();
         UpdateButton();
+    }
+
+    void OnEnable()
+    {
+        if (cameraManager != null) cameraManager.frameReceived += OnCameraFrame;
+    }
+
+    void OnDisable()
+    {
+        if (cameraManager != null) cameraManager.frameReceived -= OnCameraFrame;
+    }
+
+    void OnCameraFrame(ARCameraFrameEventArgs args)
+    {
+        if (!args.displayMatrix.HasValue) return;
+        displayMatrix = args.displayMatrix.Value;
+        hasDisplayMatrix = true;
+        if (Screen.orientation == loggedOrientation) return;
+        loggedOrientation = Screen.orientation;
+        Debug.Log($"[Gnarly] LiDAR display matrix for {loggedOrientation}:\n{displayMatrix}");
     }
 
     public void Toggle() => SetOn(!isOn);
@@ -141,7 +168,6 @@ public class LidarPulseView : MonoBehaviour
     /// <summary>Session-space coordinates change when ARKit relocalizes or resets, so old points would be misplaced.</summary>
     public void ClearPoints()
     {
-        voxels.Clear();
         count = 0;
         next = 0;
         if (points == null) return;
@@ -181,7 +207,6 @@ public class LidarPulseView : MonoBehaviour
         if (buffer == null)
         {
             points = new Vector4[capacity];
-            slotKeys = new long[capacity];
             buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, sizeof(float) * 4);
             material.SetBuffer(PointsId, buffer);
             ClearPoints();
@@ -267,6 +292,7 @@ public class LidarPulseView : MonoBehaviour
         material.SetFloat(PulseWidthId, pulseWidth);
         material.SetFloat(PulseTrailId, pulseTrail);
         material.SetFloat(PointSizeId, pointSize);
+        material.SetFloat(MinPixelRadiusId, minPixelRadius);
         material.SetFloat(NowId, Time.time);
         material.SetFloat(FreshSecondsId, freshSeconds);
 
@@ -301,85 +327,81 @@ public class LidarPulseView : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// The depth image is in the camera sensor's landscape orientation and is aspect-filled onto the
-    /// screen, which is also how ARKit derives the camera's projection matrix. Each sample is mapped to
-    /// the viewport, then unprojected with that matrix at its LiDAR depth.
-    /// </summary>
+    struct DepthFrame
+    {
+        public NativeArray<float> depth;
+        public int depthRowStride;
+        public XRCpuImage.Plane confidence;
+        public bool useConfidence;
+        public int width;
+        public int height;
+        public Matrix4x4 projection;
+        public Matrix4x4 cameraToSession;
+        public Vector2 viewportOrigin;
+        public Vector2 viewportPerU;
+        public Vector2 viewportPerV;
+    }
+
     void AddPoints(XRCpuImage depthImage, XRCpuImage confidenceImage, bool useConfidence)
     {
+        if (!hasDisplayMatrix) return;
+        // The background shader maps viewport to image UV as uv = (vx, vy, 1, 1) * displayMatrix;
+        // the depth texture is sampled with that same UV, so its inverse places depth pixels on screen.
+        var m = displayMatrix;
+        var det = m.m00 * m.m11 - m.m10 * m.m01;
+        if (Mathf.Abs(det) < 1e-6f) return;
+        var perU = new Vector2(m.m11, -m.m01) / det;
+        var perV = new Vector2(-m.m10, m.m00) / det;
+        var imageOffset = new Vector2(m.m20 + m.m30, m.m21 + m.m31);
+
         var depthPlane = depthImage.GetPlane(0);
-        var depth = depthPlane.data.Reinterpret<float>(1);
-        var depthRowStride = depthPlane.rowStride / sizeof(float);
-        var confidence = useConfidence ? confidenceImage.GetPlane(0) : default;
-
-        var width = depthImage.width;
-        var height = depthImage.height;
         var camera = origin.Camera;
-        var projection = camera.projectionMatrix;
-        var cameraToSession = origin.TrackablesParent.worldToLocalMatrix * camera.cameraToWorldMatrix;
+        var frame = new DepthFrame
+        {
+            depth = depthPlane.data.Reinterpret<float>(1),
+            depthRowStride = depthPlane.rowStride / sizeof(float),
+            confidence = useConfidence ? confidenceImage.GetPlane(0) : default,
+            useConfidence = useConfidence,
+            width = depthImage.width,
+            height = depthImage.height,
+            projection = camera.projectionMatrix,
+            cameraToSession = origin.TrackablesParent.worldToLocalMatrix * camera.cameraToWorldMatrix,
+            viewportOrigin = -(imageOffset.x * perU + imageOffset.y * perV),
+            viewportPerU = perU,
+            viewportPerV = perV
+        };
 
-        var orientation = Screen.orientation;
-        var portrait = orientation == ScreenOrientation.Portrait || orientation == ScreenOrientation.PortraitUpsideDown;
-        var imageAspect = portrait ? height / (float)width : width / (float)height;
-        var screenAspect = camera.pixelWidth / (float)camera.pixelHeight;
-        var cropX = imageAspect > screenAspect ? imageAspect / screenAspect : 1f;
-        var cropY = imageAspect > screenAspect ? 1f : screenAspect / imageAspect;
-
-        var now = Time.time;
-        var start = next;
-        var written = 0;
-        var step = Mathf.Max(1, sampleStep);
         var hasPath = navigator != null && navigator.CopyUpcomingPath(upcomingPath);
         blockingHits = 0;
         clearPathHits = 0;
         closenessSum = 0f;
         peakCloseness = 0f;
-        var sessionToWorld = hasPath ? origin.TrackablesParent.localToWorldMatrix : default;
-
-        for (var y = step / 2; y < height; y += step)
+        if (hasPath)
         {
-            for (var x = step / 2; x < width; x += step)
+            var sessionToWorld = origin.TrackablesParent.localToWorldMatrix;
+            var step = Mathf.Max(1, sampleStep);
+            for (var y = step / 2; y < frame.height; y += step)
+            for (var x = step / 2; x < frame.width; x += step)
             {
-                var d = depth[y * depthRowStride + x];
-                if (!(d >= minDepth && d <= maxDepth)) continue;
-                if (useConfidence && confidence.data[y * confidence.rowStride + x] < 1) continue;
-
-                var u = (x + 0.5f) / width;
-                var v = (y + 0.5f) / height;
-                Vector2 viewport = orientation switch
-                {
-                    ScreenOrientation.LandscapeLeft => new Vector2(u, 1f - v),
-                    ScreenOrientation.LandscapeRight => new Vector2(1f - u, v),
-                    ScreenOrientation.PortraitUpsideDown => new Vector2(v, u),
-                    _ => new Vector2(1f - v, 1f - u)
-                };
-                var ndcX = (viewport.x - 0.5f) * 2f * cropX;
-                var ndcY = (viewport.y - 0.5f) * 2f * cropY;
-                var cameraPoint = new Vector3(
-                    (ndcX + projection.m02) * d / projection.m00,
-                    (ndcY + projection.m12) * d / projection.m11,
-                    -d);
-                var sessionPoint = cameraToSession.MultiplyPoint3x4(cameraPoint);
-                if (hasPath)
+                if (TrySample(frame, x + 0.5f, y + 0.5f, out var sessionPoint, out var d))
                     ConsiderPathObstacle(sessionToWorld.MultiplyPoint3x4(sessionPoint), d);
-                if (points == null) continue;
-
-                var key = VoxelKey(sessionPoint);
-                if (voxels.ContainsKey(key)) continue;
-
-                var slot = next;
-                next = (next + 1) % capacity;
-                if (count < capacity) count++;
-                else voxels.Remove(slotKeys[slot]);
-                slotKeys[slot] = key;
-                voxels[key] = slot;
-                points[slot] = new Vector4(sessionPoint.x, sessionPoint.y, sessionPoint.z, now);
-                written++;
             }
         }
-
         PublishObstacleIntensity(hasPath);
+
+        if (points == null) return;
+        var now = Time.time;
+        var start = next;
+        var written = 0;
+        for (var i = 0; i < raysPerCapture && written < capacity; i++)
+        {
+            if (!TrySample(frame, Random.value * frame.width, Random.value * frame.height, out var sessionPoint, out _))
+                continue;
+            points[next] = new Vector4(sessionPoint.x, sessionPoint.y, sessionPoint.z, now);
+            next = (next + 1) % capacity;
+            if (count < capacity) count++;
+            written++;
+        }
 
         if (written == 0) return;
         var firstRun = Mathf.Min(written, capacity - start);
@@ -495,14 +517,32 @@ public class LidarPulseView : MonoBehaviour
         PathObstacleHaptics.Stop();
     }
 
-    long VoxelKey(Vector3 p)
+    /// <summary>
+    /// The depth image is in the camera sensor's landscape orientation. A sample at continuous pixel
+    /// coordinates is mapped to the viewport with the inverse display matrix (which includes the
+    /// rotation and aspect-fill crop), then unprojected with the camera's projection at its LiDAR depth.
+    /// Pixels cropped off screen map outside 0–1 and still unproject correctly.
+    /// </summary>
+    bool TrySample(in DepthFrame frame, float px, float py, out Vector3 sessionPoint, out float d)
     {
-        const int bias = 1 << 20;
-        const long mask = (1L << 21) - 1;
-        var x = (Mathf.FloorToInt(p.x / voxelSize) + bias) & mask;
-        var y = (Mathf.FloorToInt(p.y / voxelSize) + bias) & mask;
-        var z = (Mathf.FloorToInt(p.z / voxelSize) + bias) & mask;
-        return (x << 42) | (y << 21) | z;
+        sessionPoint = default;
+        var x = Mathf.Min((int)px, frame.width - 1);
+        var y = Mathf.Min((int)py, frame.height - 1);
+        d = frame.depth[y * frame.depthRowStride + x];
+        if (!(d >= minDepth && d <= maxDepth)) return false;
+        if (frame.useConfidence && frame.confidence.data[y * frame.confidence.rowStride + x] < 1) return false;
+
+        var viewport = frame.viewportOrigin +
+                       px / frame.width * frame.viewportPerU +
+                       py / frame.height * frame.viewportPerV;
+        var ndcX = (viewport.x - 0.5f) * 2f;
+        var ndcY = (viewport.y - 0.5f) * 2f;
+        var cameraPoint = new Vector3(
+            (ndcX + frame.projection.m02) * d / frame.projection.m00,
+            (ndcY + frame.projection.m12) * d / frame.projection.m11,
+            -d);
+        sessionPoint = frame.cameraToSession.MultiplyPoint3x4(cameraPoint);
+        return true;
     }
 
     void UpdateButton()

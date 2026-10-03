@@ -53,6 +53,7 @@ All five files are downloaded to `Application.persistentDataPath/navigation-cach
 | `building.json` | Yes | Graph nodes/edges plus destination labels ([schema](../shared/building.schema.json)) |
 | `structure.usdz` | Yes | Original RoomPlan building geometry rendered in the expanded iPhone map |
 | `route.json` | No | Fallback polyline if A* has no destination ([schema](../shared/route.schema.json)) |
+| `stairs.json` | No | Separate stair zones, with `prev`/`next` floors and the floor lookup ([schema](../shared/stairs.schema.json)) |
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
 
@@ -95,6 +96,8 @@ Tap the minimap (top right, below the status card) at any time to open the full-
 
 When you start from a point other than your location, the AR ribbon still guides you from where you are to the nearest point on that route, then along it.
 
+A stair on the floor is a portal into another world map. Choosing it, or arriving there, opens that stair zone only when `StreamingAssets/<stair-zone>/worldmap-<stair-zone>.bin` exists. The stair map draws the landing below and the landing above. **Down** and **Up** follow `prev` and `next`, and the floor you land on comes from `floorIndex`. Each of those floors is its own scanned map.
+
 ARKit positions are converted to Unity by negating Z (right-handed to left-handed).
 
 ## Scripts
@@ -103,7 +106,7 @@ ARKit positions are converted to Unity by negating Z (right-handed to left-hande
 - `Assets/Scripts/FirebaseNavigationPackageRepository.cs`: Firebase email/password authentication, Firestore metadata reads, Storage downloads, path validation, and atomic offline cache.
 - `Assets/Scripts/FirebaseNavigationPackageLoader.cs`: login/building/zone UI and offline-package selection.
 - `Assets/Scripts/RouteNavigator.cs`: path ribbon, waypoint markers, off-screen turn arrow.
-- `Assets/Scripts/LidarPulseView.cs`: **LiDAR** button (bottom left). Turns on ARKit scene depth via an `AROcclusionManager` with occlusion disabled, accumulates a 2.5 cm voxel point cloud out to 6 m in session space, and draws it as dark green dots (`Assets/Resources/GnarlyLidarPoints.shader`) that brighten as a pulse sweeps out from the user every 1.6 s. Unlike feature points, LiDAR depth works in the dark. The cloud is cleared on relocalization and **Reset map**.
+- `Assets/Scripts/LidarPulseView.cs`: **LiDAR** button (bottom left). Turns on ARKit scene depth via an `AROcclusionManager` with occlusion disabled, casts 1,200 random rays per depth frame out to 6 m and keeps the newest 300,000 hits in session space (rays are uniform across the view, so near surfaces are dense and far ones sparse), and draws it as dark green dots (`Assets/Resources/GnarlyLidarPoints.shader`) that brighten as a pulse sweeps out from the user every 1.6 s. Unlike feature points, LiDAR depth works in the dark. The cloud is cleared on relocalization and **Reset map**.
 - `Assets/Scripts/Pathfinding.cs`: RoomPlan visibility connections, multi-zone graph merging, and A*.
 - `Assets/Scripts/IndoorMapOverlay.cs`: minimap card, top-down map rendering (scan geometry, place markers, start and destination pins, routes), and the bridge to the native 3D view. `IndoorMapOverlay.Planner.cs` holds the route-planner screen; `MapViewportInput.cs` handles tap, pan and pinch on the map; `MapUi.cs` has shared colors and uGUI builders.
 - `Assets/Plugins/iOS/AppleRoomModelPreview.swift`: RealityKit 3D view of `structure.usdz` with marker selection.

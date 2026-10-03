@@ -28,3 +28,8 @@ GoogleService-Info.plist
 google-services.json
 .env
 navigator-unity/FirebaseConfig/
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+
+web/.vite/

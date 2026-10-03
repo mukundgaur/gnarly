@@ -5,7 +5,9 @@
     ],
     "method": [
       "GET",
-      "HEAD"
+      "HEAD",
+      "POST",
+      "PUT"
     ],
     "responseHeader": [
       "Content-Type",

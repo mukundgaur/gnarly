@@ -6,7 +6,6 @@ Shader "Gnarly/LidarPoints"
 
         Pass
         {
-            Blend One One
             ZWrite Off
             ZTest LEqual
             Cull Off
@@ -27,6 +26,7 @@ Shader "Gnarly/LidarPoints"
             float _PulseWidth;
             float _PulseTrail;
             float _PointSize;
+            float _MinPixelRadius;
             float _Now;
             float _FreshSeconds;
 
@@ -58,7 +58,8 @@ Shader "Gnarly/LidarPoints"
 
                 float3 world = mul(_SessionToWorld, float4(p.xyz, 1)).xyz;
                 float3 view = TransformWorldToView(world);
-                view.xy += corner * _PointSize;
+                float metersPerPixel = 2 * -view.z / (abs(UNITY_MATRIX_P[1][1]) * _ScreenParams.y);
+                view.xy += corner * max(_PointSize, _MinPixelRadius * metersPerPixel);
                 o.positionCS = TransformWViewToHClip(view);
 
                 // Bright crest at the pulse front with a decaying afterglow behind it.
@@ -76,7 +77,7 @@ Shader "Gnarly/LidarPoints"
             {
                 float r2 = dot(i.corner, i.corner);
                 if (r2 > 1) discard;
-                return half4(i.color * (0.45 + 0.55 * (1 - r2)), 1);
+                return half4(i.color, 1);
             }
             ENDHLSL
         }

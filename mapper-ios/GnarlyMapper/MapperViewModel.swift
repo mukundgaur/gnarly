@@ -12,7 +12,19 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var exportURL: URL?
     @Published private(set) var recordedNodes: [RecordedGraphNode] = []
     @Published private(set) var isUploading = false
+    @Published private(set) var detectedStairs: [DetectedStair] = []
+    @Published private(set) var catalog = StairCatalogStore.load()
+    @Published private(set) var isStairScan = false
+    @Published private(set) var zoneConnectionsJSON = ""
+    @Published private(set) var scanPlan = ScanPlan.empty
     private var uploadAttemptID: UUID?
+
+    private enum ScanTarget {
+        case floor
+        case stairs
+    }
+
+    private var scanTarget: ScanTarget = .floor
     @Published var showsError = false
     @Published private(set) var errorMessage = ""
 
@@ -22,6 +34,8 @@ final class MapperViewModel: ObservableObject {
     private var testAnchor: TestAnchor?
     private var pathSamplingTimer: Timer?
     private var lastSampledPosition: [Float]?
+    private var lastPlanUpdate = Date.distantPast
+    private var lastStairCount = 0
     private let automaticNodeSpacingMeters: Float = 0.75
 
     var canMarkAnchor: Bool {
@@ -40,6 +54,12 @@ final class MapperViewModel: ObservableObject {
         recordedNodes.count
     }
 
+    init() {
+        let loaded = StairCatalogStore.load()
+        catalog = loaded
+        zoneConnectionsJSON = loaded.navigatorZoneConnectionsJSON()
+    }
+
     func configure(captureView: RoomCaptureView) {
         self.captureView = captureView
         startScan()
@@ -56,6 +76,11 @@ final class MapperViewModel: ObservableObject {
         testAnchor = nil
         recordedNodes = []
         exportURL = nil
+        if scanTarget == .floor {
+            detectedStairs = []
+        }
+        scanPlan = .empty
+        lastStairCount = 0
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
         statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
@@ -81,7 +106,15 @@ final class MapperViewModel: ObservableObject {
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 capturedRoom = room
-                statusText = "Room ready. Mark the cube point, then export the package."
+                scanPlan = ScanPlan(room: room)
+                if scanTarget == .floor {
+                    detectedStairs = RoomPlanScanExtractor.detectedStairs(in: room)
+                    statusText = detectedStairs.isEmpty
+                        ? "Room ready. Mark the cube point, then export the package."
+                        : "RoomPlan found \(detectedStairs.count) stair object(s). Export this floor, then scan the stairwell."
+                } else {
+                    statusText = "Stairwell ready. Export this zone so its landings can connect to the floors."
+                }
             } catch {
                 showError("Unable to build the captured room: \(error.localizedDescription)")
             }
@@ -122,15 +155,50 @@ final class MapperViewModel: ObservableObject {
         statusText = "Test anchor marked. Export the package when ready."
     }
 
-    func exportPackage(zoneID rawZoneID: String, floorID rawFloorID: String) {
-        guard let room = capturedRoom else {
-            showError("Finish a room scan before exporting.")
+    func noteRoomUpdate(_ room: CapturedRoom) {
+        let stairs = room.objects.reduce(into: 0) { count, object in
+            if object.category == .stairs { count += 1 }
+        }
+        let now = Date()
+        guard stairs != lastStairCount || now.timeIntervalSince(lastPlanUpdate) > 0.3 else { return }
+        lastPlanUpdate = now
+        lastStairCount = stairs
+        scanPlan = ScanPlan(room: room)
+    }
+
+    func beginFloorScan() {
+        scanTarget = .floor
+        isStairScan = false
+        resetTracking()
+        startScan()
+        statusText = "Scanning this floor. RoomPlan stair objects become links into a separate stair zone."
+    }
+
+    func beginStairScan(stairID rawStairID: String) {
+        let stairID = StairZoneID.sanitize(rawStairID)
+        guard !stairID.isEmpty else {
+            showError("RoomPlan has not detected a stair yet. Finish a floor scan that includes the staircase.")
             return
         }
+        let keptStairs = detectedStairs
+        scanTarget = .stairs
+        isStairScan = true
+        resetTracking()
+        startScan()
+        detectedStairs = keptStairs
+        statusText = "Scanning stair zone \(stairID). Walk from the lower landing to the upper landing, then export."
+    }
 
-        let zoneID = rawZoneID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !zoneID.isEmpty else {
-            showError("Enter a non-empty zone ID, such as zone-a.")
+    func exportPackage(
+        zoneID rawZoneID: String,
+        floorID rawFloorID: String,
+        asStairs: Bool = false,
+        stairID rawStairID: String = "",
+        linkedFloorZoneID: String = "",
+        floorIsBelow: Bool = true
+    ) {
+        guard let room = capturedRoom else {
+            showError("Finish a room scan before exporting.")
             return
         }
 
@@ -139,10 +207,63 @@ final class MapperViewModel: ObservableObject {
             showError("Enter a floor ID, such as ground.")
             return
         }
+        let packageZoneID = StairZoneID.sanitize(rawZoneID)
+        guard !packageZoneID.isEmpty else {
+            showError("Enter a non-empty zone ID.")
+            return
+        }
 
-        let anchor = (testAnchor ?? fallbackAnchor()).withZoneID(zoneID)
+        var draft = catalog
+        let map: ExportedMap
+        if asStairs {
+            let floorZoneID = StairZoneID.sanitize(linkedFloorZoneID.isEmpty ? rawZoneID : linkedFloorZoneID)
+            let pointer = FloorPointer(floorID: floorID, zoneID: floorZoneID, story: room.story, nodeID: packageZoneID)
+            let sample = RoomPlanScanExtractor.detectedStairs(in: room).first
+            let center = sample?.position ?? recordedNodes.first?.position ?? [0, 0, 0]
+            let landings = StairLandings.positions(
+                center: center,
+                dimensions: sample?.dimensions ?? [1.2, 3, 2.5],
+                up: sample?.up ?? [0, 1, 0],
+                forward: sample?.forward ?? [0, 0, 1]
+            )
+            let existing = draft.stair(id: packageZoneID)
+            let below = floorIsBelow ? pointer : existing?.prev
+            let above = floorIsBelow ? existing?.next : pointer
+            draft.markScanned(
+                id: packageZoneID,
+                prev: below,
+                next: above,
+                landingBelow: landings.below,
+                landingAbove: landings.above
+            )
+            map = .stairZone(id: packageZoneID)
+        } else {
+            let end: StairEnd = floorIsBelow ? .below : .above
+            let selected = StairZoneID.sanitize(rawStairID)
+            let attaching = !selected.isEmpty && draft.stair(id: selected) != nil && !detectedStairs.contains(where: { $0.id == selected })
+            if attaching {
+                let pointer = FloorPointer(floorID: floorID, zoneID: packageZoneID, story: room.story, nodeID: selected)
+                draft.link(stairID: selected, floor: pointer, as: end)
+            } else {
+                for stair in detectedStairs {
+                    let pointer = FloorPointer(
+                        floorID: floorID,
+                        zoneID: packageZoneID,
+                        story: stair.story,
+                        nodeID: stair.id
+                    )
+                    draft.upsert(detection: stair, on: pointer)
+                    draft.link(stairID: stair.id, floor: pointer, as: end)
+                }
+            }
+            map = .floor
+        }
 
-        statusText = "Saving ARWorldMap, RoomPlan scan, and building graph…"
+        let anchor = (testAnchor ?? fallbackAnchor()).withZoneID(packageZoneID)
+        let recorded = recordedNodes
+        statusText = asStairs
+            ? "Saving the stair zone world map and RoomPlan stair links…"
+            : "Saving ARWorldMap, RoomPlan scan, and building graph…"
         arSession.getCurrentWorldMap { [weak self] worldMap, error in
             Task { @MainActor in
                 guard let self else { return }
@@ -156,15 +277,32 @@ final class MapperViewModel: ObservableObject {
                         room: room,
                         worldMap: worldMap,
                         anchor: anchor,
-                        recordedNodes: self.recordedNodes,
-                        floorID: floorID
+                        recordedNodes: recorded,
+                        floorID: floorID,
+                        map: map,
+                        stairs: draft.stairs.isEmpty ? nil : draft
                     )
-                    self.statusText = "Package saved. Share it for Unity relocalization and graph work."
+                    try StairCatalogStore.save(draft)
+                    self.catalog = draft
+                    self.zoneConnectionsJSON = draft.navigatorZoneConnectionsJSON()
+                    let linkCount = draft.navigatorZoneConnections().connections.count
+                    if linkCount == 0 {
+                        self.statusText = "Package saved. No RoomPlan stair object was linked yet."
+                    } else {
+                        self.statusText = "Package saved. \(linkCount) RoomPlan stair link(s) written to zone-connections.json."
+                    }
                 } catch {
                     self.showError("Package export failed: \(error.localizedDescription)")
                 }
             }
         }
+    }
+
+    private func resetTracking() {
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.planeDetection = [.horizontal, .vertical]
+        configuration.environmentTexturing = .automatic
+        arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
     }
 
     func uploadPackage(buildingID rawBuildingID: String, versionID rawVersionID: String, zoneID rawZoneID: String, floorID rawFloorID: String, startNextZone: Bool = false, onNextZone: @escaping (String) -> Void = { _ in }) {
@@ -231,6 +369,12 @@ final class MapperViewModel: ObservableObject {
                 statusText = "Uploading AR world map…"
                 try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
+                let connectionsURL = packageURL.appendingPathComponent("zone-connections.json")
+                if FileManager.default.fileExists(atPath: connectionsURL.path) {
+                    statusText = "Uploading RoomPlan stair links…"
+                    _ = try await repository.uploadZoneConnections(from: connectionsURL, buildingId: buildingID, versionId: versionID)
+                    try Task.checkCancellation()
+                }
                 statusText = "Publishing building version…"
                 try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
                 try Task.checkCancellation()

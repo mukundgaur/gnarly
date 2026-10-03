@@ -13,6 +13,7 @@ shared/local-packages/
     scan-features.json
     building.json
     route.json
+    stairs.json
     structure.usdz
     structure-metadata.json
     manifest.json
@@ -28,7 +29,8 @@ shared/local-packages/
 - `test-anchor.json`: schema described in [test-anchor.schema.json](test-anchor.schema.json).
 - `scan.json`: wrapped RoomPlan `CapturedRoom` JSON in the same ARKit coordinate system.
 - `scan-features.json`: normalized walls, doors, openings, windows, floors, objects, and sections. Schema: [scan-features.schema.json](scan-features.schema.json). Example: [examples/scan-features.example.json](examples/scan-features.example.json).
-- `building.json`: navigation graph. RoomPlan doors/openings/stairs/sections plus visibility edges; optional recorded entrance/destination labels. Schema: [building.schema.json](building.schema.json). Example: [examples/building.example.json](examples/building.example.json).
+- `building.json`: navigation graph. RoomPlan doors/openings/stairs/sections plus visibility edges; optional recorded entrance/destination labels. Schema: [building.schema.json](building.schema.json). Example: [examples/building.example.json](examples/building.example.json). Stair nodes on a floor are portals into a separate stair zone.
+- `stairs.json`: stair zones, each with its own world map. `prev` / `next` point at the floor below and the floor above. `floorIndex` maps a stair id and direction to the floor that exit lands on. The mapper turns those links into `zone-connections.json`, which is what the navigator loads. Schema: [stairs.schema.json](stairs.schema.json). Example: [examples/stairs.example.json](examples/stairs.example.json).
 - `route.json`: ordered waypoints from recorded nodes, described in [route.schema.json](route.schema.json). See [examples/route.example.json](examples/route.example.json).
 - `structure.usdz` / `structure-metadata.json`: RoomPlan mesh plus identifier mapping for later minimap work.
 - `zone-connections.json`: links a node in one zone to a node in another (for example a floor's `stairs-bottom` to a staircase zone's `landing-bottom`). Bidirectional, A* weight 1. Schema: [zone-connections.schema.json](zone-connections.schema.json). Example: [examples/zone-connections.example.json](examples/zone-connections.example.json).

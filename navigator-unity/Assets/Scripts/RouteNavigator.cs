@@ -43,6 +43,10 @@ public class RouteNavigator : MonoBehaviour
 
     public bool IsActive => route != null;
     public bool HasArrived { get; private set; }
+    public string TargetWaypointId =>
+        route?.waypoints == null || route.waypoints.Length == 0
+            ? null
+            : route.waypoints[Mathf.Clamp(targetIndex, 0, route.waypoints.Length - 1)].id;
     public string StatusMessage { get; private set; } = "";
 
     public void Begin(Route route, Transform sessionSpace, Camera arCamera)
@@ -251,7 +255,7 @@ public class RouteNavigator : MonoBehaviour
             else
             {
                 marker.transform.localScale = Vector3.one * 0.12f;
-                marker.transform.localPosition = basePosition;
+                marker.transform.localPosition = basePosition + Vector3.up * 0.06f;
             }
 
             var renderer = marker.GetComponent<Renderer>();

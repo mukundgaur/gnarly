@@ -89,6 +89,7 @@ public class RelocalizationController : MonoBehaviour
     string selectedDestinationKey;
     readonly Dictionary<string, string> placeNames = new Dictionary<string, string>();
     bool arrivalAnnounced;
+    float nextPoseLogAt;
 #if UNITY_IOS && !UNITY_EDITOR
     ARWorldMap? appliedWorldMap;
 #endif
@@ -197,6 +198,7 @@ public class RelocalizationController : MonoBehaviour
                 }
                 else if (navigator != null && navigator.IsActive)
                 {
+                    LogCameraPose();
                     if (navigator.HasArrived && activeLegs != null && activeLegIndex < activeLegs.Count - 1)
                         AwaitZoneTransition();
                     else
@@ -301,6 +303,7 @@ public class RelocalizationController : MonoBehaviour
                 : null;
             var routePath = Path.Combine(package.directory, "route.json");
             fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), currentZoneId) : null;
+            Pathfinding.SnapToFloor(fallbackRoute, package.graph);
 
             if (!skipWorldMap)
                 ApplyWorldMap(File.ReadAllBytes(Path.Combine(package.directory, $"worldmap-{currentZoneId}.bin")));
@@ -826,6 +829,22 @@ public class RelocalizationController : MonoBehaviour
             State.TrackingLost => new Color(1f, 0.69f, 0.24f),
             _ => new Color(0.25f, 0.85f, 1f)
         };
+    }
+
+    /// <summary>
+    /// With the phone held upright in portrait, roll should be near 0°. Near ±90° means the AR camera
+    /// is rotated against the camera feed, so world-up content (the destination pillar) draws sideways.
+    /// </summary>
+    void LogCameraPose()
+    {
+        if (Time.unscaledTime < nextPoseLogAt) return;
+        nextPoseLogAt = Time.unscaledTime + 2f;
+        var camera = origin.Camera.transform;
+        var upInView = Vector3.ProjectOnPlane(Vector3.up, camera.forward);
+        var roll = upInView.sqrMagnitude > 1e-4f ? Vector3.SignedAngle(upInView, camera.up, camera.forward) : float.NaN;
+        var pitch = 90f - Vector3.Angle(Vector3.up, camera.forward);
+        Debug.Log($"[Gnarly] Pose: screen={Screen.orientation} {Screen.width}x{Screen.height}, camera roll={roll:0}° pitch={pitch:0}°, " +
+                  $"trackables rotation={origin.TrackablesParent.rotation.eulerAngles}, camera offset={origin.CameraFloorOffsetObject.transform.localPosition}.");
     }
 
     void ReportTrackingState(bool force = false)

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-03T00:00:00Z",
+  "stairs": [
+    {
+      "id": "stairs-44444444",
+      "zoneId": "stairs-44444444",
+      "roomPlanIdentifier": "44444444-4444-4444-4444-444444444444",
+      "detectedOnFloorId": "ground",
+      "detectedOnZoneId": "zone-a",
+      "position": [2.0, 1.5, -8.0],
+      "prev": { "floorId": "ground", "zoneId": "zone-a", "story": 0 },
+      "next": { "floorId": "level-1", "zoneId": "zone-b", "story": 1 },
+      "scanned": true,
+      "landingBelow": [2.0, 0.2, -9.2],
+      "landingAbove": [2.0, 3.2, -6.8]
+    }
+  ],
+  "floorIndex": [
+    { "stairId": "stairs-44444444", "direction": "down", "floorId": "ground", "zoneId": "zone-a", "story": 0 },
+    { "stairId": "stairs-44444444", "direction": "up", "floorId": "level-1", "zoneId": "zone-b", "story": 1 }
+  ],
+  "connections": [
+    {
+      "fromZoneId": "zone-a",
+      "fromFloorId": "ground",
+      "fromNodeId": "stairs-44444444",
+      "toZoneId": "stairs-44444444",
+      "toFloorId": null,
+      "kind": "floor-to-stairs"
+    },
+    {
+      "fromZoneId": "stairs-44444444",
+      "fromFloorId": "ground",
+      "fromNodeId": "landing-below",
+      "toZoneId": "zone-a",
+      "toFloorId": "ground",
+      "kind": "stairs-to-floor"
+    },
+    {
+      "fromZoneId": "zone-b",
+      "fromFloorId": "level-1",
+      "fromNodeId": "stairs-44444444",
+      "toZoneId": "stairs-44444444",
+      "toFloorId": null,
+      "kind": "floor-to-stairs"
+    },
+    {
+      "fromZoneId": "stairs-44444444",
+      "fromFloorId": "level-1",
+      "fromNodeId": "landing-above",
+      "toZoneId": "zone-b",
+      "toFloorId": "level-1",
+      "kind": "stairs-to-floor"
+    }
+  ],
+  "notes": "Illustrative stair zone. The floor maps and the stairwell are separate world maps. Scan the stair zone before it can render."
+}
