@@ -26,7 +26,7 @@ docs/                   Setup, handoff, and integration notes
 
 1. Read [docs/poc-success-criteria.md](docs/poc-success-criteria.md).
 2. The mapper engineer follows [mapper-ios/README.md](mapper-ios/README.md).
-3. The Unity engineer follows [navigator-unity/README.md](navigator-unity/README.md).
+3. The Unity engineer follows [docs/unity-agent-handoff.md](docs/unity-agent-handoff.md), then [navigator-unity/README.md](navigator-unity/README.md).
 4. Exchange generated test artifacts only through the ignored `shared/local-packages/` directory; commit only schema and redacted examples.
 
 ## Guardrail
