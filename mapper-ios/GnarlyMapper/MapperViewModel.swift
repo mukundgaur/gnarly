@@ -16,6 +16,7 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var catalog = StairCatalogStore.load()
     @Published private(set) var isStairScan = false
     @Published private(set) var zoneConnectionsJSON = ""
+    @Published private(set) var scanPlan = ScanPlan.empty
     private var uploadAttemptID: UUID?
 
     private enum ScanTarget {
@@ -33,6 +34,8 @@ final class MapperViewModel: ObservableObject {
     private var testAnchor: TestAnchor?
     private var pathSamplingTimer: Timer?
     private var lastSampledPosition: [Float]?
+    private var lastPlanUpdate = Date.distantPast
+    private var lastStairCount = 0
     private let automaticNodeSpacingMeters: Float = 0.75
 
     var canMarkAnchor: Bool {
@@ -76,6 +79,8 @@ final class MapperViewModel: ObservableObject {
         if scanTarget == .floor {
             detectedStairs = []
         }
+        scanPlan = .empty
+        lastStairCount = 0
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
         statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
@@ -101,6 +106,7 @@ final class MapperViewModel: ObservableObject {
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 capturedRoom = room
+                scanPlan = ScanPlan(room: room)
                 if scanTarget == .floor {
                     detectedStairs = RoomPlanScanExtractor.detectedStairs(in: room)
                     statusText = detectedStairs.isEmpty
@@ -147,6 +153,17 @@ final class MapperViewModel: ObservableObject {
             notes: "Camera position captured by GnarlyMapper."
         )
         statusText = "Test anchor marked. Export the package when ready."
+    }
+
+    func noteRoomUpdate(_ room: CapturedRoom) {
+        let stairs = room.objects.reduce(into: 0) { count, object in
+            if object.category == .stairs { count += 1 }
+        }
+        let now = Date()
+        guard stairs != lastStairCount || now.timeIntervalSince(lastPlanUpdate) > 0.3 else { return }
+        lastPlanUpdate = now
+        lastStairCount = stairs
+        scanPlan = ScanPlan(room: room)
     }
 
     func beginFloorScan() {
