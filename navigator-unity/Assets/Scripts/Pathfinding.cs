@@ -632,7 +632,7 @@ public static class Pathfinding
 
         // After building.json, so a recorded edge is not replaced by a synthetic one for the same pair.
         ConnectVisibility(graph, walls, portals);
-        ConnectIsolatedConnectors(graph, walls, portals);
+        ConnectStrandedNodes(graph, walls, portals);
 
         if (scan?.walls != null && scan.walls.Length > 0 && graph.Walls.Count == 0)
             Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}' listed {scan.walls.Length} walls but none became obstacles.");
@@ -771,42 +771,99 @@ public static class Pathfinding
         return IsClear(Xz(a.position), Xz(b.position), walls, portals);
     }
 
-    /// <summary>
-    /// An elevator or continuation placed on the website before it was connected to a walkable
-    /// point has no edges, so every route through it fails. Join it to the nearest wall-clear
-    /// node on its floor, falling back to the nearest node within <see cref="MaxEdgeMeters"/>.
-    /// </summary>
-    static void ConnectIsolatedConnectors(Graph graph, List<Wall> walls, List<Portal> portals)
-    {
-        foreach (var connector in graph.Nodes)
-        {
-            if (!IsElevator(connector) && !IsContinuation(connector)) continue;
-            if (connector.position?.Length != 3 || graph.Neighbors(connector.id).GetEnumerator().MoveNext()) continue;
+    /// <summary>How far a stranded door or place is joined to the walk even through its own wall.</summary>
+    public const float StrandedPlaceMeters = 4f;
 
-            Node clear = null, nearest = null;
-            float clearMeters = float.MaxValue, nearestMeters = float.MaxValue;
-            foreach (var node in graph.Nodes)
+    /// <summary>
+    /// Joins nodes the route cannot reach: an elevator, continuation, door or labelled place that
+    /// has no edges, or that only connects to other such nodes and never to the recorded walk. A
+    /// door sits on its wall, so unless the scan has an opening exactly there every line to it is
+    /// "blocked" and it ends up stranded a step from the walk. Each stranded group is joined by its
+    /// closest wall-clear pair; failing that, by its closest pair within
+    /// <see cref="StrandedPlaceMeters"/> (<see cref="MaxEdgeMeters"/> for elevators and continuations).
+    /// </summary>
+    static void ConnectStrandedNodes(Graph graph, List<Wall> walls, List<Portal> portals)
+    {
+        var component = new Dictionary<string, int>();
+        var groups = new List<List<Node>>();
+        foreach (var node in graph.Nodes)
+        {
+            if (component.ContainsKey(node.id)) continue;
+            var group = new List<Node>();
+            var stack = new Stack<Node>();
+            stack.Push(node);
+            component[node.id] = groups.Count;
+            while (stack.Count > 0)
             {
-                if (node == connector || node.floor != connector.floor || node.position?.Length != 3) continue;
-                if (IsElevator(node) || IsContinuation(node)) continue;
-                var meters = Vector3.Distance(Position(connector), Position(node));
-                if (meters < nearestMeters) { nearestMeters = meters; nearest = node; }
-                if (meters < clearMeters && CanConnect(connector, node, walls, portals)) { clearMeters = meters; clear = node; }
+                var current = stack.Pop();
+                group.Add(current);
+                foreach (var edge in graph.Neighbors(current.id))
+                {
+                    var next = graph.Node(edge.to);
+                    if (next == null || component.ContainsKey(next.id)) continue;
+                    component[next.id] = groups.Count;
+                    stack.Push(next);
+                }
             }
-            var target = clear ?? (nearestMeters <= MaxEdgeMeters ? nearest : null);
-            if (target == null) continue;
-            graph.AddEdge(new Edge
+            groups.Add(group);
+        }
+
+        var floorsWithWalk = new HashSet<string>();
+        var groupHasWalk = new bool[groups.Count];
+        foreach (var node in graph.Nodes)
+        {
+            if (!IsRecordedWalkNode(node)) continue;
+            floorsWithWalk.Add(node.floor ?? "");
+            groupHasWalk[component[node.id]] = true;
+        }
+
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            if (groupHasWalk[index] || !group.Exists(IsRoutablePlace)) continue;
+            // Without a recorded walk on the floor there is no main network to join, so only
+            // nodes with no edges at all are treated as stranded.
+            var walkFloor = floorsWithWalk.Contains(group[0].floor ?? "");
+            if (group.Count > 1 && !walkFloor) continue;
+
+            Node clearFrom = null, clearTo = null, nearFrom = null, nearTo = null;
+            float clearMeters = float.MaxValue, nearMeters = float.MaxValue;
+            var reach = StrandedPlaceMeters;
+            foreach (var from in group)
             {
-                from = connector.id,
-                to = target.id,
-                kind = "hallway",
-                meters = clear != null ? clearMeters : nearestMeters,
-                source = "visibility"
-            });
-            Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}': {connector.type} '{connector.id}' had no connections; " +
-                             $"joined it to '{target.id}' ({(clear != null ? clearMeters : nearestMeters):0.0} m). Connect it on the website to confirm.");
+                if (!IsRoutablePlace(from) || from.position?.Length != 3) continue;
+                if (IsElevator(from) || IsContinuation(from)) reach = MaxEdgeMeters;
+                foreach (var to in graph.Nodes)
+                {
+                    if (component[to.id] == index || to.floor != from.floor || to.position?.Length != 3) continue;
+                    if (walkFloor && !groupHasWalk[component[to.id]]) continue;
+                    if (!IsRoutablePlace(to) && !IsRecordedWalkNode(to)) continue;
+                    if (IsElevator(to) || IsContinuation(to)) continue;
+                    var meters = Vector3.Distance(Position(from), Position(to));
+                    if (meters < nearMeters) { nearMeters = meters; nearFrom = from; nearTo = to; }
+                    if (meters < clearMeters && CanConnect(from, to, walls, portals))
+                    {
+                        clearMeters = meters;
+                        clearFrom = from;
+                        clearTo = to;
+                    }
+                }
+            }
+
+            var useClear = clearFrom != null;
+            if (!useClear && (nearFrom == null || nearMeters > reach)) continue;
+            var a = useClear ? clearFrom : nearFrom;
+            var b = useClear ? clearTo : nearTo;
+            var joinMeters = useClear ? clearMeters : nearMeters;
+            graph.AddEdge(new Edge { from = a.id, to = b.id, kind = "hallway", meters = joinMeters, source = "visibility" });
+            Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}': {a.type} '{a.id}' could not be reached; " +
+                             $"joined it to '{b.id}' ({joinMeters:0.0} m). Connect it on the website to confirm.");
         }
     }
+
+    /// <summary>A node a route can start, pass through or end at, as opposed to a window.</summary>
+    static bool IsRoutablePlace(Node node) =>
+        node != null && node.type != "window" && node.type != "wall" && !IsRecordedWalkNode(node);
 
     /// <summary>Recorded walks and connections confirmed in the web editor, on one floor.</summary>
     static bool IsTrustedEdge(Edge edge, Node from, Node to) =>
