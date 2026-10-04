@@ -650,11 +650,13 @@ public class RelocalizationController : MonoBehaviour
 
         Route mapRoute = null;
         string waypointKey = null;
+        var exitLeg = -1;
         for (var legIndex = 0; legIndex < legs.Count; legIndex++)
         {
             if (legs[legIndex].zoneId != currentZoneId) continue;
             mapRoute = Pathfinding.ToRoute(navigationGraph, legs[legIndex].nodeIds, legs[legIndex].zoneId);
-            waypointKey = Pathfinding.ElevatorWaypoint(navigationGraph, legs, legIndex);
+            waypointKey = Pathfinding.ZoneExitWaypoint(navigationGraph, legs, legIndex);
+            exitLeg = legIndex;
             break;
         }
 
@@ -683,7 +685,9 @@ public class RelocalizationController : MonoBehaviour
                 : $"  ·  {changes} zone change{(changes > 1 ? "s" : "")}";
             var lead = waypointKey == null
                 ? ""
-                : $"Walk to {NameOf(waypointKey)}. That elevator is the waypoint onto the next floor. ";
+                : IsElevatorRide(legs, exitLeg)
+                    ? $"Walk to {NameOf(waypointKey)}. That elevator is the waypoint onto the next floor. "
+                    : $"Walk to {NameOf(waypointKey)}. That point continues into the next part of this floor. ";
             details = lead + "Continue via " + string.Join(", then ", steps) + ". You'll confirm each zone on arrival.";
         }
         else
@@ -836,12 +840,13 @@ public class RelocalizationController : MonoBehaviour
     }
 
     /// <summary>
-    /// On this floor the route ends at the elevator when the destination is upstairs or downstairs.
-    /// That elevator is the waypoint the minimap leads to.
+    /// On this zone's map the route ends at the connector when the destination is in another zone:
+    /// the elevator for another floor, or the continuation for another scan of the same space.
+    /// That connector is the waypoint the minimap leads to.
     /// </summary>
     void ShowFloorWaypoint()
     {
-        var connector = Pathfinding.ElevatorWaypoint(navigationGraph, activeLegs, activeLegIndex);
+        var connector = Pathfinding.ZoneExitWaypoint(navigationGraph, activeLegs, activeLegIndex);
         indoorMap?.SetFloorWaypoint(connector);
         if (connector != null)
             indoorMap?.SetCompactCaption($"TO {ConnectorName(activeLegs[activeLegIndex]).ToUpperInvariant()}  ·  THEN {NameOf(selectedDestinationKey).ToUpperInvariant()}");
