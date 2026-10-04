@@ -1,14 +1,15 @@
 using System.Runtime.InteropServices;
 
 /// <summary>
-/// Drives the iPhone Taptic Engine for navigation. A faint rumble means the user
-/// is on the route; a closeness-scaled pulse means a LiDAR obstacle is in the way.
+/// Drives the iPhone Taptic Engine for navigation. A direction-scaled cue confirms
+/// that the phone faces the next route segment; a closeness-scaled pulse means a
+/// LiDAR obstacle is in the way.
 /// </summary>
 public static class PathObstacleHaptics
 {
 #if UNITY_IOS && !UNITY_EDITOR
     [DllImport("__Internal")]
-    static extern void GnarlyHapticsSetRouteCue();
+    static extern void GnarlyHapticsSetRouteCue(float alignment);
 
     [DllImport("__Internal")]
     static extern void GnarlyHapticsSetObstaclePulse(float closeness);
@@ -17,10 +18,11 @@ public static class PathObstacleHaptics
     static extern void GnarlyHapticsStop();
 #endif
 
-    public static void PlayRouteCue()
+    /// <param name="alignment">0 when pointing away from the route, 1 when aligned with it.</param>
+    public static void PlayDirectionCue(float alignment)
     {
 #if UNITY_IOS && !UNITY_EDITOR
-        GnarlyHapticsSetRouteCue();
+        GnarlyHapticsSetRouteCue(UnityEngine.Mathf.Clamp01(alignment));
 #endif
     }
 

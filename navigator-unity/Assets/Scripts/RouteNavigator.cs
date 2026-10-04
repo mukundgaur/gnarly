@@ -53,6 +53,32 @@ public class RouteNavigator : MonoBehaviour
             : route.waypoints[Mathf.Clamp(targetIndex, 0, route.waypoints.Length - 1)].id;
     public string StatusMessage { get; private set; } = "";
 
+    /// <summary>
+    /// Reports how closely the camera is facing the next route direction. This is deliberately
+    /// based on the phone's forward direction rather than distance from the path, so it can drive
+    /// a compass-like haptic cue: no cue while facing away, strongest while facing ahead.
+    /// </summary>
+    public bool TryGetDirectionAlignment(out float alignment)
+    {
+        alignment = 0f;
+        if (route == null || HasArrived || !visible || arCamera == null ||
+            route.waypoints == null || route.waypoints.Length == 0) return false;
+
+        var cameraPosition = arCamera.transform.position;
+        var target = WaypointWorld(Mathf.Clamp(targetIndex, 0, route.waypoints.Length - 1));
+        var toTarget = Vector3.ProjectOnPlane(target - cameraPosition, Vector3.up);
+        if (toTarget.sqrMagnitude < 0.04f && targetIndex < route.waypoints.Length - 1)
+            toTarget = Vector3.ProjectOnPlane(WaypointWorld(targetIndex + 1) - cameraPosition, Vector3.up);
+        var forward = Vector3.ProjectOnPlane(arCamera.transform.forward, Vector3.up);
+        if (toTarget.sqrMagnitude < 0.01f || forward.sqrMagnitude < 0.01f) return false;
+
+        var angle = Vector3.Angle(forward, toTarget);
+        // A little cue starts within roughly 50 degrees. It becomes clear inside 15 degrees,
+        // leaving enough tolerance for natural hand movement while walking.
+        alignment = Mathf.InverseLerp(58f, 12f, angle);
+        return alignment > 0.01f;
+    }
+
     public void Begin(Route route, Transform sessionSpace, Camera arCamera)
     {
         Clear();

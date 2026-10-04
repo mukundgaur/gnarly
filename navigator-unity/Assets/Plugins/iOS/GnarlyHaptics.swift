@@ -2,7 +2,7 @@ import CoreHaptics
 import Foundation
 
 /// Two navigation patterns on the Taptic Engine:
-/// a faint continuous rumble while the user is on the route, and a violent
+/// a direction-scaled continuous cue while the user faces along the route, and a violent
 /// repeating pulse when LiDAR sees an obstacle. Pulse rate and hardness
 /// follow closeness (0 = just detected, 1 = about to hit).
 final class GnarlyHapticPlayer {
@@ -10,13 +10,13 @@ final class GnarlyHapticPlayer {
 
     private enum Mode {
         case stopped
-        case route
+        case direction
         case obstacle
     }
 
     private enum Command {
         case idle
-        case route
+        case direction(Float)
         case obstacle(Float)
     }
 
@@ -37,9 +37,9 @@ final class GnarlyHapticPlayer {
         supportsHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
     }
 
-    func setRouteCue() {
+    func setRouteCue(_ alignment: Float) {
         guard supportsHaptics else { return }
-        pending = .route
+        pending = .direction(min(1, max(0, alignment)))
         enqueueApply()
     }
 
@@ -67,21 +67,25 @@ final class GnarlyHapticPlayer {
             switch haptics.pending {
             case .idle:
                 break
-            case .route:
-                haptics.applyRouteCue()
+            case .direction(let alignment):
+                haptics.applyDirectionCue(alignment)
             case .obstacle(let closeness):
                 haptics.applyObstaclePulse(closeness)
             }
         }
     }
 
-    private func applyRouteCue() {
+    private func applyDirectionCue(_ alignment: Float) {
         stopPulseTimer()
         closeness = 0
         do {
             try ensureEngine()
-            try ensureContinuousPlaying(intensity: 0.2, sharpness: 0.22)
-            mode = .route
+            // This is deliberately a soft, continuous confirmation—not an alarm. Even at
+            // perfect alignment it stays far below the obstacle pattern's 0.78–1.0 sharp hits.
+            // The different texture makes it feel like a compass lock rather than a warning.
+            try ensureContinuousPlaying(intensity: 0.07 + 0.17 * alignment,
+                                       sharpness: 0.10 + 0.12 * alignment)
+            mode = .direction
         } catch {
             recover(from: error)
         }
@@ -218,7 +222,12 @@ final class GnarlyHapticPlayer {
             value: intensity,
             relativeTime: 0
         )
-        try continuousPlayer?.sendParameters([intensityParameter], atTime: CHHapticTimeImmediate)
+        let sharpnessParameter = CHHapticDynamicParameter(
+            parameterID: .hapticSharpnessControl,
+            value: sharpness,
+            relativeTime: 0
+        )
+        try continuousPlayer?.sendParameters([intensityParameter, sharpnessParameter], atTime: CHHapticTimeImmediate)
     }
 
     private func makeContinuousPlayer(sharpness: Float) throws -> CHHapticAdvancedPatternPlayer? {
@@ -238,8 +247,10 @@ final class GnarlyHapticPlayer {
                 guard let haptics = self else { return }
                 haptics.continuousPlaying = false
                 haptics.continuousPlayer = nil
-                guard haptics.mode == .route else { return }
-                haptics.applyRouteCue()
+                guard haptics.mode == .direction else { return }
+                if case .direction(let alignment) = haptics.pending {
+                    haptics.applyDirectionCue(alignment)
+                }
             }
         }
         return created
@@ -271,8 +282,8 @@ final class GnarlyHapticPlayer {
 }
 
 @_cdecl("GnarlyHapticsSetRouteCue")
-public func GnarlyHapticsSetRouteCue() {
-    GnarlyHapticPlayer.shared.setRouteCue()
+public func GnarlyHapticsSetRouteCue(_ alignment: Float) {
+    GnarlyHapticPlayer.shared.setRouteCue(alignment)
 }
 
 @_cdecl("GnarlyHapticsSetObstaclePulse")

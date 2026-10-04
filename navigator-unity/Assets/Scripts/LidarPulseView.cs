@@ -14,7 +14,8 @@ using UnityEngine.XR.ARSubsystems;
 /// disappear in the dark; the LiDAR sensor does not.
 /// While a route is active, the same depth is read even if the point cloud is hidden. Samples that
 /// fall in the walking corridor start a violent pulse the moment an obstacle appears; the pulse
-/// hardens as the return gets closer. A faint rumble plays while the user stays on the route.
+/// hardens as the return gets closer. A quieter cue confirms that the phone faces the next route
+/// direction, acting like a tactile compass rather than an always-on "on path" signal.
 /// </summary>
 public class LidarPulseView : MonoBehaviour
 {
@@ -108,7 +109,7 @@ public class LidarPulseView : MonoBehaviour
     enum HapticMode
     {
         Silent,
-        Route,
+        Direction,
         Obstacle
     }
 
@@ -495,14 +496,16 @@ public class LidarPulseView : MonoBehaviour
             return;
         }
 
-        if (navigator != null && navigator.IsOnRoute)
+        if (navigator != null && navigator.TryGetDirectionAlignment(out var alignment))
         {
-            if (hapticMode != HapticMode.Route || Time.unscaledTime - lastHapticSentAt >= HapticKeepAliveInterval)
+            if (hapticMode != HapticMode.Direction ||
+                Mathf.Abs(alignment - lastSentCloseness) >= 0.04f ||
+                Time.unscaledTime - lastHapticSentAt >= HapticKeepAliveInterval)
             {
-                hapticMode = HapticMode.Route;
-                lastSentCloseness = -1f;
+                hapticMode = HapticMode.Direction;
+                lastSentCloseness = alignment;
                 lastHapticSentAt = Time.unscaledTime;
-                PathObstacleHaptics.PlayRouteCue();
+                PathObstacleHaptics.PlayDirectionCue(alignment);
             }
             return;
         }
