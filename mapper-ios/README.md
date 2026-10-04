@@ -46,7 +46,9 @@ Uploading from the mapper publishes raw `scan.json`, normalized `scan-features.j
 
 ### Real-world colors
 
-RoomPlan geometry has no color, so the mapper adds it. While you scan, it saves camera photos with pose and depth data, up to 960 photos. On export it projects those photos onto RoomPlan faces and writes `surface-colors.jpg` plus `surface-colors.json` ([schema](../shared/surface-colors.schema.json)). Upload sends both files to the zone folder, and the website and navigator use them automatically.
+RoomPlan geometry has no color, so the mapper adds it. While you scan, it saves a camera photo (with pose, intrinsics and LiDAR depth) whenever you have moved about 25 cm or turned about 11°, up to 320 photos. On export it projects those photos onto every RoomPlan face, skipping samples hidden behind something else, and writes `surface-colors.jpg` (texture atlas) plus `surface-colors.json` ([schema](../shared/surface-colors.schema.json)). The status line reports how many faces were colored. Baking takes a few seconds on the phone. Upload sends both files to the zone folder, and the website and navigator minimap use them automatically.
+
+For the best colors, scan slowly in even lighting and point the camera at every wall, door and piece of furniture at least once. Faces the camera never saw fall back to their average color, or keep the default palette if none of their texels were seen. Scans made before this change have no colors until they are captured again.
 
 ## Multi-floor buildings
 

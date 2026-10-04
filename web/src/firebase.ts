@@ -38,18 +38,34 @@ async function fetchStorage(path: string): Promise<Response> {
   return response;
 }
 
-export async function fetchStorageJSON(path: string): Promise<unknown> { return (await fetchStorage(path)).json(); }
+export async function fetchStorageJSON(path: string): Promise<unknown> {
+  return (await fetchStorage(path)).json();
+}
 
+/** Optional photo-based colors; a zone without them still renders with the default palette. */
 async function loadSurfaceColors(jsonPath: string, atlasPath: string): Promise<SurfaceColors | undefined> {
   try {
-    const raw = await fetchStorageJSON(jsonPath) as { atlasWidth?: number; atlasHeight?: number; surfaces?: { identifier: string; faces: SurfaceColorFace[] }[] };
+    const raw = await fetchStorageJSON(jsonPath) as {
+      atlasWidth?: number; atlasHeight?: number;
+      surfaces?: { identifier: string; faces: SurfaceColorFace[] }[];
+    };
     if (!Array.isArray(raw.surfaces)) return undefined;
     const surfaces: SurfaceColors['surfaces'] = {};
-    for (const surface of raw.surfaces) surfaces[surface.identifier] = Object.fromEntries((surface.faces || []).map(face => [face.face, face]));
+    for (const surface of raw.surfaces) {
+      surfaces[surface.identifier] = Object.fromEntries((surface.faces || []).map(face => [face.face, face]));
+    }
     let atlasUrl: string | undefined;
-    if (raw.atlasWidth && raw.atlasHeight) { try { atlasUrl = URL.createObjectURL(await (await fetchStorage(atlasPath)).blob()); } catch { atlasUrl = undefined; } }
+    if (raw.atlasWidth && raw.atlasHeight) {
+      try {
+        atlasUrl = URL.createObjectURL(await (await fetchStorage(atlasPath)).blob());
+      } catch {
+        atlasUrl = undefined;
+      }
+    }
     return { atlasUrl, atlasWidth: raw.atlasWidth || 1, atlasHeight: raw.atlasHeight || 1, surfaces };
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 export function normalizeGraph(raw: unknown): Graph {
@@ -129,7 +145,9 @@ export async function loadBuilding(input: Building): Promise<Building> {
       const scanPath = zone.scanFeaturesPath || storageBase + '/zones/' + item.id + '/scan-features.json';
       const scanResult = await loadScan(scanPath);
       const zoneBase = storageBase + '/zones/' + item.id;
-      const colors = scanResult.scan ? await loadSurfaceColors(zone.surfaceColorsPath || zoneBase + '/surface-colors.json', zone.surfaceColorAtlasPath || zoneBase + '/surface-colors.jpg') : undefined;
+      const colors = scanResult.scan
+        ? await loadSurfaceColors(zone.surfaceColorsPath || zoneBase + '/surface-colors.json', zone.surfaceColorAtlasPath || zoneBase + '/surface-colors.jpg')
+        : undefined;
       const scan = scanResult.scan && colors ? { ...scanResult.scan, colors } : scanResult.scan;
       let rawScanStatus = '';
       if (!scan && storage) {
@@ -334,11 +352,13 @@ export function createFirebaseGraphStore(input: Building): import('./graphStore.
     subscribe(onChange, onError) {
       let disposed = false;
       let lastRevision = '';
+      let request = 0;
       const check = async () => {
+        const currentRequest=++request;
         try {
           const snapshot = await load();
-          if (!disposed && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
-        } catch (error) { if (!disposed) onError(error instanceof Error ? error : Error(String(error))); }
+          if (!disposed && currentRequest===request && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
+        } catch (error) { if (!disposed && currentRequest===request) onError(error instanceof Error ? error : Error(String(error))); }
       };
       const unsubscribe = onSnapshot(documentRef, () => void check(), error => onError(error));
       const interval = window.setInterval(() => void check(), 15000);
