@@ -58,6 +58,8 @@ public class RelocalizationController : MonoBehaviour
     }
 
     const string ZoneConnectionsFileName = "zone-connections.json";
+    /// <summary>Vertical gap between floors in the building map. Display only; never used for ARKit or routing.</summary>
+    const float DisplayFloorSpacingMeters = 6.5f;
 
     [SerializeField] ARSession session;
     [SerializeField] XROrigin origin;
@@ -86,6 +88,8 @@ public class RelocalizationController : MonoBehaviour
     [Header("Guidance")]
     [Tooltip("Maximum gap between runtime route targets. Graph and map selection nodes remain unchanged.")]
     [SerializeField, Range(0.1f, 1f)] float guidanceWaypointSpacingMeters = 0.2f;
+    [Tooltip("How far (m) guidance may straighten the recorded walk. 0 follows every recorded step.")]
+    [SerializeField, Range(0f, 1f)] float routeSmoothingMeters = 0.3f;
     Vector3? automaticRouteStartPosition;
     string currentZoneId;
     bool navigationLoaded;
@@ -433,7 +437,7 @@ public class RelocalizationController : MonoBehaviour
         var sin = Mathf.Sin(radians);
         return new Vector3(
             position[0] * cos + position[2] * sin + layout.x,
-            position[1] + layout.floor * 4f,
+            position[1] + layout.floor * DisplayFloorSpacingMeters,
             -position[0] * sin + position[2] * cos + layout.z);
     }
 
@@ -523,7 +527,7 @@ public class RelocalizationController : MonoBehaviour
         indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera, SurfaceColors.Load(zone.directory));
         if (buildingLayout.TryGetValue(currentZoneId, out var currentLayout))
             indoorMap?.SetPlannerCurrentZoneTransform(
-                new Vector3(currentLayout.x, currentLayout.floor * 4f, -currentLayout.z),
+                new Vector3(currentLayout.x, currentLayout.floor * DisplayFloorSpacingMeters, -currentLayout.z),
                 -currentLayout.rotationDegrees);
         else
             indoorMap?.SetPlannerCurrentZoneTransform(Vector3.zero, 0f);
@@ -857,7 +861,7 @@ public class RelocalizationController : MonoBehaviour
         for (var legIndex = 0; legIndex < legs.Count; legIndex++)
         {
             if (legs[legIndex].zoneId != currentZoneId) continue;
-            mapRoute = Pathfinding.ToRoute(navigationGraph, legs[legIndex].nodeIds, legs[legIndex].zoneId);
+            mapRoute = LegRoute(legs[legIndex]);
             waypointKey = Pathfinding.ZoneExitWaypoint(navigationGraph, legs, legIndex);
             exitLeg = legIndex;
             break;
@@ -957,7 +961,7 @@ public class RelocalizationController : MonoBehaviour
         // The web editor operates in ARKit X/Z. Unity's imported map mirrors Z, which also
         // mirrors the authored Y-axis rotation.
         var rotated = Quaternion.Euler(0f, -layout.rotationDegrees, 0f) * local;
-        return new Vector3(rotated.x + layout.x, rotated.y + layout.floor * 4f, rotated.z - layout.z);
+        return new Vector3(rotated.x + layout.x, rotated.y + layout.floor * DisplayFloorSpacingMeters, rotated.z - layout.z);
     }
 
     List<BuildingMapZone> BuildBuildingMapZones()
@@ -976,7 +980,7 @@ public class RelocalizationController : MonoBehaviour
                 graph = pair.Value.graph,
                 plannerOffset = layout == null
                     ? Vector3.zero
-                    : new Vector3(layout.x, layout.floor * 4f, -layout.z),
+                    : new Vector3(layout.x, layout.floor * DisplayFloorSpacingMeters, -layout.z),
                 plannerRotationDegrees = layout == null ? 0f : -layout.rotationDegrees,
                 colors = SurfaceColors.Load(pair.Value.directory)
             });
@@ -1053,7 +1057,7 @@ public class RelocalizationController : MonoBehaviour
             return;
         }
 
-        var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+        var route = LegRoute(leg);
         if (activeLegIndex == 0 && automaticRouteStartPosition.HasValue)
             route = PrependAutomaticStart(route, automaticRouteStartPosition.Value);
         navigator.Begin(GuidanceRoute(route), origin.TrackablesParent, origin.Camera);
@@ -1063,6 +1067,14 @@ public class RelocalizationController : MonoBehaviour
     }
 
     Route GuidanceRoute(Route route) => Pathfinding.DensifyRoute(route, guidanceWaypointSpacingMeters);
+
+    /// <summary>One zone leg as a route, with small recorded-walk wobbles straightened.</summary>
+    Route LegRoute(Pathfinding.RouteLeg leg)
+    {
+        var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+        var walls = zonePackages.TryGetValue(leg.zoneId, out var package) ? package.graph?.Walls : null;
+        return Pathfinding.SimplifyRoute(route, navigationGraph, walls, routeSmoothingMeters);
+    }
 
     static Route PrependAutomaticStart(Route route, Vector3 arkitPosition)
     {

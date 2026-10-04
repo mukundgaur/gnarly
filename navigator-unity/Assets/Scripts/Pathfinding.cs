@@ -1029,6 +1029,68 @@ public static class Pathfinding
         };
     }
 
+    /// <summary>
+    /// Straightens small wobbles in a recorded walk so guidance does not retrace every step of the
+    /// mapping session. Only recorded walk samples can be removed; doors, connectors and places stay.
+    /// The result stays within <paramref name="toleranceMeters"/> of the original path and never
+    /// replaces it with a segment that crosses one of <paramref name="walls"/>.
+    /// </summary>
+    public static Route SimplifyRoute(Route route, Graph graph, IReadOnlyList<Wall> walls, float toleranceMeters)
+    {
+        if (route?.waypoints == null || route.waypoints.Length < 3 || toleranceMeters <= 0f) return route;
+        var count = route.waypoints.Length;
+        var keep = new bool[count];
+        keep[0] = keep[count - 1] = true;
+        for (var i = 1; i < count - 1; i++)
+        {
+            var node = graph?.Node(route.waypoints[i].id);
+            keep[i] = node == null || !IsRecordedWalkNode(node);
+        }
+
+        var wallList = walls as List<Wall> ?? (walls != null ? new List<Wall>(walls) : null);
+        var anchor = 0;
+        for (var i = 1; i < count; i++)
+        {
+            if (!keep[i]) continue;
+            KeepSignificantPoints(route.waypoints, anchor, i, toleranceMeters, wallList, keep);
+            anchor = i;
+        }
+
+        var kept = new List<Route.Waypoint>();
+        for (var i = 0; i < count; i++)
+            if (keep[i]) kept.Add(route.waypoints[i]);
+        if (kept.Count == count) return route;
+        return new Route
+        {
+            schemaVersion = route.schemaVersion,
+            zoneId = route.zoneId,
+            coordinateSystem = route.coordinateSystem,
+            heightReference = route.heightReference,
+            waypoints = kept.ToArray()
+        };
+    }
+
+    /// <summary>Douglas–Peucker on the floor plane, refusing shortcuts through walls.</summary>
+    static void KeepSignificantPoints(Route.Waypoint[] waypoints, int first, int last, float tolerance, List<Wall> walls, bool[] keep)
+    {
+        if (last - first < 2) return;
+        var a = Xz(waypoints[first].position);
+        var b = Xz(waypoints[last].position);
+        var farthest = -1;
+        var farthestDistance = -1f;
+        for (var i = first + 1; i < last; i++)
+        {
+            var distance = new Segment(a, b).DistanceTo(Xz(waypoints[i].position));
+            if (distance <= farthestDistance) continue;
+            farthestDistance = distance;
+            farthest = i;
+        }
+        if (farthestDistance <= tolerance && IsClear(a, b, walls, null)) return;
+        keep[farthest] = true;
+        KeepSignificantPoints(waypoints, first, farthest, tolerance, walls, keep);
+        KeepSignificantPoints(waypoints, farthest, last, tolerance, walls, keep);
+    }
+
     static Route.Waypoint CloneWaypoint(Route.Waypoint waypoint) => new Route.Waypoint
     {
         id = waypoint.id,
