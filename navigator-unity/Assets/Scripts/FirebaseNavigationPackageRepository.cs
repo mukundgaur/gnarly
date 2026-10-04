@@ -729,8 +729,15 @@ public sealed class FirebaseScanChoice
         ZoneId = zoneId;
         BuildingName = buildingName;
         FloorId = floorId;
-        ZoneName = zoneName;
+        ZoneName = ZoneLabels.Known(buildingId, zoneId) ?? zoneName;
     }
+}
+
+/// <summary>Display names fixed in the app for zones whose scans carry no useful name.</summary>
+public static class ZoneLabels
+{
+    public static string Known(string buildingId, string zoneId) =>
+        string.Equals(buildingId, "baker", StringComparison.OrdinalIgnoreCase) && zoneId == "1" ? "Entrance" : null;
 }
 
 public sealed class FirebaseNavigationException : Exception

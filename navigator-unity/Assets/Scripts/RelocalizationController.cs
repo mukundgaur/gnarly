@@ -809,7 +809,7 @@ public class RelocalizationController : MonoBehaviour
         return string.IsNullOrEmpty(connector.label) ? Humanize(connector.localId) : connector.label;
     }
 
-    static string FloorName(string zone) => Humanize(zone);
+    string FloorName(string zone) => ZoneLabels.Known(buildingId, zone) ?? Humanize(zone);
 
     /// <summary>"up" or "down" when both floors have known stories, otherwise null.</summary>
     string RideDirection(string fromZone, string toZone)
@@ -1307,11 +1307,11 @@ public class RelocalizationController : MonoBehaviour
         if (state != State.Locating) return;
         if (IsTrackingNormally() && !sawRelocalizing)
         {
-            SetStatus($"Locating in {currentZoneId}. Look around the scanned area until your position is confirmed.");
+            SetStatus($"Locating in {FloorName(currentZoneId)}. Look around the scanned area until your position is confirmed.");
             return;
         }
 
-        SetStatus($"Finding your position in {Humanize(currentZoneId)}. Slowly look around the scanned area.");
+        SetStatus($"Finding your position in {FloorName(currentZoneId)}. Slowly look around the scanned area.");
     }
 
     void BuildUi()

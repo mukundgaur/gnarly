@@ -186,7 +186,8 @@ public sealed partial class FirebaseNavigationPackageLoader
 
     static string FloorDisplay(FirebaseScanChoice scan)
     {
-        if (string.IsNullOrWhiteSpace(scan.FloorId)) return "Area " + DisplayName(scan.ZoneId);
+        if (string.IsNullOrWhiteSpace(scan.FloorId))
+            return ZoneLabels.Known(scan.BuildingId, scan.ZoneId) ?? "Area " + DisplayName(scan.ZoneId);
         if (scan.FloorId.Equals("ground", StringComparison.OrdinalIgnoreCase) ||
             scan.FloorId.Equals("ground-floor", StringComparison.OrdinalIgnoreCase)) return "Ground floor";
         if (int.TryParse(scan.FloorId, out var number)) return "Floor " + number;
