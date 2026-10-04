@@ -728,7 +728,7 @@ public class RelocalizationController : MonoBehaviour
             }
             if (startId == null)
             {
-                error = $"No connected route from {currentZoneId} to that destination.";
+                error = $"No connected route from {currentZoneId} to that destination.{UnreachableZoneHint(destinationKey)}";
                 return false;
             }
 
@@ -762,10 +762,34 @@ public class RelocalizationController : MonoBehaviour
             path = Pathfinding.AStar(navigationGraph, startId, destinationKey);
         if (path == null)
         {
-            error = $"No walkable path from {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}. Try another point.";
+            error = $"No walkable path from {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}. Try another point.{UnreachableZoneHint(destinationKey)}";
             return false;
         }
         return true;
+    }
+
+    /// <summary>Explains a cross-zone failure: the destination's zone has no usable link, or its connector is cut off.</summary>
+    string UnreachableZoneHint(string destinationKey)
+    {
+        var destinationZone = navigationGraph?.Node(destinationKey)?.zone;
+        if (destinationZone == null || destinationZone == currentZoneId) return "";
+        string linked = null;
+        foreach (var node in navigationGraph.Nodes)
+        {
+            if (node.zone != destinationZone || (!Pathfinding.IsElevator(node) && !Pathfinding.IsContinuation(node))) continue;
+            foreach (var edge in navigationGraph.Neighbors(node.id))
+            {
+                if (navigationGraph.Node(edge.to)?.zone == destinationZone) continue;
+                linked = node.id;
+                break;
+            }
+            if (linked != null) break;
+        }
+        var message = linked == null
+            ? $" {destinationZone} has no elevator or continuation linked to this building's other zones."
+            : $" {destinationZone} is linked through {NameOf(linked)}, but an elevator or connector is cut off from the walkable path on one of the floors. Connect each to a walkable waypoint on the website.";
+        Debug.LogWarning("[Gnarly] Route to " + destinationKey + " failed." + message);
+        return message;
     }
 
     float PathMeters(List<string> nodeIds)

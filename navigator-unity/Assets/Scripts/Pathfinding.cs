@@ -617,6 +617,7 @@ public static class Pathfinding
         ConnectVisibility(graph, walls, portals);
 
         var dropped = 0;
+        var trustedOverScan = 0;
         if (building?.edges != null)
         {
             foreach (var edge in building.edges)
@@ -637,6 +638,15 @@ public static class Pathfinding
                 }
                 if (!CanConnect(from, to, walls, portals))
                 {
+                    // Walked and editor-confirmed edges stay routable when the approximate RoomPlan
+                    // walls disagree, as on the website. Walk samples get no visibility edges, so
+                    // dropping one would split the floor (e.g. cut off its elevator).
+                    if (IsTrustedEdge(edge, from, to))
+                    {
+                        trustedOverScan++;
+                        graph.AddEdge(edge);
+                        continue;
+                    }
                     dropped++;
                     continue;
                 }
@@ -644,11 +654,13 @@ public static class Pathfinding
             }
         }
 
+        ConnectIsolatedConnectors(graph, walls, portals);
+
         if (scan?.walls != null && scan.walls.Length > 0 && graph.Walls.Count == 0)
             Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}' listed {scan.walls.Length} walls but none became obstacles.");
         else if (graph.Walls.Count == 0)
             Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}' has no walls. Neighbors are limited to {MaxEdgeMeters:0} m and are not blocked by geometry.");
-        Debug.Log($"[Gnarly] Zone '{graph.zoneId}': {graph.Nodes.Count} nodes, {graph.Edges.Count} edges, {graph.Walls.Count} walls. Dropped {dropped} blocked edge(s).");
+        Debug.Log($"[Gnarly] Zone '{graph.zoneId}': {graph.Nodes.Count} nodes, {graph.Edges.Count} edges, {graph.Walls.Count} walls. Dropped {dropped} blocked edge(s); kept {trustedOverScan} walked/manual edge(s) the scan disagrees with.");
 
         return graph;
     }
@@ -778,6 +790,50 @@ public static class Pathfinding
         if (meters < MinEdgeMeters || meters > MaxEdgeMeters) return false;
         return IsClear(Xz(a.position), Xz(b.position), walls, portals);
     }
+
+    /// <summary>
+    /// An elevator or continuation placed on the website before it was connected to a walkable
+    /// point has no edges, so every route through it fails. Join it to the nearest wall-clear
+    /// node on its floor, falling back to the nearest node within <see cref="MaxEdgeMeters"/>.
+    /// </summary>
+    static void ConnectIsolatedConnectors(Graph graph, List<Wall> walls, List<Portal> portals)
+    {
+        foreach (var connector in graph.Nodes)
+        {
+            if (!IsElevator(connector) && !IsContinuation(connector)) continue;
+            if (connector.position?.Length != 3 || graph.Neighbors(connector.id).GetEnumerator().MoveNext()) continue;
+
+            Node clear = null, nearest = null;
+            float clearMeters = float.MaxValue, nearestMeters = float.MaxValue;
+            foreach (var node in graph.Nodes)
+            {
+                if (node == connector || node.floor != connector.floor || node.position?.Length != 3) continue;
+                if (IsElevator(node) || IsContinuation(node)) continue;
+                var meters = Vector3.Distance(Position(connector), Position(node));
+                if (meters < nearestMeters) { nearestMeters = meters; nearest = node; }
+                if (meters < clearMeters && CanConnect(connector, node, walls, portals)) { clearMeters = meters; clear = node; }
+            }
+            var target = clear ?? (nearestMeters <= MaxEdgeMeters ? nearest : null);
+            if (target == null) continue;
+            graph.AddEdge(new Edge
+            {
+                from = connector.id,
+                to = target.id,
+                kind = "hallway",
+                meters = clear != null ? clearMeters : nearestMeters,
+                source = "visibility"
+            });
+            Debug.LogWarning($"[Gnarly] Zone '{graph.zoneId}': {connector.type} '{connector.id}' had no connections; " +
+                             $"joined it to '{target.id}' ({(clear != null ? clearMeters : nearestMeters):0.0} m). Connect it on the website to confirm.");
+        }
+    }
+
+    /// <summary>Recorded walks and connections confirmed in the web editor, on one floor.</summary>
+    static bool IsTrustedEdge(Edge edge, Node from, Node to) =>
+        from.floor == to.floor &&
+        from.position?.Length == 3 && to.position?.Length == 3 &&
+        (edge.source == "walked-path" || edge.source == "recorded" || edge.source == "manual" ||
+         IsRecordedWalkEdge(edge, from, to));
 
     static bool IsCrossFloorStair(Node a, Node b, Edge edge) =>
         a.floor != b.floor &&
