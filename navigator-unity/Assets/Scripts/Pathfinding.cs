@@ -381,7 +381,9 @@ public static class Pathfinding
                 Link(elevatorLinks, to, from);
                 continue;
             }
-            if (connection.kind == "continuation" &&
+            // Older website files did not write `kind` for a continuation. The endpoint types
+            // are authoritative in that case, matching the web building graph.
+            if ((connection.kind == "continuation" || string.IsNullOrEmpty(connection.kind)) &&
                 IsContinuation(combined.Node(from)) && IsContinuation(combined.Node(to)))
             {
                 combined.AddEdge(new Edge

@@ -310,6 +310,7 @@ public class RelocalizationController : MonoBehaviour
             };
         }
 
+        ResolveDisplayLayouts(connections);
         var zoneGraphs = new Dictionary<string, Pathfinding.Graph>();
         foreach (var pair in zonePackages)
             if (pair.Value.graph != null) zoneGraphs[pair.Key] = pair.Value.graph;
@@ -340,6 +341,84 @@ public class RelocalizationController : MonoBehaviour
         {
             Debug.LogWarning($"[Gnarly] Couldn't read building-layout.json: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// Mirrors the website's continuation alignment fallback. Authored layout positions win;
+    /// unplaced scans inherit a same-floor position by matching their continuation anchors.
+    /// This only affects the full-screen map presentation, never ARKit coordinates.
+    /// </summary>
+    void ResolveDisplayLayouts(Pathfinding.ZoneConnections connections)
+    {
+        if (zonePackages.Count == 0) return;
+        if (!buildingLayout.ContainsKey(currentZoneId) && zonePackages.ContainsKey(currentZoneId))
+            buildingLayout[currentZoneId] = new ZoneLayout
+            {
+                zoneId = currentZoneId,
+                floor = GuessDisplayFloor(currentZoneId),
+                x = 0f,
+                z = 0f,
+                rotationDegrees = 0f
+            };
+
+        if (connections?.connections == null) return;
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var connection in connections.connections)
+            {
+                if (!TryContinuationPair(connection, out var from, out var to)) continue;
+                var fromPlaced = buildingLayout.TryGetValue(connection.from.zoneId, out var fromLayout);
+                var toPlaced = buildingLayout.TryGetValue(connection.to.zoneId, out var toLayout);
+                if (fromPlaced == toPlaced) continue;
+
+                var placedNode = fromPlaced ? from : to;
+                var missingNode = fromPlaced ? to : from;
+                var placedLayout = fromPlaced ? fromLayout : toLayout;
+                var missingZone = fromPlaced ? connection.to.zoneId : connection.from.zoneId;
+                var target = DisplayArkitPosition(placedNode.position, placedLayout);
+                // With one connector the web keeps the missing scan's rotation at zero and solves
+                // translation. A later authored edit may refine that rotation.
+                buildingLayout[missingZone] = new ZoneLayout
+                {
+                    zoneId = missingZone,
+                    floor = placedLayout.floor,
+                    x = target.x - missingNode.position[0],
+                    z = target.z - missingNode.position[2],
+                    rotationDegrees = 0f
+                };
+                changed = true;
+            }
+        }
+    }
+
+    bool TryContinuationPair(Pathfinding.ZoneConnection connection, out Pathfinding.Node from, out Pathfinding.Node to)
+    {
+        from = to = null;
+        if (connection == null || (connection.kind != "continuation" && !string.IsNullOrEmpty(connection.kind))) return false;
+        if (!zonePackages.TryGetValue(connection.from.zoneId, out var fromPackage) ||
+            !zonePackages.TryGetValue(connection.to.zoneId, out var toPackage)) return false;
+        from = fromPackage.graph?.Node(connection.from.nodeId);
+        to = toPackage.graph?.Node(connection.to.nodeId);
+        return Pathfinding.IsContinuation(from) && Pathfinding.IsContinuation(to) &&
+            from.position?.Length == 3 && to.position?.Length == 3;
+    }
+
+    static Vector3 DisplayArkitPosition(float[] position, ZoneLayout layout)
+    {
+        var radians = layout.rotationDegrees * Mathf.Deg2Rad;
+        var cos = Mathf.Cos(radians);
+        var sin = Mathf.Sin(radians);
+        return new Vector3(
+            position[0] * cos + position[2] * sin + layout.x,
+            position[1] + layout.floor * 4f,
+            -position[0] * sin + position[2] * cos + layout.z);
+    }
+
+    int GuessDisplayFloor(string zone)
+    {
+        if (!zonePackages.TryGetValue(zone, out var package)) return 0;
+        return package.graph?.story ?? 0;
     }
 
     void LoadAndApplyZoneMap()
