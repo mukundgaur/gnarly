@@ -14,8 +14,13 @@ export function graphDigest(graph: Graph): string {
   for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
   return (hash >>> 0).toString(16);
 }
+const localGraphKey = (building: Building) => ['gnarly-local-graph', building.id, building.activeVersion || 'sample', building.zoneId || 'root'].join(':');
+/** A graph saved in local test mode for this building/zone, if any. */
+export function readLocalGraph(building: Building): Graph | null {
+  try { const saved = localStorage.getItem(localGraphKey(building)); return saved ? JSON.parse(saved) as Graph : null; } catch { return null; }
+}
 export function createLocalGraphStore(building: Building): GraphStore {
-  const key = ['gnarly-local-graph', building.id, building.activeVersion || 'sample', building.zoneId || 'root'].join(':');
+  const key = localGraphKey(building);
   const initial = copyGraph(building.graph!);
   const read = (): GraphSnapshot => {
     const saved = localStorage.getItem(key);

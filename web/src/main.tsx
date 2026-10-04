@@ -84,7 +84,7 @@ function App() {
     </header>
     <Suspense fallback={<div className="page-loading" role="status"><span className="loading-ring"/>Opening explorer…</div>}>
       {dataOpen ? <FirebaseData connected={user} onDirtyChange={setDataDirty} onClose={() => {setDataOpen(false);setDataDirty(false)}} onConnect={() => setAuthOpen(true)}/>
-        : inside && selected?.graph ? <BuildingWorkspace key={selected.id+':'+selected.activeVersion+':'+selected.zoneId} building={selected} onBack={back} onUpdate={setSelected} onDirtyChange={setWorkspaceDirty}/>
+        : inside && selected?.graph ? <BuildingWorkspace key={selected.id+':'+selected.activeVersion} building={selected} onBack={back} onUpdate={setSelected} onDirtyChange={setWorkspaceDirty}/>
         : <main className={'map-area '+(selected?'has-selection':'')}>
           <ExteriorMap buildings={buildings} selected={selected} onSelect={select}/><div className="map-tint"/>
           <div className="search-shell"><Search size={20}/><input aria-label="Search buildings and destinations" placeholder="Search buildings or destinations" value={search} onChange={e => setSearch(e.target.value)}/>{search&&<button onClick={() => setSearch('')} aria-label="Clear search"><X size={17}/></button>}</div>

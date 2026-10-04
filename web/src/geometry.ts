@@ -1,7 +1,7 @@
 import type { Edge, Graph, Node, ScanFeature, ScanFeatures } from './data.ts';
 
 type P = [number, number];
-export type EdgeCheck = { status: 'valid' | 'unverified' | 'blocked'; reason: string };
+export type EdgeCheck = { status: 'valid' | 'unverified' | 'warning' | 'blocked'; reason: string };
 const eps = 1e-6;
 const xz = (p: [number, number, number]): P => [p[0], p[2]];
 const length = (a: P, b: P) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -101,6 +101,10 @@ function wallObstruction(a:P,b:P,story:number|undefined,scan:ScanFeatures):strin
   }
   return null;
 }
+/** Wall test only (no floor polygon), for segments that leave the scanned area such as links between joined zones. */
+export function wallBetween(from: [number, number, number], to: [number, number, number], scan: ScanFeatures, story?: number): string | null {
+  return wallObstruction(xz(from), xz(to), story, scan);
+}
 export function canWalkBetween(from: [number, number, number], to: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): boolean {
   if(!pointOnFloor(from,floorId,graph,scan)||!pointOnFloor(to,floorId,graph,scan))return false;
   if(!scan?.floors?.length)return true;
@@ -109,7 +113,15 @@ export function canWalkBetween(from: [number, number, number], to: [number, numb
   return segmentOnFloors(xz(from),xz(to),polygons)&&!wallObstruction(xz(from),xz(to),story,scan);
 }
 function isWalked(edge: Edge): boolean { return ['manual', 'recorded', 'walked-path'].includes(edge.source || ''); }
+/** Physically walked during capture. RoomPlan polygons and walls are approximate, so these stay routable. */
+export function isRecordedEdge(edge: Edge): boolean { return ['recorded', 'walked-path'].includes(edge.source || ''); }
+export const isRoutable = (check: EdgeCheck) => check.status !== 'blocked';
 export function checkEdge(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCheck {
+  const check = checkEdgeGeometry(edge, graph, scan);
+  if (check.status === 'blocked' && check.geometric && isRecordedEdge(edge)) return { status: 'warning', reason: 'Recorded walk; scan disagrees: ' + check.reason };
+  return check;
+}
+function checkEdgeGeometry(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCheck & { geometric?: boolean } {
   if (!Number.isFinite(edge.meters) || edge.meters <= 0) return { status: 'blocked', reason: 'Invalid connection distance' };
   const from = graph.nodes.find(node => node.id === edge.from);
   const to = graph.nodes.find(node => node.id === edge.to);
@@ -126,13 +138,13 @@ export function checkEdge(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCh
     : { status: 'blocked', reason: 'No scanned floor; only confirmed connections can be routed' };
   const a = xz(from.position), b = xz(to.position);
   const distance = length(a, b);
-  if (distance < .02) return { status: 'blocked', reason: 'Waypoints overlap' };
+  if (distance < .02) return { status: 'blocked', reason: 'Waypoints overlap', geometric: true };
   const story = graph.floors.find(floor => floor.id === from.floor)?.story;
   const floors = scan.floors.filter(item => story == null || item.story == null || item.story === story).map(floorPolygon);
-  if (!floors.length) return { status: 'blocked', reason: 'No scanned surface for this floor' };
-  if(!segmentOnFloors(a,b,floors))return {status:'blocked',reason:'Connection leaves the scanned floor'};
+  if (!floors.length) return { status: 'blocked', reason: 'No scanned surface for this floor', geometric: true };
+  if(!segmentOnFloors(a,b,floors))return {status:'blocked',reason:'Connection leaves the scanned floor',geometric:true};
   const obstruction=wallObstruction(a,b,story,scan);
-  if(obstruction)return {status:'blocked',reason:obstruction};
+  if(obstruction)return {status:'blocked',reason:obstruction,geometric:true};
   return { status: 'valid', reason: 'Inside floor and clear of walls' };
 }
 export function distance3D(a: Node, b: Node): number {

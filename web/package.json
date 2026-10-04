@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "start": "node server.mjs",
-    "test": "node --experimental-strip-types --test src/routing.test.ts"
+    "test": "node --experimental-strip-types --test src/*.test.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

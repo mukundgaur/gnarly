@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Graph, ScanFeature, ScanFeatures } from './data.ts';
 import { canWalkBetween, checkEdge } from './geometry.ts';
-import { addWaypoint, connectWaypoints, deleteWaypoint, updateWaypoint } from './graphEdit.ts';
+import { addWaypoint, autoConnect, connectWaypoints, deleteWaypoint, updateWaypoint } from './graphEdit.ts';
 import { findRoute } from './routing.ts';
 const matrix = (x: number, y: number, z: number, vertical = false) => vertical
   ? [0,0,1,0, 0,1,0,0, -1,0,0,0, x,y,z,1]
@@ -104,6 +104,33 @@ test('invalid edge weights are excluded and one-way connections stay one-way',()
   const directed={...graph,edges:[{...graph.edges[1],bidirectional:false}]};
   assert.equal(findRoute({graph:directed,startId:'a',destinationId:'left'}).ok,true);
   assert.equal(findRoute({graph:directed,startId:'left',destinationId:'a'}).ok,false);
+});
+test('recorded walk edges stay routable when the scan disagrees; manual ones do not',()=>{
+  const walked={...graph,edges:[{from:'a',to:'b',kind:'hallway',meters:4,source:'walked-path'}]};
+  assert.equal(checkEdge(walked.edges[0],walked,scan).status,'warning');
+  const result=findRoute({graph:walked,startId:'a',destinationId:'b',options:{scan}});
+  assert.equal(result.ok,true);
+  if(result.ok)assert.equal(result.warningEdges,1);
+  assert.equal(checkEdge({...walked.edges[0],source:'manual'},walked,scan).status,'blocked');
+  assert.equal(checkEdge({...walked.edges[0],meters:0},walked,scan).status,'blocked');
+});
+test('a recorded walk across a door threshold between room polygons is routable',()=>{
+  const rooms={...scan,walls:[],doors:[],floors:[feature('left',[4.5,4,0],[-2.5,0,0]),feature('right',[4.5,4,0],[2.5,0,0])]};
+  const g:Graph={floors:graph.floors,nodes:[{id:'a',floor:'ground',type:'waypoint',position:[-2,1.3,0],source:'walked-path'},{id:'b',floor:'ground',type:'waypoint',position:[2,1.3,0],source:'walked-path'}],edges:[{from:'a',to:'b',kind:'hallway',meters:4,source:'walked-path'}]};
+  assert.equal(findRoute({graph:g,startId:'a',destinationId:'b',options:{scan:rooms}}).ok,true);
+});
+test('auto-connect links waypoints through a doorway but never through a wall',()=>{
+  const g:Graph={floors:graph.floors,nodes:[nodes[0],nodes[1],{id:'door',floor:'ground',type:'door',position:[0,0,0],source:'roomplan-hint'}],edges:[]};
+  const {graph:connected,added}=autoConnect(g,scan);
+  const pairs=added.map(edge=>[edge.from,edge.to].sort().join('-')).sort();
+  assert.deepEqual(pairs,['a-door','b-door']);
+  assert.ok(added.every(edge=>edge.source==='visibility'));
+  const result=findRoute({graph:connected,startId:'a',destinationId:'b',options:{scan}});
+  assert.equal(result.ok,true);
+  if(result.ok)assert.deepEqual(result.nodes.map(node=>node.id),['a','door','b']);
+  assert.equal(autoConnect(g).added.length,0);
+  const walks:Graph={...g,nodes:g.nodes.map(node=>({...node,source:'walked-path'}))};
+  assert.equal(autoConnect(walks,{...scan,walls:[],doors:[]}).added.length,0);
 });
 test('empty floors can receive a first waypoint and invalid coordinates are rejected',()=>{
   const empty:Graph={floors:graph.floors,nodes:[],edges:[]};

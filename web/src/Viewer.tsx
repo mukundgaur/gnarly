@@ -2,11 +2,14 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Text } from '@react-three/drei';
 import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import { Box3, BoxGeometry, Color, DoubleSide, FrontSide, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, Shape, ShapeGeometry, SRGBColorSpace, TextureLoader, Vector2, Vector3, type Material, type Texture } from 'three';
-import type { Graph, Node, ScanFeature, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneConnections, ZoneView } from './data';
-import { stackBuilding, stackPoint, type StackZone } from './buildingStack.ts';
-import { canWalkBetween, checkEdge } from './geometry';
+import type { Graph, ScanFeature, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneView } from './data';
+import { elevatorStopNear, zoneEdgeChecks, type BuildingModel, type BuildingNode, type ElevatorStop } from './buildingGraph.ts';
+import { canWalkBetween, pointOnFloor, wallBetween } from './geometry';
+import { FLOOR_GAP, toLocal, toWorld, type Vec3, type ZoneTransform } from './zoneAlign.ts';
 
-export type WalkLocation = { position: [number, number, number]; floorId: string; zoneId?: string };
+/** position is in the zone's own ARKit coordinates. */
+export type WalkLocation = { position: [number, number, number]; floorId: string; zoneId: string };
+export type FloorPick = { position: [number, number, number]; floorId: string; zoneId: string };
 export type DropRequest = { clientX: number; clientY: number; id: number };
 
 // Matches the face names and UV directions baked by the mapper (three.js BoxGeometry group order).
@@ -98,27 +101,29 @@ function ColoredBox({ identifier, size, position, region, fallback, opacity = 1,
 }
 
 type ViewerProps = {
-  graph: Graph;
-  scan?: ScanFeatures;
+  model: BuildingModel;
+  /** A building floor level, or every floor stacked. */
+  level: number | 'all';
   illustrative?: boolean;
-  floor: string;
+  /** Node key. */
   selected: string;
-  onSelect: (id: string) => void;
-  path: Node[];
+  onSelect: (key: string) => void;
+  path: BuildingNode[];
   step: number;
   reset: number;
   editing?: boolean;
-  onFloorPick?: (position: [number, number, number], floorId: string, zoneId?: string) => void;
+  editZoneId?: string;
+  onFloorPick?: (pick: FloorPick) => void;
   walker?: WalkLocation | null;
   walking?: boolean;
   dropRequest?: DropRequest | null;
   onWalkerDrop?: (location: WalkLocation | null) => void;
   onWalkerMove?: (location: WalkLocation) => void;
-  zones?: ZoneView[];
-  zoneConnections?: ZoneConnections;
-  layout?: import('./data.ts').BuildingLayout;
-  zoneId?: string;
+  /** The linked elevator the walker is standing at, or null after walking away. */
+  onWalkerElevator?: (stop: ElevatorStop | null) => void;
 };
+type WorldPick = (world: Vec3, floorId: string) => void;
+const zoneMatrix = (t: ZoneTransform) => new Matrix4().makeRotationY(t.rotationDegrees * Math.PI / 180).setPosition(t.x, t.y, t.z);
 
 function featureMatrix(feature: ScanFeature) {
   return feature.transformColumnMajor?.length === 16
@@ -138,7 +143,7 @@ function FeatureBox({ feature, color, opacity = 1 }: {
   </group>;
 }
 
-function ScannedFloor({ feature, floorId, zoneId, offset=[0,0,0], onPick }: { feature: ScanFeature; floorId: string; zoneId?: string; offset?:[number,number,number]; onPick?: (position: [number, number, number]) => void }) {
+function ScannedFloor({ feature, floorId, zoneId, onPick }: { feature: ScanFeature; floorId: string; zoneId?: string; onPick?: (world: Vec3) => void }) {
   const { colors, atlas } = useContext(SurfaceColorContext);
   const faces = colors?.surfaces[feature.identifier];
   const outline = feature.polygonCorners?.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
@@ -169,9 +174,9 @@ function ScannedFloor({ feature, floorId, zoneId, offset=[0,0,0], onPick }: { fe
   useEffect(() => () => geometry?.dispose(), [geometry]);
   const matrix = useMemo(() => featureMatrix(feature), [feature]);
   const pick = (event: { stopPropagation: () => void; point: Vector3 }) => {
-    if (onPick) { event.stopPropagation(); onPick([event.point.x-offset[0],event.point.y-offset[1],event.point.z-offset[2]]); }
+    if (onPick) { event.stopPropagation(); onPick([event.point.x, event.point.y, event.point.z]); }
   };
-  const userData={walkableFloor:true,floorId,zoneId,stackOffset:offset};
+  const userData={walkableFloor:true,floorId,zoneId};
   if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh userData={userData} onClick={pick}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
   const average = face ? new Color().setRGB(face.color[0], face.color[1], face.color[2], SRGBColorSpace) : null;
   return <group matrix={matrix} matrixAutoUpdate={false}>
@@ -238,7 +243,7 @@ function Wall({ wall, portals }: { wall: ScanFeature; portals: ScanFeature[] }) 
   </group>;
 }
 
-function ScannedGeometry({ scan, graph, floor, zoneId, offset, onFloorPick }: { scan: ScanFeatures; graph: Graph; floor: string; zoneId?:string; offset?:[number,number,number]; onFloorPick?: ViewerProps['onFloorPick'] }) {
+function ScannedGeometry({ scan, graph, floor, zoneId, onFloorPick }: { scan: ScanFeatures; graph: Graph; floor: string; zoneId?:string; onFloorPick?: WorldPick }) {
   const story = graph.floors.find(item => item.id === floor)?.story;
   const visible = (item: ScanFeature) => floor === 'all' || item.story == null || item.story === story;
   const portals = [...scan.doors, ...scan.openings, ...scan.windows].filter(visible);
@@ -248,7 +253,7 @@ function ScannedGeometry({ scan, graph, floor, zoneId, offset, onFloorPick }: { 
   return <SurfaceColorContext.Provider value={surfaceColors}>
     {scan.floors.filter(visible).map(item => {
       const floorId = graph.floors.find(candidate => candidate.story === item.story)?.id || graph.floors[0]?.id;
-      return floorId ? <ScannedFloor key={item.identifier} feature={item} floorId={floorId} zoneId={zoneId} offset={offset} onPick={onFloorPick ? position => onFloorPick(position, floorId, zoneId) : undefined} /> : null;
+      return floorId ? <ScannedFloor key={item.identifier} feature={item} floorId={floorId} zoneId={zoneId} onPick={onFloorPick ? world => onFloorPick(world, floorId) : undefined} /> : null;
     })}
     {scan.walls.filter(visible).map(item => <Wall key={item.identifier} wall={item} portals={portals.filter(portal => portal.parentIdentifier === item.identifier)} />)}
     {scan.windows.filter(visible).map(item => <FeatureBox key={item.identifier} feature={item} color="#8fbfce" opacity={real ? .6 : .32} />)}
@@ -258,7 +263,7 @@ function ScannedGeometry({ scan, graph, floor, zoneId, offset, onFloorPick }: { 
   </SurfaceColorContext.Provider>;
 }
 
-function GraphFloor({ graph, floor, illustrative, zoneId, offset=[0,0,0], onFloorPick }: { graph: Graph; floor: string; illustrative?: boolean; zoneId?:string; offset?:[number,number,number]; onFloorPick?: ViewerProps['onFloorPick'] }) {
+function GraphFloor({ graph, floor, illustrative, zoneId, onFloorPick }: { graph: Graph; floor: string; illustrative?: boolean; zoneId?:string; onFloorPick?: WorldPick }) {
   return <>{graph.floors.filter(item => floor === 'all' || item.id === floor).map(item => {
     const nodes = graph.nodes.filter(node => node.floor === item.id);
     const xs = nodes.map(node => node.position[0]);
@@ -272,7 +277,7 @@ function GraphFloor({ graph, floor, illustrative, zoneId, offset=[0,0,0], onFloo
     const width = Math.max(4, maxX - minX);
     const depth = Math.max(4, maxZ - minZ);
     return <group key={item.id}>
-      <mesh position={[cx, item.elevation - .08, cz]} userData={{ walkableFloor: true, floorId: item.id, zoneId, stackOffset:offset }} onClick={event => { if (onFloorPick) { event.stopPropagation(); onFloorPick([event.point.x-offset[0],event.point.y-offset[1],event.point.z-offset[2]], item.id, zoneId); } }}>
+      <mesh position={[cx, item.elevation - .08, cz]} userData={{ walkableFloor: true, floorId: item.id, zoneId }} onClick={event => { if (onFloorPick) { event.stopPropagation(); onFloorPick([event.point.x, event.point.y, event.point.z], item.id); } }}>
         <boxGeometry args={[width, .12, depth]} />
         <meshStandardMaterial color={item.story ? '#e7edf0' : '#edf1f2'} />
       </mesh>
@@ -293,79 +298,143 @@ function GraphFloor({ graph, floor, illustrative, zoneId, offset=[0,0,0], onFloo
   })}</>;
 }
 
-function CameraRig({ graph, scan, floor, reset }: Pick<ViewerProps, 'graph' | 'scan' | 'floor' | 'reset'>) {
+const nodeKeyOf = (zoneId: string, nodeId: string) => zoneId + '/' + nodeId;
+const importantTypes = ['entrance', 'destination', 'stairs', 'elevator', 'continuation'];
+function visibleFloorIds(model: BuildingModel, zone: ZoneView, level: number | 'all') {
+  return zone.graph.floors.filter(floor => level === 'all' || model.levelOf(zone.id, floor.id) === level).map(floor => floor.id);
+}
+const edgeColor = (status: string) => status === 'blocked' ? '#d88a82' : status === 'unverified' || status === 'warning' ? '#d4ac62' : '#8abdb2';
+
+/** All segments in one draw call; thousands of separate line meshes make editing large scans sluggish. */
+function EdgeLines({ segments, opacity, lineWidth }: { segments: { from: Vec3; to: Vec3; color: string }[]; opacity: number; lineWidth: number }) {
+  const { points, colors } = useMemo(() => {
+    const color = new Color();
+    return {
+      points: segments.flatMap(segment => [segment.from, segment.to]),
+      colors: segments.flatMap(segment => { color.set(segment.color); const rgb: [number, number, number] = [color.r, color.g, color.b]; return [rgb, rgb]; }),
+    };
+  }, [segments]);
+  if (!segments.length) return null;
+  return <Line points={points} vertexColors={colors} segments lineWidth={lineWidth} transparent opacity={opacity} />;
+}
+
+function ZoneEdges({ zone, shown, strong }: { zone: ZoneView; shown: Set<string>; strong: boolean }) {
+  const shownKey = [...shown].join('|');
+  const segments = useMemo(() => {
+    const byId = new Map(zone.graph.nodes.map(node => [node.id, node]));
+    const checks = zoneEdgeChecks(zone.graph, zone.scan);
+    return zone.graph.edges.flatMap((edge, index) => {
+      const from = byId.get(edge.from), to = byId.get(edge.to);
+      if (!from || !to || !shown.has(from.floor) || !shown.has(to.floor)) return [];
+      return [{ from: from.position, to: to.position, color: edgeColor(checks[index].status) }];
+    });
+  }, [zone.graph, zone.scan, shownKey]);
+  return <EdgeLines segments={segments} opacity={strong ? .8 : .35} lineWidth={strong ? 2 : 1} />;
+}
+
+const nodeColor = (type: string) => type === 'stairs' ? '#e6a84d' : type === 'elevator' ? '#8b5cf6' : type === 'continuation' ? '#0f9d91' : '#277ad1';
+
+function CameraRig({ model, level, reset }: Pick<ViewerProps, 'model' | 'level' | 'reset'>) {
   const { camera, size: viewportSize } = useThree();
-  const geometryKey=graph.nodes.map(node=>node.floor+':'+node.position.join(',')).join('|');
   const controls = useRef<{ target: Vector3; update: () => void } | null>(null);
+  const frameKey = model.zones.map(zone => zone.id).join('|');
+  const latest = useRef(model);
+  latest.current = model;
   useEffect(() => {
+    const model = latest.current;
     const box = new Box3();
-    for (const node of graph.nodes) {
-      if (floor === 'all' || node.floor === floor) box.expandByPoint(new Vector3(...node.position));
-    }
-    if (scan) {
-      const story = graph.floors.find(item => item.id === floor)?.story;
-      const features = [...scan.floors, ...scan.walls, ...scan.objects];
-      for (const feature of features) {
-        if (floor !== 'all' && feature.story != null && feature.story !== story) continue;
+    for (const node of model.nodes) if (level === 'all' || node.level === level) box.expandByPoint(new Vector3(...node.world));
+    for (const zone of model.zones) {
+      if (!zone.scan || !visibleFloorIds(model, zone, level).length) continue;
+      const matrix = zoneMatrix(model.transforms.get(zone.id)!);
+      for (const feature of [...zone.scan.floors, ...zone.scan.walls, ...zone.scan.objects]) {
         const size = new Vector3(...feature.dimensions.map(value => Math.max(.025, value)));
-        box.union(new Box3().setFromCenterAndSize(new Vector3(), size).applyMatrix4(featureMatrix(feature)));
+        box.union(new Box3().setFromCenterAndSize(new Vector3(), size).applyMatrix4(featureMatrix(feature)).applyMatrix4(matrix));
       }
     }
     if (box.isEmpty()) box.expandByPoint(new Vector3(0, 0, 0));
     const center = box.getCenter(new Vector3());
     const size = box.getSize(new Vector3());
-    const span = Math.max(8, size.x, size.z, size.y * 2) * Math.max(1, viewportSize.height / Math.max(1,viewportSize.width));
+    const span = Math.max(8, size.x, size.z, size.y * 1.4) * Math.max(1, viewportSize.height / Math.max(1, viewportSize.width));
     camera.position.copy(center).add(new Vector3(span * 1.2, span * .95, span * 1.2));
     camera.lookAt(center);
     controls.current?.target.copy(center);
     controls.current?.update();
-  }, [camera, geometryKey, scan, floor, reset, viewportSize.width, viewportSize.height]);
-  return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={200} maxPolarAngle={Math.PI / 2.05} />;
+  }, [camera, frameKey, level, reset, viewportSize.width, viewportSize.height]);
+  return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={300} maxPolarAngle={level === 'all' ? Math.PI * .88 : Math.PI / 2.05} />;
 }
 
-function StackCameraRig({ zones, reset }: { zones: StackZone[]; reset:number }) {
-  const { camera } = useThree();
-  const controls = useRef<{ target: Vector3; update: () => void } | null>(null);
-  useEffect(()=>{
-    const box=new Box3();
-    for(const zone of zones){
-      const offset=new Vector3(...zone.offset);
-      zone.graph.nodes.forEach(node=>box.expandByPoint(new Vector3(...node.position).add(offset)));
-      for(const feature of [...(zone.scan?.floors||[]),...(zone.scan?.walls||[]),...(zone.scan?.objects||[])]){
-        const size=new Vector3(...feature.dimensions.map(value=>Math.max(.025,value)));
-        box.union(new Box3().setFromCenterAndSize(new Vector3(),size).applyMatrix4(featureMatrix(feature)).translate(offset));
-      }
-    }
-    if(box.isEmpty())box.expandByPoint(new Vector3());
-    const center=box.getCenter(new Vector3()),size=box.getSize(new Vector3());
-    const span=Math.max(10,size.x,size.z,size.y*1.4);
-    camera.position.copy(center).add(new Vector3(span*1.25,span*.9,span*1.25));camera.lookAt(center);
-    controls.current?.target.copy(center);controls.current?.update();
-  },[camera,zones,reset]);
-  return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={300} maxPolarAngle={Math.PI*.88}/>;
+function ZoneLayer({ model, zone, level, illustrative, editing, active, selected, onSelect, onFloorPick }: Pick<ViewerProps, 'model' | 'level' | 'illustrative' | 'editing' | 'selected' | 'onSelect' | 'onFloorPick'> & { zone: ZoneView; active: boolean }) {
+  const t = model.transforms.get(zone.id)!;
+  const floorIds = visibleFloorIds(model, zone, level);
+  if (!floorIds.length) return null;
+  const shown = new Set(floorIds);
+  const graph = zone.graph;
+  const pick: WorldPick | undefined = onFloorPick ? (world, floorId) => onFloorPick({ position: toLocal(t, world), floorId, zoneId: zone.id }) : undefined;
+  const nodes = graph.nodes.filter(node => shown.has(node.floor) && ((editing && active) || node.label || importantTypes.includes(node.type)));
+  const center = graph.nodes.length ? graph.nodes.reduce((sum, node) => [sum[0] + node.position[0] / graph.nodes.length, 0, sum[2] + node.position[2] / graph.nodes.length], [0, 0, 0]) : [0, 0, 0];
+  return <group position={[t.x, t.y, t.z]} rotation={[0, t.rotationDegrees * Math.PI / 180, 0]}>
+    {zone.scan
+      ? <ScannedGeometry scan={zone.scan} graph={graph} floor={level === 'all' ? 'all' : floorIds[0]} zoneId={zone.id} onFloorPick={pick} />
+      : <GraphFloor graph={graph} floor={level === 'all' ? 'all' : floorIds[0]} illustrative={illustrative} zoneId={zone.id} onFloorPick={pick} />}
+    {((editing && active) || !zone.scan) && <ZoneEdges zone={zone} shown={shown} strong={Boolean(editing && active)} />}
+    {nodes.map(node => {
+      const key = nodeKeyOf(zone.id, node.id);
+      return <group key={node.id} position={node.position} onClick={event => { event.stopPropagation(); onSelect(key); }}>
+        <mesh position={[0, .35, 0]}>
+          <cylinderGeometry args={[node.type === 'elevator' ? .22 : .16, node.type === 'elevator' ? .22 : .16, .7, 20]} />
+          <meshStandardMaterial color={key === selected ? '#0b8b81' : nodeColor(node.type)} transparent={editing && !active} opacity={editing && !active ? .45 : 1} />
+        </mesh>
+        {(node.label || key === selected || !editing || importantTypes.includes(node.type)) && <Html position={[0, .9, 0]} center distanceFactor={13}>
+          <button className={'scene-label ' + (key === selected ? 'chosen' : '')} onClick={() => onSelect(key)}>
+            {node.label || node.id}
+          </button>
+        </Html>}
+      </group>;
+    })}
+    {model.zones.length > 1 && <Html position={[center[0], (graph.floors.find(floor => floor.id === floorIds[0])?.elevation || 0) + .15, center[2]]} center distanceFactor={24}><span className={'floor-stack-label' + (editing && active ? ' active' : '')}>{zone.name}</span></Html>}
+  </group>;
 }
 
-function StackScene({ zones, connections, activeZoneId, selected, onSelect, onFloorPick, walker }:{zones:StackZone[];connections?:ZoneConnections;activeZoneId?:string;selected:string;onSelect:(id:string)=>void;onFloorPick?:ViewerProps['onFloorPick'];walker?:WalkLocation|null}){
-  const byId=new Map(zones.map(zone=>[zone.id,zone]));
+function SeamLines({ model, level }: Pick<ViewerProps, 'model' | 'level'>) {
+  const segments = useMemo(() => model.seams.flatMap(seam => {
+    const from = model.byKey.get(seam.from)!, to = model.byKey.get(seam.to)!;
+    if (level !== 'all' && from.level !== level) return [];
+    const lift = (point: Vec3): Vec3 => [point[0], point[1] + .05, point[2]];
+    return [{ from: lift(from.world), to: lift(to.world), color: seam.check.status === 'valid' ? '#0f9d91' : '#d4ac62' }];
+  }), [model.seams, model.byKey, level]);
+  return <EdgeLines segments={segments} opacity={.9} lineWidth={3} />;
+}
+
+function Scene(props: ViewerProps) {
+  const { model, level, path, step, walker, walking, editing, editZoneId } = props;
+  const visible = (value: number) => level === 'all' || value === level;
+  const routeSegments = path.slice(1).map((node, index) => [path[index], node] as const).filter(([from, to]) => visible(from.level) && visible(to.level));
+  const groundLevel = level === 'all' ? Math.min(0, ...model.floors.map(floor => floor.level)) : level;
+  const walkerZone = walker && model.transforms.get(walker.zoneId);
   return <>
-    <ambientLight intensity={2}/><directionalLight position={[10,22,14]} intensity={2}/>
-    <gridHelper args={[120,120,'#d7dee3','#e8edef']} position={[0,-.15,0]}/>
-    {zones.map(zone=><group key={zone.id} position={zone.offset} rotation={[0,zone.rotationDegrees*Math.PI/180,0]}>
-      {zone.scan?<ScannedGeometry scan={zone.scan} graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>:<GraphFloor graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>}
-      {zone.graph.edges.map((edge,index)=>{const from=zone.graph.nodes.find(node=>node.id===edge.from),to=zone.graph.nodes.find(node=>node.id===edge.to);if(!from||!to)return null;return <Line key={index} points={[from.position,to.position]} color="#8abdb2" lineWidth={1} transparent opacity={.28}/>})}
-      {zone.graph.nodes.filter(node=>node.label||['entrance','destination','elevator','continuation'].includes(node.type)).map(node=><group key={node.id} position={node.position} onClick={event=>{event.stopPropagation();if(zone.id===activeZoneId)onSelect(node.id)}}>
-        <mesh position={[0,.35,0]}><cylinderGeometry args={[node.type==='elevator'?.22:node.type==='continuation'?.2:.15,node.type==='elevator'?.22:node.type==='continuation'?.2:.15,.7,20]}/><meshStandardMaterial color={node.type==='elevator'?'#8b5cf6':node.type==='continuation'?'#0f9d91':node.id===selected&&zone.id===activeZoneId?'#0b8b81':'#277ad1'}/></mesh>
-        {node.type==='elevator'&&<Html position={[0,.95,0]} center distanceFactor={15}><span className="elevator-label">Elevator · {zone.name}</span></Html>}
-        {node.type==='continuation'&&<Html position={[0,.95,0]} center distanceFactor={15}><span className="connector-label">{node.label||'Zone continuation'} · {zone.name}</span></Html>}
-      </group>)}
-      <Html position={[0,.15,0]} center distanceFactor={24}><span className="floor-stack-label">{zone.name}</span></Html>
-      {walker&&walker.zoneId===zone.id&&<WalkerMarker location={walker}/>}
-    </group>)}
-    {(connections?.connections||[]).map((connection,index)=>{const fromZone=byId.get(connection.from.zoneId),toZone=byId.get(connection.to.zoneId);const from=fromZone?.graph.nodes.find(node=>node.id===connection.from.nodeId),to=toZone?.graph.nodes.find(node=>node.id===connection.to.nodeId);if(!fromZone||!toZone||!from||!to)return null;return <Line key={'zone-link-'+index} points={[stackPoint(fromZone,from.position),stackPoint(toZone,to.position)]} color={connection.kind==='continuation'?'#0f9d91':'#8b5cf6'} lineWidth={3} dashed dashSize={.28} gapSize={.2} transparent opacity={.9}/>})}
+    <ambientLight intensity={2} />
+    <directionalLight position={[8, 22, 12]} intensity={2} />
+    <gridHelper args={[160, 160, '#d7dee3', '#e8edef']} position={[0, groundLevel * FLOOR_GAP - .15, 0]} />
+    {model.zones.map(zone => <ZoneLayer key={zone.id} {...props} zone={zone} active={!editing || zone.id === editZoneId} />)}
+    {model.links.map((link, index) => {
+      const from = model.byKey.get(link.from), to = model.byKey.get(link.to);
+      if (!from || !to || !visible(from.level) || !visible(to.level)) return null;
+      return <Line key={'zone-link-' + index} points={[from.world, to.world]} color={link.kind === 'continuation' ? '#0f9d91' : '#8b5cf6'} lineWidth={3} dashed dashSize={.28} gapSize={.2} transparent opacity={.9} />;
+    })}
+    {editing && <SeamLines model={model} level={level} />}
+    {routeSegments.map(([from, to], index) => from.level === to.level
+      ? <Line key={'route-' + index} points={[[from.world[0], from.world[1] + .18, from.world[2]], [to.world[0], to.world[1] + .18, to.world[2]]]} color="#2583df" lineWidth={5} />
+      : <Line key={'route-' + index} points={[from.world, to.world]} color="#8b5cf6" lineWidth={4} dashed dashSize={.35} gapSize={.2} />)}
+    {path.slice(0, step + 1).filter(node => visible(node.level)).map(node => <mesh key={'breadcrumb-' + node.key} position={[node.world[0], node.world[1] + .24, node.world[2]]}>
+      <sphereGeometry args={[.14, 12, 12]} />
+      <meshBasicMaterial color="#2583df" />
+    </mesh>)}
+    {walker && walkerZone && !walking && visible(model.levelOf(walker.zoneId, walker.floorId)) && <WalkerMarker position={toWorld(walkerZone, walker.position)} />}
   </>;
 }
 
-function DropController({ request, onDrop }: { request?: DropRequest | null; onDrop?: ViewerProps['onWalkerDrop'] }) {
+function DropController({ request, onDrop, model }: { request?: DropRequest | null; onDrop?: ViewerProps['onWalkerDrop']; model: BuildingModel }) {
   const { camera, gl, raycaster, scene } = useThree();
   const handled = useRef<number | null>(null);
   useEffect(() => {
@@ -379,15 +448,15 @@ function DropController({ request, onDrop }: { request?: DropRequest | null; onD
     if(request.clientX<bounds.left||request.clientX>bounds.right||request.clientY<bounds.top||request.clientY>bounds.bottom){onDrop(null);return}
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(scene.children, true)
-      .find(item => item.object.userData.walkableFloor === true && typeof item.object.userData.floorId === 'string');
-    const offset=(hit?.object.userData.stackOffset||[0,0,0]) as [number,number,number];
-    onDrop(hit ? { position: [hit.point.x-offset[0],hit.point.y-offset[1],hit.point.z-offset[2]], floorId: hit.object.userData.floorId as string, zoneId: hit.object.userData.zoneId as string|undefined } : null);
-  }, [camera, gl, onDrop, raycaster, request, scene]);
+      .find(item => item.object.userData.walkableFloor === true && typeof item.object.userData.floorId === 'string' && typeof item.object.userData.zoneId === 'string');
+    const transform = hit && model.transforms.get(hit.object.userData.zoneId as string);
+    onDrop(hit && transform ? { position: toLocal(transform, [hit.point.x, hit.point.y, hit.point.z]), floorId: hit.object.userData.floorId as string, zoneId: hit.object.userData.zoneId as string } : null);
+  }, [camera, gl, onDrop, raycaster, request, scene, model]);
   return null;
 }
 
-function WalkerMarker({ location }: { location: WalkLocation }) {
-  return <group position={[location.position[0], location.position[1] + .02, location.position[2]]}>
+function WalkerMarker({ position }: { position: Vec3 }) {
+  return <group position={[position[0], position[1] + .02, position[2]]}>
     <mesh position={[0, 1.42, 0]} castShadow>
       <sphereGeometry args={[.18, 18, 18]} />
       <meshStandardMaterial color="#f3b33d" />
@@ -414,11 +483,12 @@ function WalkerMarker({ location }: { location: WalkLocation }) {
   </group>;
 }
 
-function WalkCamera({ location, graph, scan, onMove }: {
+/** Collision runs in the zone's own coordinates; the camera is placed in the building frame. */
+function WalkCamera({ location, model, onMove, onElevator }: {
   location: WalkLocation;
-  graph: Graph;
-  scan?: ScanFeatures;
+  model: BuildingModel;
   onMove?: ViewerProps['onWalkerMove'];
+  onElevator?: ViewerProps['onWalkerElevator'];
 }) {
   const { camera, gl } = useThree();
   const keys = useRef(new Set<string>());
@@ -426,21 +496,67 @@ function WalkCamera({ location, graph, scan, onMove }: {
   const lastPointer = useRef<[number, number]>([0, 0]);
   const yaw = useRef(0);
   const pitch = useRef(0);
-  const feet = useRef(new Vector3(...location.position));
+  /** Feet in building coordinates, so the walker can cross from one zone into the next. */
+  const feet = useRef<Vec3>([0, 0, 0]);
+  const here = useRef({ zoneId: location.zoneId, floorId: location.floorId });
+  const started = useRef('');
   const lastUpdate = useRef(0);
+  const stop = useRef<ElevatorStop | null>(null);
+  const latest = useRef(model);
+  latest.current = model;
+  const callbacks = useRef({ onMove, onElevator });
+  callbacks.current = { onMove, onElevator };
+  const placeCamera = (world: Vec3) => camera.position.set(world[0], world[1] + 1.62, world[2]);
+  const report = () => {
+    const { zoneId, floorId } = here.current, model = latest.current, t = model.transforms.get(zoneId);
+    if (!t) return;
+    lastUpdate.current = performance.now();
+    callbacks.current.onMove?.({ position: toLocal(t, feet.current), floorId, zoneId });
+    const next = elevatorStopNear(model, feet.current, model.levelOf(zoneId, floorId));
+    const id = (stop: ElevatorStop | null) => stop ? [stop.from.key, stop.up?.key, stop.down?.key].join('|') : '';
+    if (id(next) === id(stop.current)) return;
+    stop.current = next;
+    callbacks.current.onElevator?.(next);
+  };
+  const ride = (direction: 'up' | 'down') => {
+    const to = stop.current?.[direction];
+    if (!to) return;
+    here.current = { zoneId: to.zoneId, floorId: to.floor };
+    started.current = to.zoneId + '|' + to.floor;
+    feet.current = to.world;
+    placeCamera(to.world);
+    report();
+  };
+  const rideRef = useRef(ride);
+  rideRef.current = ride;
+
+  useEffect(() => {
+    const id = location.zoneId + '|' + location.floorId;
+    if (started.current === id) { report(); return; }
+    started.current = id;
+    const model = latest.current, zone = model.zones.find(item => item.id === location.zoneId), t = model.transforms.get(location.zoneId);
+    if (!zone || !t) return;
+    here.current = { zoneId: location.zoneId, floorId: location.floorId };
+    feet.current = toWorld(t, location.position);
+    const nearest = zone.graph.nodes
+      .filter(node => node.floor === location.floorId && Math.hypot(node.position[0] - location.position[0], node.position[2] - location.position[2]) > .3)
+      .sort((a, b) => Math.hypot(a.position[0] - location.position[0], a.position[2] - location.position[2]) - Math.hypot(b.position[0] - location.position[0], b.position[2] - location.position[2]))[0];
+    if (nearest) {
+      const there = toWorld(t, nearest.position);
+      yaw.current = Math.atan2(feet.current[0] - there[0], feet.current[2] - there[2]);
+    }
+    pitch.current = 0;
+    placeCamera(feet.current);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.set(0, yaw.current, 0);
+    report();
+  }, [camera, location.zoneId, location.floorId]);
+
+  useEffect(() => () => { stop.current = null; callbacks.current.onElevator?.(null); }, []);
 
   useEffect(() => {
     const canvas = gl.domElement;
     const perspective = camera as PerspectiveCamera;
-    const nearest = graph.nodes
-      .filter(node => node.floor === location.floorId && Math.hypot(node.position[0] - location.position[0], node.position[2] - location.position[2]) > .3)
-      .sort((a, b) => Math.hypot(a.position[0] - location.position[0], a.position[2] - location.position[2]) - Math.hypot(b.position[0] - location.position[0], b.position[2] - location.position[2]))[0];
-    feet.current.set(...location.position);
-    if (nearest) yaw.current = Math.atan2(location.position[0] - nearest.position[0], location.position[2] - nearest.position[2]);
-    pitch.current = 0;
-    camera.position.set(location.position[0], location.position[1] + 1.62, location.position[2]);
-    camera.rotation.order = 'YXZ';
-    camera.rotation.set(0, yaw.current, 0);
     if (perspective.isPerspectiveCamera) {
       perspective.fov = 68;
       perspective.updateProjectionMatrix();
@@ -453,6 +569,12 @@ function WalkCamera({ location, graph, scan, onMove }: {
     const keyDown = (event: KeyboardEvent) => {
       const target=event.target;
       if(event.ctrlKey||event.metaKey||event.altKey||target instanceof HTMLElement && (target.matches('input,textarea,select,button')||target.isContentEditable))return;
+      const direction = event.code === 'KeyE' || event.code === 'PageUp' ? 'up' : event.code === 'KeyQ' || event.code === 'PageDown' ? 'down' : null;
+      if (direction) {
+        event.preventDefault();
+        if (!event.repeat) rideRef.current(direction);
+        return;
+      }
       if (movementCodes.has(event.code)) {
         event.preventDefault();
         keys.current.add(event.code);
@@ -504,7 +626,31 @@ function WalkCamera({ location, graph, scan, onMove }: {
         perspective.updateProjectionMatrix();
       }
     };
-  }, [camera, gl, graph, location.floorId]);
+  }, [camera, gl]);
+
+  /** Steps within the current zone, or into another zone on the same floor where its scanned floor continues. */
+  const step = (from: Vec3, to: Vec3): boolean => {
+    const model = latest.current, { zoneId, floorId } = here.current;
+    const zone = model.zones.find(item => item.id === zoneId), t = model.transforms.get(zoneId);
+    if (!zone || !t) return false;
+    const fromLocal = toLocal(t, from), toLocalPoint = toLocal(t, to);
+    if (canWalkBetween(fromLocal, toLocalPoint, floorId, zone.graph, zone.scan)) return true;
+    if (zone.scan && wallBetween(fromLocal, toLocalPoint, zone.scan)) return false;
+    const level = model.levelOf(zoneId, floorId);
+    for (const other of model.zones) {
+      const t2 = model.transforms.get(other.id);
+      if (other.id === zoneId || !t2) continue;
+      const target = toLocal(t2, to);
+      for (const floor of other.graph.floors) {
+        if (model.levelOf(other.id, floor.id) !== level || !pointOnFloor(target, floor.id, other.graph, other.scan)) continue;
+        if (other.scan && wallBetween(toLocal(t2, from), target, other.scan, floor.story)) continue;
+        here.current = { zoneId: other.id, floorId: floor.id };
+        started.current = other.id + '|' + floor.id;
+        return true;
+      }
+    }
+    return false;
+  };
 
   useFrame((_, delta) => {
     const forward = Number(keys.current.has('KeyW') || keys.current.has('ArrowUp')) - Number(keys.current.has('KeyS') || keys.current.has('ArrowDown'));
@@ -512,74 +658,26 @@ function WalkCamera({ location, graph, scan, onMove }: {
     if (turn) yaw.current += turn * 1.85 * Math.min(delta, .05);
     camera.rotation.set(pitch.current, yaw.current, 0);
     if (!forward) return;
-    const speed = (keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') ? 3.7 : 1.9) * Math.min(delta, .05);
-    const dx = -Math.sin(yaw.current) * forward * speed;
-    const dz = -Math.cos(yaw.current) * forward * speed;
-    const current = feet.current.toArray() as [number, number, number];
-    let next: [number, number, number] = [current[0] + dx, current[1], current[2] + dz];
-    if (!canWalkBetween(current, next, location.floorId, graph, scan)) {
-      const alongX: [number, number, number] = [current[0] + dx, current[1], current[2]];
-      const alongZ: [number, number, number] = [current[0], current[1], current[2] + dz];
-      if (canWalkBetween(current, alongX, location.floorId, graph, scan)) next = alongX;
-      else if (canWalkBetween(current, alongZ, location.floorId, graph, scan)) next = alongZ;
-      else return;
-    }
-    feet.current.set(...next);
-    camera.position.set(next[0], next[1] + 1.62, next[2]);
-    if (onMove && performance.now() - lastUpdate.current > 180) {
-      lastUpdate.current = performance.now();
-      onMove({ position: next, floorId: location.floorId });
-    }
+    const speed = (keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') ? 5.5 : 1.9) * Math.min(delta, .05);
+    const dx = -Math.sin(yaw.current) * forward * speed, dz = -Math.cos(yaw.current) * forward * speed;
+    const current = feet.current;
+    const next = ([[current[0] + dx, current[1], current[2] + dz], [current[0] + dx, current[1], current[2]], [current[0], current[1], current[2] + dz]] as Vec3[])
+      .find(candidate => step(current, candidate));
+    if (!next) return;
+    feet.current = next;
+    placeCamera(next);
+    if (performance.now() - lastUpdate.current > 180) report();
   });
   return null;
 }
 
-function Scene(props: ViewerProps) {
-  const { graph, scan, illustrative, floor, selected, onSelect, path, step, editing, onFloorPick, walker, walking } = props;
-  const visibleNodes = graph.nodes.filter(node => floor === 'all' || node.floor === floor);
-  const routeSegments = path.slice(1).map((node, index) => [path[index], node] as const)
-    .filter(([from, to]) => floor === 'all' || (from.floor === floor && to.floor === floor));
-  return <>
-    <ambientLight intensity={2} />
-    <directionalLight position={[8, 15, 12]} intensity={2} />
-    {!scan && <gridHelper args={[100, 100, '#d7dee3', '#e8edef']} position={[0, -.12, 0]} />}
-    {scan ? <ScannedGeometry scan={scan} graph={graph} floor={floor} zoneId={props.zoneId} onFloorPick={onFloorPick} /> : <GraphFloor graph={graph} floor={floor} illustrative={illustrative} zoneId={props.zoneId} onFloorPick={onFloorPick} />}
-    {(editing || !scan) && graph.edges.map((edge, index) => {
-      const from = graph.nodes.find(node => node.id === edge.from);
-      const to = graph.nodes.find(node => node.id === edge.to);
-      if (!from || !to || (floor !== 'all' && (from.floor !== floor || to.floor !== floor))) return null;
-      const status = checkEdge(edge, graph, scan).status;
-      return <Line key={index} points={[from.position, to.position]} color={status === 'blocked' ? '#d88a82' : status === 'unverified' ? '#d4ac62' : '#8abdb2'} lineWidth={editing ? 2 : 1} transparent opacity={editing ? .8 : .35} />;
-    })}
-    {visibleNodes.filter(node => editing || node.label || node.type === 'entrance' || node.type === 'destination' || node.type === 'stairs' || node.type === 'elevator' || node.type === 'continuation').map(node =>
-      <group key={node.id} position={node.position} onClick={event => { event.stopPropagation(); onSelect(node.id); }}>
-        <mesh position={[0, .35, 0]}>
-          <cylinderGeometry args={[.16, .16, .7, 20]} />
-          <meshStandardMaterial color={node.id === selected ? '#0b8b81' : node.type === 'stairs' ? '#e6a84d' : node.type==='elevator' ? '#8b5cf6' : node.type==='continuation' ? '#0f9d91' : '#277ad1'} />
-        </mesh>
-        {(node.label || node.id === selected || !editing) && <Html position={[0, .9, 0]} center distanceFactor={13}>
-          <button className={'scene-label ' + (node.id === selected ? 'chosen' : '')} onClick={() => onSelect(node.id)}>
-            {node.label || node.id}
-          </button>
-        </Html>}
-      </group>)}
-    {routeSegments.map(([from, to], index) => <Line key={'route-' + index} points={[[from.position[0], from.position[1] + .18, from.position[2]], [to.position[0], to.position[1] + .18, to.position[2]]]} color="#2583df" lineWidth={5} />)}
-    {path.slice(0, step + 1).filter(node=>floor==='all'||node.floor===floor).map(node => <mesh key={'breadcrumb-' + node.id} position={[node.position[0], node.position[1] + .24, node.position[2]]}>
-      <sphereGeometry args={[.14, 12, 12]} />
-      <meshBasicMaterial color="#2583df" />
-    </mesh>)}
-    {walker && !walking && (floor === 'all' || floor === walker.floorId) && <WalkerMarker location={walker} />}
-  </>;
-}
-
 export default function Viewer(props: ViewerProps) {
-  const stacked=useMemo(()=>props.zones&&props.zones.length>1?stackBuilding(props.zones,props.zoneConnections,props.layout):[],[props.zones,props.zoneConnections,props.layout]);
-  const overview=stacked.length>1&&props.floor==='all'&&!props.editing&&!props.walking;
   return <Canvas camera={{ position: [24, 23, 27], fov: 42 }} gl={{ antialias: true }}>
-    {overview?<StackScene zones={stacked} connections={props.zoneConnections} activeZoneId={props.zoneId} selected={props.selected} onSelect={props.onSelect} onFloorPick={props.onFloorPick} walker={props.walker}/>:<Scene {...props} />}
-    <DropController request={props.dropRequest} onDrop={props.onWalkerDrop} />
-    {props.walking && props.walker
-      ? <WalkCamera location={props.walker} graph={props.graph} scan={props.scan} onMove={props.onWalkerMove} />
-      : overview?<StackCameraRig zones={stacked} reset={props.reset}/>:<CameraRig graph={props.graph} scan={props.scan} floor={props.floor} reset={props.reset} />}
+    <Scene {...props} />
+    <DropController request={props.dropRequest} onDrop={props.onWalkerDrop} model={props.model} />
+    {props.walking && props.walker && props.model.transforms.has(props.walker.zoneId)
+      ? <WalkCamera location={props.walker} model={props.model} onMove={props.onWalkerMove} onElevator={props.onWalkerElevator} />
+      : <CameraRig model={props.model} level={props.level} reset={props.reset} />}
   </Canvas>;
 }
+

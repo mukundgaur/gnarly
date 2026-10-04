@@ -43,6 +43,25 @@ export function connectWaypoints(graph: Graph, fromId: string, toId: string, sca
   if (check.status === 'blocked') throw Error(check.reason);
   return { ...graph, edges: [...graph.edges, edge] };
 }
+const isWalkSample = (node: Node) => node.source === 'walked-path' || node.id.startsWith('walk-');
+/**
+ * Mirrors the navigator's visibility pass: same floor, 0.2–18 m apart, and accepted by checkEdge.
+ * Pairs of walk samples are skipped so a shortcut cannot bypass the recorded walk.
+ */
+export function autoConnect(graph: Graph, scan?: ScanFeatures, maxMeters = 18): { graph: Graph; added: Edge[] } {
+  if (!scan?.floors?.length) return { graph, added: [] };
+  const connected = new Set(graph.edges.flatMap(edge => [edge.from + '\u0000' + edge.to, edge.to + '\u0000' + edge.from]));
+  const added: Edge[] = [];
+  for (let i = 0; i < graph.nodes.length; i++) for (let j = i + 1; j < graph.nodes.length; j++) {
+    const a = graph.nodes[i], b = graph.nodes[j];
+    if (a.floor !== b.floor || (isWalkSample(a) && isWalkSample(b)) || connected.has(a.id + '\u0000' + b.id)) continue;
+    const span = Math.hypot(a.position[0] - b.position[0], a.position[2] - b.position[2]);
+    if (span < .2 || span > maxMeters) continue;
+    const edge: Edge = { from: a.id, to: b.id, kind: a.type === 'stairs' && b.type === 'stairs' ? 'stairs' : 'hallway', meters: distance3D(a, b), source: 'visibility' };
+    if (checkEdge(edge, graph, scan).status === 'valid') added.push(edge);
+  }
+  return { graph: { ...graph, edges: [...graph.edges, ...added] }, added };
+}
 export function disconnectWaypoints(graph: Graph, fromId: string, toId: string): Graph {
   return { ...graph, edges: graph.edges.filter(edge => !(edge.from === fromId && edge.to === toId || edge.from === toId && edge.to === fromId)) };
 }

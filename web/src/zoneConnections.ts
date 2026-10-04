@@ -31,16 +31,24 @@ export function normalizeZoneConnections(raw: unknown): ZoneConnections {
 const refKey = (value: ZoneNodeRef) => value.zoneId + '\u0000' + value.nodeId;
 export const zoneConnectionKey = (connection: ZoneConnection) => [refKey(connection.from), refKey(connection.to)].sort().join('\u0001');
 
-export function addZoneConnection(document: ZoneConnections, connection: ZoneConnection, zones: ZoneView[]): ZoneConnections {
+/** levelOf returns an endpoint's building floor, so elevators can be required to change floors. */
+export type ConnectionOptions = { levelOf?: (zoneId: string, floorId: string) => number };
+
+export function addZoneConnection(document: ZoneConnections, connection: ZoneConnection, zones: ZoneView[], options: ConnectionOptions = {}): ZoneConnections {
   if (connection.from.zoneId === connection.to.zoneId) throw Error('Choose a waypoint in a different zone.');
-  for (const endpoint of [connection.from, connection.to]) {
+  const endpoints = [connection.from, connection.to].map(endpoint => {
     const zone = zones.find(item => item.id === endpoint.zoneId);
     if (!zone) throw Error('Zone ' + endpoint.zoneId + ' is unavailable.');
-    if (!zone.graph.nodes.some(node => node.id === endpoint.nodeId)) throw Error('Waypoint ' + endpoint.nodeId + ' is not saved in zone ' + zone.name + '.');
-  }
+    const node = zone.graph.nodes.find(item => item.id === endpoint.nodeId);
+    if (!node) throw Error('Waypoint ' + endpoint.nodeId + ' is not saved in zone ' + zone.name + '.');
+    return { endpoint, node };
+  });
   if(connection.kind==='elevator'||connection.kind==='continuation'){
-    const endpointTypes=[connection.from,connection.to].map(endpoint=>zones.find(item=>item.id===endpoint.zoneId)!.graph.nodes.find(node=>node.id===endpoint.nodeId)!.type);
-    if(endpointTypes.some(type=>type!==connection.kind))throw Error('Both endpoints must be '+connection.kind+' waypoints.');
+    if(endpoints.some(item=>item.node.type!==connection.kind))throw Error('Both endpoints must be '+connection.kind+' waypoints.');
+  }
+  if (connection.kind === 'elevator' && options.levelOf) {
+    const [a, b] = endpoints.map(item => options.levelOf!(item.endpoint.zoneId, item.node.floor));
+    if (a === b) throw Error('An elevator link must connect two different floors. Assign the zones to their floors first.');
   }
   const key = zoneConnectionKey(connection);
   if (document.connections.some(item => zoneConnectionKey(item) === key)) throw Error('These waypoints are already connected.');

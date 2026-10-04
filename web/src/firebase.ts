@@ -273,7 +273,7 @@ export async function saveBuildingLayout(input: Building, document: BuildingLayo
     if (!zone.zoneId || ![zone.floor, zone.x, zone.z, zone.rotationDegrees].every(Number.isFinite)) throw Error('Each zone needs a finite floor, X, Z, and rotation.');
   }
   const path = input.layoutPath || 'buildings/' + input.id + '/' + input.activeVersion + '/building-layout.json';
-  const normalized: BuildingLayout = { schemaVersion: 1, zones: document.zones.map(zone => ({ ...zone })), notes: document.notes };
+  const normalized: BuildingLayout = { schemaVersion: 1, zones: document.zones.map(zone => ({ ...zone })), ...(document.floors ? { floors: document.floors.map(floor => ({ ...floor })) } : {}), ...(document.notes ? { notes: document.notes } : {}) };
   const revision = crypto.randomUUID();
   await uploadBytes(ref(storage, path), new TextEncoder().encode(JSON.stringify(normalized)), { contentType: 'application/json', cacheControl: 'no-cache' });
   await runTransaction(db, async transaction => {
