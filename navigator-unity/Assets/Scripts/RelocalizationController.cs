@@ -426,6 +426,7 @@ public class RelocalizationController : MonoBehaviour
                 -currentLayout.rotationDegrees);
         else
             indoorMap?.SetPlannerCurrentZoneTransform(Vector3.zero, 0f);
+        indoorMap?.SetBuildingZones(BuildBuildingMapZones());
         indoorMap?.SetPackagePaths(
             Path.Combine(zone.directory, "structure.usdz"),
             Path.Combine(zone.directory, "building.json"),
@@ -800,6 +801,29 @@ public class RelocalizationController : MonoBehaviour
         // mirrors the authored Y-axis rotation.
         var rotated = Quaternion.Euler(0f, -layout.rotationDegrees, 0f) * local;
         return new Vector3(rotated.x + layout.x, rotated.y + layout.floor * 4f, rotated.z - layout.z);
+    }
+
+    List<BuildingMapZone> BuildBuildingMapZones()
+    {
+        var result = new List<BuildingMapZone>();
+        foreach (var pair in zonePackages)
+        {
+            // A remote ARKit scan has arbitrary local coordinates. Only show it in the shared
+            // map after the website has authored where it belongs in the building.
+            if (pair.Key != currentZoneId && !buildingLayout.ContainsKey(pair.Key)) continue;
+            var layout = buildingLayout.TryGetValue(pair.Key, out var authored) ? authored : null;
+            result.Add(new BuildingMapZone
+            {
+                id = pair.Key,
+                scan = pair.Value.scan,
+                graph = pair.Value.graph,
+                plannerOffset = layout == null
+                    ? Vector3.zero
+                    : new Vector3(layout.x, layout.floor * 4f, -layout.z),
+                plannerRotationDegrees = layout == null ? 0f : -layout.rotationDegrees
+            });
+        }
+        return result;
     }
 
     static string PlaceKind(Pathfinding.Node node)

@@ -56,6 +56,16 @@ public sealed class MapPlace
     };
 }
 
+/// <summary>A downloaded zone positioned by the website's display-only building layout.</summary>
+public sealed class BuildingMapZone
+{
+    public string id;
+    public Pathfinding.ScanFeatures scan;
+    public Pathfinding.Graph graph;
+    public Vector3 plannerOffset;
+    public float plannerRotationDegrees;
+}
+
 /// <summary>The controller's A* answer for the planner's current start/destination.</summary>
 public sealed class RoutePreview
 {
@@ -99,6 +109,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
     Button compactModeButton;
     Transform activeRouteRoot;
     Transform previewRouteRoot;
+    Transform buildingDiagramRoot;
+    Transform scanGeometryRoot;
     Transform userMarker;
     Transform startPin;
     Transform destinationPin;
@@ -125,6 +137,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     bool showingBuildingPlanner;
     Vector3 currentZonePlannerOffset;
     float currentZonePlannerRotation;
+    readonly List<BuildingMapZone> buildingZones = new List<BuildingMapZone>();
     string appleModelPath;
     string buildingJsonPath;
     string scanJsonPath;
@@ -174,7 +187,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         if (arCamera != null) arCamera.cullingMask &= ~(1 << MapLayer);
         BuildMapRoot();
         CalculateMapBounds(scan);
-        BuildScanGeometry(scan);
+        BuildScanGeometry(scan, scanGeometryRoot, true);
         BuildUserMarker();
         BuildSelectionPins();
         BuildCamera();
@@ -186,6 +199,19 @@ public partial class IndoorMapOverlay : MonoBehaviour
     {
         currentZonePlannerOffset = offset;
         currentZonePlannerRotation = rotationDegrees;
+    }
+
+    /// <summary>
+    /// Supplies the downloaded zones for the full-screen building picker. Their transforms are
+    /// authored layout data only; no AR session or route coordinates are changed here.
+    /// </summary>
+    public void SetBuildingZones(IReadOnlyList<BuildingMapZone> zones)
+    {
+        buildingZones.Clear();
+        if (zones != null)
+            foreach (var zone in zones)
+                if (zone != null && !string.IsNullOrEmpty(zone.id)) buildingZones.Add(zone);
+        BuildBuildingDiagram();
     }
 
     /// <summary>The route being followed in AR, drawn on both map views and the native model.</summary>
@@ -262,8 +288,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
         mapRoot.SetParent(sessionSpace, false);
         SetLayer(mapRoot.gameObject, MapLayer);
         markerRoot = Child("Places", mapRoot);
+        scanGeometryRoot = Child("ActiveZoneGeometry", mapRoot);
         activeRouteRoot = Child("ActiveRoute", mapRoot);
         previewRouteRoot = Child("PreviewRoute", mapRoot);
+        buildingDiagramRoot = Child("BuildingDiagram", mapRoot);
+        buildingDiagramRoot.gameObject.SetActive(false);
 
         routeMaterial = MakeMaterial(MapUi.Accent, RouteQueue);
         previewMaterial = MakeMaterial(MapUi.Preview, RouteQueue + 1);
@@ -281,7 +310,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         return child;
     }
 
-    void BuildScanGeometry(Pathfinding.ScanFeatures scan)
+    void BuildScanGeometry(Pathfinding.ScanFeatures scan, Transform target, bool includePhotos)
     {
         if (scan == null)
         {
@@ -289,19 +318,19 @@ public partial class IndoorMapOverlay : MonoBehaviour
             return;
         }
 
-        BuildSurfaces(scan.floors, floorMaterial, true);
-        BuildSurfaces(scan.walls, wallMaterial, false);
-        BuildSurfaces(scan.doors, openingMaterial, false);
-        BuildSurfaces(scan.openings, openingMaterial, false);
-        BuildSurfaces(scan.windows, openingMaterial, false);
+        BuildSurfaces(scan.floors, floorMaterial, true, target, includePhotos);
+        BuildSurfaces(scan.walls, wallMaterial, false, target, includePhotos);
+        BuildSurfaces(scan.doors, openingMaterial, false, target, includePhotos);
+        BuildSurfaces(scan.openings, openingMaterial, false, target, includePhotos);
+        BuildSurfaces(scan.windows, openingMaterial, false, target, includePhotos);
         if (scan.objects != null)
         {
             foreach (var item in scan.objects)
             {
-                if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
-                CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
-                    item.transformColumnMajor, SurfaceMaterial(item.identifier, objectMaterial), false);
-                AddPhotoFaces(item.identifier, item.position, item.dimensions, item.transformColumnMajor, true, 0f);
+            if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
+            CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
+                    item.transformColumnMajor, SurfaceMaterial(item.identifier, objectMaterial), false, target);
+                if (includePhotos) AddPhotoFaces(item.identifier, item.position, item.dimensions, item.transformColumnMajor, true, 0f, target);
             }
         }
     }
@@ -324,7 +353,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     /// Adds photo-textured quads for each baked face. Corners are computed in ARKit space and then
     /// mirrored with ToUnity, so the handedness flip never touches the UV layout.
     /// </summary>
-    void AddPhotoFaces(string identifier, float[] position, float[] dimensions, float[] transform, bool solid, float halfDepth)
+    void AddPhotoFaces(string identifier, float[] position, float[] dimensions, float[] transform, bool solid, float halfDepth, Transform target)
     {
         if (surfaceColors?.atlas == null || transform == null || transform.Length != 16 || dimensions == null || dimensions.Length < 2) return;
         var surface = surfaceColors.Find(identifier);
@@ -372,7 +401,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
                 photoMaterial.mainTexture = surfaceColors.atlas;
             }
             var photo = new GameObject(mesh.name);
-            photo.transform.SetParent(mapRoot, false);
+            photo.transform.SetParent(target, false);
             photo.transform.localPosition = new Vector3(faceCenter.x, faceCenter.y, -faceCenter.z);
             photo.AddComponent<MeshFilter>().sharedMesh = mesh;
             photo.AddComponent<MeshRenderer>().sharedMaterial = photoMaterial;
@@ -380,7 +409,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         }
     }
 
-    void BuildSurfaces(Pathfinding.Surface[] surfaces, Material material, bool floor)
+    void BuildSurfaces(Pathfinding.Surface[] surfaces, Material material, bool floor, Transform target, bool includePhotos)
     {
         if (surfaces == null) return;
         foreach (var surface in surfaces)
@@ -400,8 +429,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
                 dimensions[2] = 0.06f;
             }
             CreateScanBox("RoomPlan-" + surface.category, surface.position, dimensions,
-                surface.transformColumnMajor, SurfaceMaterial(surface.identifier, material), floor);
-            AddPhotoFaces(surface.identifier, surface.position, surface.dimensions, surface.transformColumnMajor, false, dimensions[2] / 2f);
+                surface.transformColumnMajor, SurfaceMaterial(surface.identifier, material), floor, target);
+            if (includePhotos) AddPhotoFaces(surface.identifier, surface.position, surface.dimensions, surface.transformColumnMajor, false, dimensions[2] / 2f, target);
         }
     }
 
@@ -411,11 +440,12 @@ public partial class IndoorMapOverlay : MonoBehaviour
         float[] dimensions,
         float[] transform,
         Material material,
-        bool floor)
+        bool floor,
+        Transform target)
     {
         var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
         box.name = objectName;
-        box.transform.SetParent(mapRoot, false);
+        box.transform.SetParent(target, false);
         box.transform.localPosition = ToUnity(position);
         box.transform.localRotation = ToUnityRotation(transform, floor);
         box.transform.localScale = new Vector3(
@@ -552,6 +582,73 @@ public partial class IndoorMapOverlay : MonoBehaviour
     {
         if (showingBuildingPlanner && place.hasPlannerPosition) return place.plannerPosition;
         return MarkerPosition(place);
+    }
+
+    /// <summary>
+    /// Render each downloaded RoomPlan zone in the website-authored arrangement. These copies
+    /// are diagram geometry only: ARKit still relocalizes against one zone world map at a time.
+    /// </summary>
+    void BuildBuildingDiagram()
+    {
+        if (buildingDiagramRoot == null) return;
+        foreach (Transform child in buildingDiagramRoot) Destroy(child.gameObject);
+        if (buildingZones.Count < 2) return;
+
+        for (var index = 0; index < buildingZones.Count; index++)
+        {
+            var zone = buildingZones[index];
+            var root = Child("Zone-" + zone.id, buildingDiagramRoot);
+            root.localPosition = zone.plannerOffset;
+            root.localRotation = Quaternion.Euler(0f, zone.plannerRotationDegrees, 0f);
+            if (zone.scan != null) BuildScanGeometry(zone.scan, root, false);
+            else if (TryZoneBounds(zone, out var min, out var max))
+                BuildFootprintOutline(root, min, max, MapUi.Accent);
+        }
+    }
+
+    bool TryZoneBounds(BuildingMapZone zone, out Vector3 min, out Vector3 max)
+    {
+        var points = new List<Vector3>();
+        if (zone.scan?.walls != null)
+            foreach (var wall in zone.scan.walls)
+                if (ValidVector(wall.position)) points.Add(ToUnity(wall.position));
+        if (points.Count == 0 && zone.graph?.Nodes != null)
+            foreach (var node in zone.graph.Nodes)
+                if (node.position != null && node.position.Length == 3)
+                    points.Add(new Vector3(node.position[0], 0f, -node.position[2]));
+        if (points.Count == 0)
+        {
+            min = max = Vector3.zero;
+            return false;
+        }
+        min = max = points[0];
+        foreach (var point in points)
+        {
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+        min -= new Vector3(0.5f, 0f, 0.5f);
+        max += new Vector3(0.5f, 0f, 0.5f);
+        return true;
+    }
+
+    void BuildFootprintOutline(Transform root, Vector3 min, Vector3 max, Color color)
+    {
+        var lineObject = new GameObject("Outline");
+        lineObject.transform.SetParent(root, false);
+        lineObject.layer = MapLayer;
+        var line = lineObject.AddComponent<LineRenderer>();
+        line.useWorldSpace = false;
+        line.loop = true;
+        line.widthMultiplier = Mathf.Max(0.06f, lineWidth * 0.65f);
+        line.numCornerVertices = 3;
+        line.sharedMaterial = MakeMaterial(new Color(color.r, color.g, color.b, 0.9f), 3050);
+        line.positionCount = 4;
+        line.SetPositions(new[]
+        {
+            new Vector3(min.x, 0.04f, min.z), new Vector3(max.x, 0.04f, min.z),
+            new Vector3(max.x, 0.04f, max.z), new Vector3(min.x, 0.04f, max.z)
+        });
     }
 
     void DrawRoute(Transform root, Route route, Material material, float widthScale, Vector3? prefix)

@@ -410,6 +410,9 @@ public partial class IndoorMapOverlay
         showingBuildingPlanner = places.Exists(place => !place.inCurrentZone && place.hasPlannerPosition);
         if (!showingBuildingPlanner) return;
 
+        if (scanGeometryRoot != null) scanGeometryRoot.gameObject.SetActive(false);
+        if (buildingDiagramRoot != null) buildingDiagramRoot.gameObject.SetActive(true);
+
         compactCenter = center;
         compactSpan = span;
         var points = new List<Vector3>();
@@ -435,6 +438,8 @@ public partial class IndoorMapOverlay
     {
         if (!showingBuildingPlanner) return;
         showingBuildingPlanner = false;
+        if (buildingDiagramRoot != null) buildingDiagramRoot.gameObject.SetActive(false);
+        if (scanGeometryRoot != null) scanGeometryRoot.gameObject.SetActive(true);
         center = compactCenter;
         span = compactSpan;
         markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
