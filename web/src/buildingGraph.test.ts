@@ -5,6 +5,7 @@ import { demoBuilding } from './data.ts';
 import { combineBuilding, ELEVATOR_BOARD_COST, ELEVATOR_STORY_COST, elevatorFloorFit, elevatorStopNear, findBuildingRoute, nodeKey } from './buildingGraph.ts';
 import { fitZone, guessFloors, moveFloor, resolveLayout, toLocal, toWorld } from './zoneAlign.ts';
 import { addZoneConnection, emptyZoneConnections } from './zoneConnections.ts';
+import { floorHeightAt } from './geometry.ts';
 
 const near = (a: number[], b: number[]) => a.every((value, index) => Math.abs(value - b[index]) < 1e-6);
 const zone = (id: string, nodes: Graph['nodes'], edges: [string, string, number][], story = 0): ZoneView => ({
@@ -195,4 +196,12 @@ test('the demo routes from floor 1 east, across the joined zone, and up the elev
   assert.equal(route.ok, true);
   if (!route.ok) return;
   assert.deepEqual(route.transitions.map(item => item.kind), ['continuation', 'elevator']);
+});
+
+test('elevator arrivals stand on the scanned floor, not at phone height', () => {
+  const graph: Graph = { schemaVersion: 1, zoneId: 'z', coordinateSystem: 'arkit-world-meters', heightReference: 'floor', floors: [{ id: 'f', story: 0, elevation: 0, name: 'F' }], nodes: [], edges: [] };
+  const scan: ScanFeatures = { floors: [wallFeature('floor', [10, 10, 0], [0, -1.4, 0], false)], walls: [], doors: [], openings: [], windows: [], objects: [] };
+  assert.equal(floorHeightAt([1, 0, 1], 'f', graph, scan), -1.4);
+  assert.equal(floorHeightAt([30, 0, 30], 'f', graph, scan), -1.4, 'nearest scanned floor when outside every outline');
+  assert.equal(floorHeightAt([1, 0, 1], 'f', graph), 0, 'graph elevation without a scan');
 });

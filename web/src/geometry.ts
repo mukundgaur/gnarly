@@ -70,6 +70,14 @@ export function pointOnFloor(position: [number, number, number], floorId: string
   const floors = scan.floors.filter(item => story == null || item.story == null || item.story === story);
   return floors.some(item => inPolygon(xz(position), floorPolygon(item), .25));
 }
+/** Height of the floor under a point, in the zone's own coordinates. Waypoints sit at phone height, not on the floor. */
+export function floorHeightAt(position: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): number {
+  const floor = graph.floors.find(item => item.id === floorId);
+  const scanned = (scan?.floors || []).filter(item => floor?.story == null || item.story == null || item.story === floor.story);
+  const under = scanned.find(item => inPolygon(xz(position), floorPolygon(item), .25))
+    || [...scanned].sort((a, b) => Math.hypot(a.position[0] - position[0], a.position[2] - position[2]) - Math.hypot(b.position[0] - position[0], b.position[2] - position[2]))[0];
+  return under ? under.position[1] : floor?.elevation ?? 0;
+}
 // Split at every polygon boundary, so short gaps and concave corners cannot be skipped.
 function segmentOnFloors(a: P, b: P, polygons: P[][]): boolean {
   const distance=length(a,b);

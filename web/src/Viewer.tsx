@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import { Box3, BoxGeometry, Color, DoubleSide, FrontSide, Matrix4, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, Shape, ShapeGeometry, SRGBColorSpace, TextureLoader, Vector2, Vector3, type Material, type Texture } from 'three';
 import type { Graph, ScanFeature, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneView } from './data';
 import { elevatorStopNear, zoneEdgeChecks, type BuildingModel, type BuildingNode, type ElevatorStop } from './buildingGraph.ts';
-import { canWalkBetween, pointOnFloor, wallBetween } from './geometry';
+import { canWalkBetween, floorHeightAt, pointOnFloor, wallBetween } from './geometry';
 import { FLOOR_GAP, toLocal, toWorld, type Vec3, type ZoneTransform } from './zoneAlign.ts';
 
 /** position is in the zone's own ARKit coordinates. */
@@ -520,11 +520,13 @@ function WalkCamera({ location, model, onMove, onElevator }: {
   };
   const ride = (direction: 'up' | 'down') => {
     const to = stop.current?.[direction];
-    if (!to) return;
+    const zone = to && latest.current.zones.find(item => item.id === to.zoneId), t = to && latest.current.transforms.get(to.zoneId);
+    if (!to || !zone || !t) return;
     here.current = { zoneId: to.zoneId, floorId: to.floor };
     started.current = to.zoneId + '|' + to.floor;
-    feet.current = to.world;
-    placeCamera(to.world);
+    const ground = floorHeightAt(to.position, to.floor, zone.graph, zone.scan);
+    feet.current = toWorld(t, [to.position[0], ground, to.position[2]]);
+    placeCamera(feet.current);
     report();
   };
   const rideRef = useRef(ride);
