@@ -6,8 +6,8 @@ The mapper produces a local package for the Unity navigator and for navigation-g
 
 ```text
 shared/local-packages/
-  zone-a/
-    worldmap-zone-a.bin
+  floor-1/
+    worldmap-floor-1.bin
     test-anchor.json
     scan.json
     scan-features.json
@@ -16,10 +16,9 @@ shared/local-packages/
     stairs.json
     structure.usdz
     structure-metadata.json
-    surface-colors.json   optional, with surface-colors.jpg
     manifest.json
-  stairs-a/             another zone, same file set
-  zone-connections.json building-level links between zones
+  floor-2/              another floor zone, same file set
+  zone-connections.json building-level elevator links between floors
 ```
 
 `shared/local-packages/` is ignored by Git. It may contain real building imagery/features encoded in ARKit data and should be transferred only to teammates who need it.
@@ -34,8 +33,8 @@ shared/local-packages/
 - `stairs.json`: stair zones, each with its own world map. `prev` / `next` point at the floor below and the floor above. `floorIndex` maps a stair id and direction to the floor that exit lands on. The mapper turns those links into `zone-connections.json`, which is what the navigator loads. Schema: [stairs.schema.json](stairs.schema.json). Example: [examples/stairs.example.json](examples/stairs.example.json).
 - `route.json`: ordered waypoints from recorded nodes, described in [route.schema.json](route.schema.json). See [examples/route.example.json](examples/route.example.json).
 - `structure.usdz` / `structure-metadata.json`: RoomPlan mesh plus identifier mapping for later minimap work.
-- `surface-colors.json` / `surface-colors.jpg` (optional): real-world colors. During the scan the mapper keeps up to 320 camera photos with their poses, then projects them onto every wall, door, window, floor and object face, rejecting occluded samples with LiDAR depth. The JPEG is a texture atlas and the JSON gives each face's atlas rect and average color, keyed by the RoomPlan identifiers in `scan-features.json`. Schema: [surface-colors.schema.json](surface-colors.schema.json). Storage path: `buildings/{buildingId}/{versionId}/zones/{zoneId}/`.
-- `zone-connections.json`: links a node in one zone to a node in another (for example a floor's `stairs-bottom` to a staircase zone's `landing-bottom`). Bidirectional, A* weight 1. Schema: [zone-connections.schema.json](zone-connections.schema.json). Example: [examples/zone-connections.example.json](examples/zone-connections.example.json).
+- `surface-colors.json` / `surface-colors.jpg` (optional): real-world colors projected from camera frames onto RoomPlan faces. Schema: [surface-colors.schema.json](surface-colors.schema.json). Storage path: `buildings/{buildingId}/{versionId}/zones/{zoneId}/`.
+- `zone-connections.json`: links matching elevator nodes in separate floor zones (for example `floor-1/elevator-east` to `floor-2/elevator-east`). Bidirectional, A* weight 1. Schema: [zone-connections.schema.json](zone-connections.schema.json). Example: [examples/zone-connections.example.json](examples/zone-connections.example.json). Legacy stair-zone links remain readable.
 - Positions are in meters in the **restored ARKit world coordinate system** used during capture. Each zone has its own coordinate system, so positions from different zones are never compared.
 - `zoneId` identifies the specific world map. The Unity app must never use an anchor or route from a different zone.
 

@@ -58,23 +58,23 @@ All five files are downloaded to `Application.persistentDataPath/navigation-cach
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.
 
-## Multi-zone routes (floors and stairs)
+## Multi-floor routes
 
-A zone is one scan with its own ARWorldMap; a staircase is its own zone. To route between zones, place each zone's package in its own folder and add `zone-connections.json` ([schema](../shared/zone-connections.schema.json)):
+A building is divided into floor zones. Each floor has its own scan, graph, and ARWorldMap. Matching elevator nodes in those floor files are linked by `zone-connections.json` ([schema](../shared/zone-connections.schema.json)):
 
 ```text
 Assets/StreamingAssets/
   zone-connections.json
   floor-1/   worldmap-floor-1.bin, building.json, scan-features.json, …
-  stairs-a/  worldmap-stairs-a.bin, building.json, …
-  floor-2/   …
+  floor-2/   worldmap-floor-2.bin, building.json, scan-features.json, …
+  floor-3/   …
 ```
 
 The `Zone Id` field on `RelocalizationController` is the zone the user starts in. The app:
 
 1. Builds each zone's graph, merges them under `zoneId/nodeId` keys, and adds every connection as a bidirectional edge with weight 1 (`Pathfinding.ZoneTransferCost`). The A* heuristic is straight-line distance within a zone and 0 across zones, because coordinates from different world maps are not comparable.
 2. Starts A* from the chosen start point, or from the node nearest to you when the start is **My location**. The start must be in the current zone. Destinations can be in any zone; the route planner's list includes places from every zone, labeled with their zone.
-3. Splits the path into one leg per zone and draws only the current leg. On arriving at the leg's connector node, it applies the next zone's world map, shows **Entering &lt;zone&gt;… Look around**, and draws the next leg after relocalizing. **Reset map** relocalizes in the current zone and resumes the route.
+3. Splits the path into one leg per floor and draws only the current leg. On arriving at the elevator connector, it applies the next floor's world map, shows **Entering &lt;zone&gt;… Look around**, and draws the next leg after relocalizing. **Reset map** relocalizes in the current zone and resumes the route. Legacy stair-zone links use the same mechanism.
 
 With Firebase (`useFirebasePackages`, on by default), choosing a scan from the library downloads that zone and also tries every other zone of the same building into the offline cache. Other zones are then read from that cache. Connections are read from `buildings/{buildingId}/{versionId}/zone-connections.json` in Storage when present, otherwise from a bundled `StreamingAssets/zone-connections.json`. A zone that fails to download, for example because its version's `building.json` belongs to another zone, is logged and left out of routing. With Firebase off, every zone is read from `StreamingAssets/<zoneId>/`.
 

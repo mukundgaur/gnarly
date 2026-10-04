@@ -38,7 +38,7 @@
           "id": { "type": "string", "minLength": 1 },
           "floor": { "type": "string", "minLength": 1 },
           "type": {
-            "enum": ["entrance", "hallway", "stairs", "destination", "door", "opening", "waypoint"]
+            "enum": ["entrance", "hallway", "elevator", "stairs", "destination", "door", "opening", "waypoint"]
           },
           "position": {
             "type": "array",

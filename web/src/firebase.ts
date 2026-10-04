@@ -8,8 +8,9 @@ import {
 } from 'firebase/auth';
 import { collection, deleteField, doc, GeoPoint, getDoc, getDocs, getFirestore, onSnapshot, runTransaction, Timestamp, type DocumentData } from 'firebase/firestore';
 import { getDownloadURL, getMetadata, getStorage, ref, uploadBytes } from 'firebase/storage';
-import type { Building, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneView } from './data';
+import type { Building, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneConnections, ZoneView } from './data';
 import { graphDigest } from './graphStore.ts';
+import { emptyZoneConnections, normalizeZoneConnections } from './zoneConnections.ts';
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -37,34 +38,18 @@ async function fetchStorage(path: string): Promise<Response> {
   return response;
 }
 
-export async function fetchStorageJSON(path: string): Promise<unknown> {
-  return (await fetchStorage(path)).json();
-}
+export async function fetchStorageJSON(path: string): Promise<unknown> { return (await fetchStorage(path)).json(); }
 
-/** Optional photo-based colors; a zone without them still renders with the default palette. */
 async function loadSurfaceColors(jsonPath: string, atlasPath: string): Promise<SurfaceColors | undefined> {
   try {
-    const raw = await fetchStorageJSON(jsonPath) as {
-      atlasWidth?: number; atlasHeight?: number;
-      surfaces?: { identifier: string; faces: SurfaceColorFace[] }[];
-    };
+    const raw = await fetchStorageJSON(jsonPath) as { atlasWidth?: number; atlasHeight?: number; surfaces?: { identifier: string; faces: SurfaceColorFace[] }[] };
     if (!Array.isArray(raw.surfaces)) return undefined;
     const surfaces: SurfaceColors['surfaces'] = {};
-    for (const surface of raw.surfaces) {
-      surfaces[surface.identifier] = Object.fromEntries((surface.faces || []).map(face => [face.face, face]));
-    }
+    for (const surface of raw.surfaces) surfaces[surface.identifier] = Object.fromEntries((surface.faces || []).map(face => [face.face, face]));
     let atlasUrl: string | undefined;
-    if (raw.atlasWidth && raw.atlasHeight) {
-      try {
-        atlasUrl = URL.createObjectURL(await (await fetchStorage(atlasPath)).blob());
-      } catch {
-        atlasUrl = undefined;
-      }
-    }
+    if (raw.atlasWidth && raw.atlasHeight) { try { atlasUrl = URL.createObjectURL(await (await fetchStorage(atlasPath)).blob()); } catch { atlasUrl = undefined; } }
     return { atlasUrl, atlasWidth: raw.atlasWidth || 1, atlasHeight: raw.atlasHeight || 1, surfaces };
-  } catch {
-    return undefined;
-  }
+  } catch { return undefined; }
 }
 
 export function normalizeGraph(raw: unknown): Graph {
@@ -144,9 +129,7 @@ export async function loadBuilding(input: Building): Promise<Building> {
       const scanPath = zone.scanFeaturesPath || storageBase + '/zones/' + item.id + '/scan-features.json';
       const scanResult = await loadScan(scanPath);
       const zoneBase = storageBase + '/zones/' + item.id;
-      const colors = scanResult.scan
-        ? await loadSurfaceColors(zone.surfaceColorsPath || zoneBase + '/surface-colors.json', zone.surfaceColorAtlasPath || zoneBase + '/surface-colors.jpg')
-        : undefined;
+      const colors = scanResult.scan ? await loadSurfaceColors(zone.surfaceColorsPath || zoneBase + '/surface-colors.json', zone.surfaceColorAtlasPath || zoneBase + '/surface-colors.jpg') : undefined;
       const scan = scanResult.scan && colors ? { ...scanResult.scan, colors } : scanResult.scan;
       let rawScanStatus = '';
       if (!scan && storage) {
@@ -174,12 +157,21 @@ export async function loadBuilding(input: Building): Promise<Building> {
 
   if (zones.length) {
     const first = zones.find(zone => zone.scan) || zones[0];
+    const zoneConnectionsPath = storageBase + '/zone-connections.json';
+    let zoneConnections = emptyZoneConnections();
+    try { zoneConnections = normalizeZoneConnections(await fetchStorageJSON(zoneConnectionsPath)); }
+    catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'storage/object-not-found') errors.push('zone-connections.json: ' + (error instanceof Error ? error.message : String(error)));
+    }
     return {
       ...input,
       zoneId: first.id,
       zones,
       graph: first.graph,
       scan: first.scan,
+      zoneConnections,
+      zoneConnectionsPath,
       notice: first.scan
         ? 'Showing RoomPlan geometry from zone ' + first.name + '. ' + zones.length + ' zone(s) available.'
         : zones.length + ' zone(s) found, but none has readable scan-features.json. ' + zones.map(zone => zone.id + ': ' + zone.notice).join('; '),
@@ -228,6 +220,21 @@ export async function loadPreviousBuildingVersion(input: Building): Promise<Buil
 
 export type DataRecord = { path: string; data: DocumentData };
 export const canEditFirebase = () => auth?.currentUser?.uid === 'WwvbXcl5hpQgdl8KO79JwcThYJd2';
+
+export async function saveZoneConnections(input: Building, document: ZoneConnections): Promise<ZoneConnections> {
+  if (!db || !storage || !input.activeVersion || !canEditFirebase()) throw Error('The signed-in account cannot edit zone connections.');
+  const normalized = normalizeZoneConnections(document);
+  const path = input.zoneConnectionsPath || 'buildings/' + input.id + '/' + input.activeVersion + '/zone-connections.json';
+  const revision = crypto.randomUUID();
+  await uploadBytes(ref(storage, path), new TextEncoder().encode(JSON.stringify(normalized)), { contentType: 'application/json', cacheControl: 'no-cache' });
+  await runTransaction(db, async transaction => {
+    const versionRef = doc(db!, 'buildings/' + input.id + '/versions/' + input.activeVersion);
+    const current = await transaction.get(versionRef);
+    if (!current.exists()) throw Error('Version metadata is missing.');
+    transaction.update(versionRef, { zoneConnectionsPath: path, webZoneConnectionsRevision: revision });
+  });
+  return normalized;
+}
 
 function displayValue(value: unknown): unknown {
   if (value instanceof Timestamp) return { __type: 'timestamp', value: value.toDate().toISOString() };
@@ -327,13 +334,11 @@ export function createFirebaseGraphStore(input: Building): import('./graphStore.
     subscribe(onChange, onError) {
       let disposed = false;
       let lastRevision = '';
-      let request = 0;
       const check = async () => {
-        const currentRequest=++request;
         try {
           const snapshot = await load();
-          if (!disposed && currentRequest===request && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
-        } catch (error) { if (!disposed && currentRequest===request) onError(error instanceof Error ? error : Error(String(error))); }
+          if (!disposed && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
+        } catch (error) { if (!disposed) onError(error instanceof Error ? error : Error(String(error))); }
       };
       const unsubscribe = onSnapshot(documentRef, () => void check(), error => onError(error));
       const interval = window.setInterval(() => void check(), 15000);
