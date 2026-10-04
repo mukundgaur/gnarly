@@ -12,11 +12,16 @@ enum RoomPlanVisibilityGraph {
         let walls = room.walls.map { Segment.xz(from: $0) }
         let portals = (room.doors + room.openings).map { Segment.xz(from: $0) }
 
+        // The walked path is the surveyed, ordered route. A line-of-sight edge from one of
+        // those samples to a distant portal can bypass several real turns, so only generate
+        // RoomPlan-to-RoomPlan visibility edges here. Sequential walked-path edges are added by
+        // BuildingGraphBuilder below this call.
+        let roomPlanNodes = nodes.filter { $0.source != "walked-path" }
         var edges: [BuildingEdge] = []
-        for i in 0 ..< nodes.count {
-            for j in (i + 1) ..< nodes.count {
-                let a = nodes[i]
-                let b = nodes[j]
+        for i in 0 ..< roomPlanNodes.count {
+            for j in (i + 1) ..< roomPlanNodes.count {
+                let a = roomPlanNodes[i]
+                let b = roomPlanNodes[j]
                 guard a.floor == b.floor else { continue }
                 let meters = distance(a.position, b.position)
                 guard meters > 0.2, meters <= maxEdgeMeters else { continue }

@@ -615,6 +615,11 @@ public static class Pathfinding
                 var from = graph.Node(edge.from);
                 var to = graph.Node(edge.to);
                 if (from == null || to == null) continue;
+                // Older mapper packages could contain long visibility edges that touched a
+                // walked sample. Those shortcuts skip the surveyed bend sequence. Ignore them
+                // so an existing scan follows its recorded walk network without a rescan.
+                if (edge.source == "visibility" && (IsRecordedWalkNode(from) || IsRecordedWalkNode(to)))
+                    continue;
                 // Stair flights change floors and are not a line across this floor's walls.
                 if (IsCrossFloorStair(from, to, edge))
                 {
@@ -724,7 +729,9 @@ public static class Pathfinding
                 // The mapper's sequential walk edges are the proven, traversable route. Adding a
                 // cheaper line-of-sight edge between two of those samples lets A* shortcut across
                 // a room and creates the backwards triangles seen in AR guidance.
-                if (IsRecordedWalkEdge(null, a, b)) continue;
+                // Never add a synthetic straight-line shortcut from a surveyed walk point.
+                // The sequential walked-path graph is the source of truth for navigation turns.
+                if (IsRecordedWalkNode(a) || IsRecordedWalkNode(b)) continue;
                 if (!CanConnect(a, b, walls, portals)) continue;
                 graph.AddEdge(new Edge
                 {

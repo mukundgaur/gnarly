@@ -38,9 +38,7 @@ final class MapperViewModel: ObservableObject {
     private var lastSampledPosition: [Float]?
     private var lastPlanUpdate = Date.distantPast
     private var lastStairCount = 0
-    /// Recorded nodes define the actual walk polyline. Keep them closer than the runtime
-    /// breadcrumbs so turns are captured in the graph rather than approximated across a long edge.
-    private let automaticNodeSpacingMeters: Float = 0.35
+    private let automaticNodeSpacingMeters: Float = 0.75
     private var scanStartedAt: Date?
     private var roomUpdateCount = 0
     private var lastRoomStats = "No captured-room updates yet"
