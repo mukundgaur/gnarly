@@ -244,7 +244,7 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
         guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
         let storagePath = try FirebaseStoragePaths.zoneConnections(buildingId: buildingId, versionId: versionId)
-        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
+        try await uploadData(jsonData, storagePath: storagePath, contentType: "application/json")
         try await cacheUploadedFile(localURL, storagePath: storagePath)
         return storagePath
     }
@@ -329,7 +329,7 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
         guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
         let storagePath = try FirebaseStoragePaths.zoneScanFeatures(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
-        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json")
+        try await uploadData(jsonData, storagePath: storagePath, contentType: "application/json")
         let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
         try await update(["scanFeaturesPath": storagePath], to: zoneRef, operation: "store zone scanFeaturesPath")
         try await cacheUploadedFile(localURL, storagePath: storagePath)
@@ -357,7 +357,7 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         let atlasPath = try FirebaseStoragePaths.zoneSurfaceColorAtlas(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
         let jsonPath = try FirebaseStoragePaths.zoneSurfaceColors(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
         try await uploadFile(atlasURL, storagePath: atlasPath, contentType: "image/jpeg")
-        try await uploadFile(jsonURL, storagePath: jsonPath, contentType: "application/json")
+        try await uploadData(jsonData, storagePath: jsonPath, contentType: "application/json")
         let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
         try await update(["surfaceColorsPath": jsonPath, "surfaceColorAtlasPath": atlasPath], to: zoneRef, operation: "store zone surface color paths")
         try await cacheUploadedFile(jsonURL, storagePath: jsonPath)
