@@ -660,6 +660,13 @@ public class RelocalizationController : MonoBehaviour
             var candidates = navigationGraph.NearestRecordedWalkEndpoints(currentPosition, currentZoneId);
             if (candidates.Count == 0)
                 candidates.Add(navigationGraph.NearestNodeId(currentPosition, currentZoneId));
+            // The website lets a visitor begin from wherever they are in a zone. A camera pose
+            // can briefly contain non-finite values immediately after relocalization, so never
+            // turn that transient pose into "this zone has no navigation points". Fall back to
+            // every graph node in the localized zone and let A* select a reachable start.
+            if (candidates.Count == 0 || candidates.TrueForAll(string.IsNullOrEmpty))
+                foreach (var node in navigationGraph.Nodes)
+                    if (node.zone == currentZoneId) candidates.Add(node.id);
 
             var bestCost = float.MaxValue;
             List<string> bestPath = null;
@@ -669,16 +676,37 @@ public class RelocalizationController : MonoBehaviour
                 if (string.IsNullOrEmpty(candidate)) continue;
                 var candidatePath = Pathfinding.AStar(navigationGraph, candidate, destinationKey);
                 if (candidatePath == null) continue;
-                var cost = HorizontalDistance(currentPosition, Pathfinding.Position(navigationGraph.Node(candidate))) +
-                           PathMeters(candidatePath);
+                var distanceToCandidate = IsFinite(currentPosition)
+                    ? HorizontalDistance(currentPosition, Pathfinding.Position(navigationGraph.Node(candidate)))
+                    : 0f;
+                var cost = distanceToCandidate + PathMeters(candidatePath);
                 if (cost >= bestCost) continue;
                 bestCost = cost;
                 startId = candidate;
                 bestPath = candidatePath;
             }
+            // The closest recorded segment can belong to a disconnected draft fragment. If it
+            // does, try the rest of this zone before declaring the selected destination unroutable.
             if (startId == null)
             {
-                error = $"{currentZoneId} has no navigation points near you.";
+                foreach (var node in navigationGraph.Nodes)
+                {
+                    if (node.zone != currentZoneId) continue;
+                    var candidatePath = Pathfinding.AStar(navigationGraph, node.id, destinationKey);
+                    if (candidatePath == null) continue;
+                    var distanceToCandidate = IsFinite(currentPosition)
+                        ? HorizontalDistance(currentPosition, Pathfinding.Position(node))
+                        : 0f;
+                    var cost = distanceToCandidate + PathMeters(candidatePath);
+                    if (cost >= bestCost) continue;
+                    bestCost = cost;
+                    startId = node.id;
+                    bestPath = candidatePath;
+                }
+            }
+            if (startId == null)
+            {
+                error = $"No connected route from {currentZoneId} to that destination.";
                 return false;
             }
 
@@ -828,6 +856,10 @@ public class RelocalizationController : MonoBehaviour
 
     static float HorizontalDistance(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
 
+    static bool IsFinite(Vector3 value) =>
+        !float.IsNaN(value.x) && !float.IsNaN(value.y) && !float.IsNaN(value.z) &&
+        !float.IsInfinity(value.x) && !float.IsInfinity(value.y) && !float.IsInfinity(value.z);
+
     string NameOf(string key)
     {
         if (key != null && placeNames.TryGetValue(key, out var name)) return name;
@@ -899,7 +931,8 @@ public class RelocalizationController : MonoBehaviour
                 plannerOffset = layout == null
                     ? Vector3.zero
                     : new Vector3(layout.x, layout.floor * 4f, -layout.z),
-                plannerRotationDegrees = layout == null ? 0f : -layout.rotationDegrees
+                plannerRotationDegrees = layout == null ? 0f : -layout.rotationDegrees,
+                colors = SurfaceColors.Load(pair.Value.directory)
             });
         }
         return result;

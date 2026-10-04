@@ -166,7 +166,9 @@ public partial class IndoorMapOverlay
 
         Canvas.ForceUpdateCanvases();
         EnsurePlannerTexture();
-        topDown = true;
+        // Match the website's building overview first; the user can switch to the precise
+        // overhead picker with the 2D/3D control.
+        topDown = false;
         zoom = 1f;
         EnterBuildingPlannerView();
         cameraFocus = userMarker != null && !showingBuildingPlanner ? ClampFocus(userMarker.localPosition) : center;

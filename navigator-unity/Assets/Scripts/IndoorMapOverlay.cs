@@ -64,6 +64,7 @@ public sealed class BuildingMapZone
     public Pathfinding.Graph graph;
     public Vector3 plannerOffset;
     public float plannerRotationDegrees;
+    public SurfaceColors colors;
 }
 
 /// <summary>The controller's A* answer for the planner's current start/destination.</summary>
@@ -310,7 +311,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         return child;
     }
 
-    void BuildScanGeometry(Pathfinding.ScanFeatures scan, Transform target, bool includePhotos)
+    void BuildScanGeometry(Pathfinding.ScanFeatures scan, Transform target, bool includePhotos, SurfaceColors colors = null)
     {
         if (scan == null)
         {
@@ -318,20 +319,36 @@ public partial class IndoorMapOverlay : MonoBehaviour
             return;
         }
 
-        BuildSurfaces(scan.floors, floorMaterial, true, target, includePhotos);
-        BuildSurfaces(scan.walls, wallMaterial, false, target, includePhotos);
-        BuildSurfaces(scan.doors, openingMaterial, false, target, includePhotos);
-        BuildSurfaces(scan.openings, openingMaterial, false, target, includePhotos);
-        BuildSurfaces(scan.windows, openingMaterial, false, target, includePhotos);
-        if (scan.objects != null)
+        var previousColors = surfaceColors;
+        var previousPhotoMaterial = photoMaterial;
+        if (colors != null)
         {
-            foreach (var item in scan.objects)
+            surfaceColors = colors;
+            // Each zone has a different atlas; its photo faces need their own material.
+            photoMaterial = null;
+        }
+        try
+        {
+            BuildSurfaces(scan.floors, floorMaterial, true, target, includePhotos);
+            BuildSurfaces(scan.walls, wallMaterial, false, target, includePhotos);
+            BuildSurfaces(scan.doors, openingMaterial, false, target, includePhotos);
+            BuildSurfaces(scan.openings, openingMaterial, false, target, includePhotos);
+            BuildSurfaces(scan.windows, openingMaterial, false, target, includePhotos);
+            if (scan.objects != null)
             {
-            if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
-            CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
+                foreach (var item in scan.objects)
+                {
+                    if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
+                    CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
                     item.transformColumnMajor, SurfaceMaterial(item.identifier, objectMaterial), false, target);
-                if (includePhotos) AddPhotoFaces(item.identifier, item.position, item.dimensions, item.transformColumnMajor, true, 0f, target);
+                    if (includePhotos) AddPhotoFaces(item.identifier, item.position, item.dimensions, item.transformColumnMajor, true, 0f, target);
+                }
             }
+        }
+        finally
+        {
+            surfaceColors = previousColors;
+            photoMaterial = previousPhotoMaterial;
         }
     }
 
@@ -600,7 +617,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
             var root = Child("Zone-" + zone.id, buildingDiagramRoot);
             root.localPosition = zone.plannerOffset;
             root.localRotation = Quaternion.Euler(0f, zone.plannerRotationDegrees, 0f);
-            if (zone.scan != null) BuildScanGeometry(zone.scan, root, false);
+            if (zone.scan != null) BuildScanGeometry(zone.scan, root, true, zone.colors);
             else if (TryZoneBounds(zone, out var min, out var max))
                 BuildFootprintOutline(root, min, max, MapUi.Accent);
         }
