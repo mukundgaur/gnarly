@@ -179,6 +179,7 @@ public sealed class FirebaseNavigationPackageRepository
             await TryDownloadZoneConnectionsAsync(
                 $"buildings/{buildingId}/{versionId}/zone-connections.json",
                 Path.Combine(staging, "zone-connections.json"));
+            await TryDownloadSurfaceColorsAsync($"buildings/{buildingId}/{versionId}/zones/{zoneId}", staging);
             File.WriteAllText(Path.Combine(staging, "package.json"), JsonUtility.ToJson(new CacheManifest
             {
                 buildingId = buildingId,
@@ -327,6 +328,25 @@ public sealed class FirebaseNavigationPackageRepository
         {
             if (File.Exists(destination)) File.Delete(destination);
             Debug.Log($"[Gnarly] No zone connections at {objectPath}: {exception.Message}");
+        }
+    }
+
+    /// <summary>Photo-based surface colors are optional; without them the minimap keeps its default palette.</summary>
+    async Task TryDownloadSurfaceColorsAsync(string zoneBase, string staging)
+    {
+        var json = Path.Combine(staging, SurfaceColors.JsonFileName);
+        var atlas = Path.Combine(staging, SurfaceColors.AtlasFileName);
+        try
+        {
+            await DownloadStorageObjectAsync($"{zoneBase}/{SurfaceColors.JsonFileName}", json, SurfaceColors.JsonFileName);
+            if (SurfaceColors.Parse(File.ReadAllText(json)) == null) throw new FormatException("unreadable surface colors");
+            await DownloadStorageObjectAsync($"{zoneBase}/{SurfaceColors.AtlasFileName}", atlas, SurfaceColors.AtlasFileName);
+        }
+        catch (Exception exception)
+        {
+            if (File.Exists(json)) File.Delete(json);
+            if (File.Exists(atlas)) File.Delete(atlas);
+            Debug.Log($"[Gnarly] No real surface colors at {zoneBase}: {exception.Message}");
         }
     }
 

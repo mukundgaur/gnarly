@@ -95,6 +95,10 @@ public partial class IndoorMapOverlay : MonoBehaviour
     Material floorMaterial;
     Material openingMaterial;
     Material objectMaterial;
+    SurfaceColors surfaceColors;
+    Material photoMaterial;
+    readonly List<Mesh> photoMeshes = new List<Mesh>();
+    readonly Dictionary<Color32, Material> surfaceMaterials = new Dictionary<Color32, Material>();
     Vector3 center;
     float span = 8f;
     float markerSize = 0.2f;
@@ -131,9 +135,15 @@ public partial class IndoorMapOverlay : MonoBehaviour
         scanJsonPath = scanPath;
     }
 
-    public void Configure(Pathfinding.ScanFeatures scan, Pathfinding.Graph graph, Transform sessionTransform, Camera camera)
+    public void Configure(
+        Pathfinding.ScanFeatures scan,
+        Pathfinding.Graph graph,
+        Transform sessionTransform,
+        Camera camera,
+        SurfaceColors colors = null)
     {
         Clear();
+        surfaceColors = colors;
         sessionSpace = sessionTransform;
         arCamera = camera;
         // The map model lives at true scale in session space; only the map camera may draw it.
@@ -249,12 +259,89 @@ public partial class IndoorMapOverlay : MonoBehaviour
         BuildSurfaces(scan.doors, openingMaterial, false);
         BuildSurfaces(scan.openings, openingMaterial, false);
         BuildSurfaces(scan.windows, openingMaterial, false);
-        if (scan.objects == null) return;
-        foreach (var item in scan.objects)
+        if (scan.objects != null)
         {
-            if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
-            CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
-                item.transformColumnMajor, objectMaterial, false);
+            foreach (var item in scan.objects)
+            {
+                if (!ValidVector(item.position) || !ValidVector(item.dimensions)) continue;
+                CreateScanBox("RoomPlanObject-" + item.category, item.position, item.dimensions,
+                    item.transformColumnMajor, SurfaceMaterial(item.identifier, objectMaterial), false);
+                AddPhotoFaces(item.identifier, item.position, item.dimensions, item.transformColumnMajor, true, 0f);
+            }
+        }
+    }
+
+    /// <summary>The surface's real average color when the mapper baked one; otherwise the default palette.</summary>
+    Material SurfaceMaterial(string identifier, Material fallback)
+    {
+        var average = SurfaceColors.Average(surfaceColors?.Find(identifier));
+        if (average == null) return fallback;
+        Color32 key = average.Value;
+        if (!surfaceMaterials.TryGetValue(key, out var material))
+        {
+            material = MakeMaterial(average.Value);
+            surfaceMaterials[key] = material;
+        }
+        return material;
+    }
+
+    /// <summary>
+    /// Adds photo-textured quads for each baked face. Corners are computed in ARKit space and then
+    /// mirrored with ToUnity, so the handedness flip never touches the UV layout.
+    /// </summary>
+    void AddPhotoFaces(string identifier, float[] position, float[] dimensions, float[] transform, bool solid, float halfDepth)
+    {
+        if (surfaceColors?.atlas == null || transform == null || transform.Length != 16 || dimensions == null || dimensions.Length < 2) return;
+        var surface = surfaceColors.Find(identifier);
+        if (surface?.faces == null) return;
+        var x = new Vector3(transform[0], transform[1], transform[2]).normalized;
+        var y = new Vector3(transform[4], transform[5], transform[6]).normalized;
+        var z = new Vector3(transform[8], transform[9], transform[10]).normalized;
+        var center = new Vector3(position[0], position[1], position[2]);
+        var d = new Vector3(Mathf.Abs(dimensions[0]), Mathf.Abs(dimensions[1]), dimensions.Length > 2 ? Mathf.Abs(dimensions[2]) : 0f);
+        const float lift = 0.004f;
+        foreach (var face in surface.faces)
+        {
+            if (face == null || !face.HasRect) continue;
+            Vector3 offset, u, v;
+            float width, height;
+            switch (face.face)
+            {
+                case "px" when solid: offset = x * (d.x / 2 + lift); u = -z; v = y; width = d.z; height = d.y; break;
+                case "nx" when solid: offset = -x * (d.x / 2 + lift); u = z; v = y; width = d.z; height = d.y; break;
+                case "py" when solid: offset = y * (d.y / 2 + lift); u = x; v = -z; width = d.x; height = d.z; break;
+                case "pz": offset = z * ((solid ? d.z / 2 : halfDepth) + lift); u = x; v = y; width = d.x; height = d.y; break;
+                case "nz": offset = -z * ((solid ? d.z / 2 : halfDepth) + lift); u = -x; v = y; width = d.x; height = d.y; break;
+                default: continue;
+            }
+            if (width < 0.01f || height < 0.01f) continue;
+            // One renderer per face: Sprites/Default skips depth writes, so each face must sort
+            // against the scan boxes by its own center.
+            var faceCenter = center + offset;
+            var vertices = new Vector3[4];
+            var uvs = new Vector2[4];
+            for (var corner = 0; corner < 4; corner++)
+            {
+                var cu = corner == 1 || corner == 2 ? 1f : 0f;
+                var cv = corner >= 2 ? 1f : 0f;
+                var arkit = u * ((cu - 0.5f) * width) + v * ((cv - 0.5f) * height);
+                vertices[corner] = new Vector3(arkit.x, arkit.y, -arkit.z);
+                uvs[corner] = surfaceColors.AtlasUV(face, cu, cv);
+            }
+            var mesh = new Mesh { name = "RoomPlanPhoto-" + face.face, vertices = vertices, uv = uvs, triangles = new[] { 0, 1, 2, 0, 2, 3 } };
+            mesh.RecalculateBounds();
+            photoMeshes.Add(mesh);
+            if (photoMaterial == null)
+            {
+                photoMaterial = MakeMaterial(Color.white);
+                photoMaterial.mainTexture = surfaceColors.atlas;
+            }
+            var photo = new GameObject(mesh.name);
+            photo.transform.SetParent(mapRoot, false);
+            photo.transform.localPosition = new Vector3(faceCenter.x, faceCenter.y, -faceCenter.z);
+            photo.AddComponent<MeshFilter>().sharedMesh = mesh;
+            photo.AddComponent<MeshRenderer>().sharedMaterial = photoMaterial;
+            SetLayer(photo, MapLayer);
         }
     }
 
@@ -278,7 +365,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
                 dimensions[2] = 0.06f;
             }
             CreateScanBox("RoomPlan-" + surface.category, surface.position, dimensions,
-                surface.transformColumnMajor, material, floor);
+                surface.transformColumnMajor, SurfaceMaterial(surface.identifier, material), floor);
+            AddPhotoFaces(surface.identifier, surface.position, surface.dimensions, surface.transformColumnMajor, false, dimensions[2] / 2f);
         }
     }
 
@@ -613,6 +701,13 @@ public partial class IndoorMapOverlay : MonoBehaviour
             if (material != null) Destroy(material);
         materials.Clear();
         markerMaterials.Clear();
+        surfaceMaterials.Clear();
+        photoMaterial = null;
+        foreach (var mesh in photoMeshes)
+            if (mesh != null) Destroy(mesh);
+        photoMeshes.Clear();
+        surfaceColors?.Dispose();
+        surfaceColors = null;
         scaledMarkers.Clear();
         routeLines.Clear();
         mapRoot = null;

@@ -349,6 +349,24 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         return storagePath
     }
 
+    /// Uploads the photo-based surface colors (atlas first, so the JSON never points at a missing image).
+    @discardableResult
+    func uploadZoneSurfaceColors(json jsonURL: URL, atlas atlasURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String {
+        try validateNonemptyFile(jsonURL)
+        try validateNonemptyFile(atlasURL)
+        let jsonData = try Data(contentsOf: jsonURL, options: [.mappedIfSafe])
+        guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
+        let atlasPath = try FirebaseStoragePaths.zoneSurfaceColorAtlas(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
+        let jsonPath = try FirebaseStoragePaths.zoneSurfaceColors(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
+        try await uploadFile(atlasURL, storagePath: atlasPath, contentType: "image/jpeg")
+        try await uploadFile(jsonURL, storagePath: jsonPath, contentType: "application/json")
+        let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
+        try await update(["surfaceColorsPath": jsonPath, "surfaceColorAtlasPath": atlasPath], to: zoneRef, operation: "store zone surface color paths")
+        try await cacheUploadedFile(jsonURL, storagePath: jsonPath)
+        try await cacheUploadedFile(atlasURL, storagePath: atlasPath)
+        return jsonPath
+    }
+
     func fetchActiveVersion(buildingId: String) async throws -> ActiveBuildingVersion {
         try FirebaseStoragePaths.validate(buildingId, field: "buildingId")
         let building: Building = try await fetch(
