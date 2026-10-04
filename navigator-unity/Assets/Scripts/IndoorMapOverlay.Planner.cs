@@ -152,7 +152,7 @@ public partial class IndoorMapOverlay
         {
             if (preview != null && preview.ok && preview.mapRoute != null)
             {
-                var prefix = startKey == null && userMarker != null ? userMarker.localPosition : (Vector3?)null;
+                var prefix = startKey == null && HasUserPosition ? UserMapPosition() : (Vector3?)null;
                 DrawRoute(previewRouteRoot, preview.mapRoute, previewMaterial, 1.1f, prefix);
             }
             else
@@ -193,7 +193,7 @@ public partial class IndoorMapOverlay
         mapPitchDegrees = CompactPitch;
         SetFullscreenMap(false);
         EnterBuildingPlannerView();
-        cameraFocus = userMarker != null && !showingBuildingPlanner ? ClampFocus(userMarker.localPosition) : center;
+        cameraFocus = HasUserPosition && !showingBuildingPlanner ? ClampFocus(UserMapPosition()) : center;
         if (mapCamera != null)
         {
             mapCamera.targetTexture = plannerTexture;
@@ -367,13 +367,14 @@ public partial class IndoorMapOverlay
 
     MapPlace NearestPlaceToUser()
     {
-        if (userMarker == null) return null;
+        if (!HasUserPosition) return null;
+        var user = UserMapPosition();
         MapPlace best = null;
         var bestDistance = float.MaxValue;
         foreach (var place in places)
         {
             if (!place.inCurrentZone) continue;
-            var offset = MapPosition(place) - userMarker.localPosition;
+            var offset = MapPosition(place) - user;
             offset.y = 0f;
             var distance = offset.sqrMagnitude - (place.major ? 0.25f : 0f);
             if (distance < bestDistance)
@@ -438,7 +439,7 @@ public partial class IndoorMapOverlay
         zoom = 1f;
         mapYawDegrees = 0f;
         mapPitchDegrees = CompactPitch;
-        cameraFocus = userMarker != null ? ClampFocus(userMarker.localPosition) : center;
+        cameraFocus = HasUserPosition ? ClampFocus(UserMapPosition()) : center;
     }
 
     void ToggleFullscreenMap() => SetFullscreenMap(!fullscreenMap);

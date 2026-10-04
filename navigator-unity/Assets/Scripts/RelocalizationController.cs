@@ -684,61 +684,13 @@ public class RelocalizationController : MonoBehaviour
         string startId;
         if (startKey == null)
         {
-            var currentPosition = CameraArkitPosition();
-            var candidates = navigationGraph.NearestRecordedWalkEndpoints(currentPosition, currentZoneId);
-            if (candidates.Count == 0)
-                candidates.Add(navigationGraph.NearestNodeId(currentPosition, currentZoneId));
-            // The website lets a visitor begin from wherever they are in a zone. A camera pose
-            // can briefly contain non-finite values immediately after relocalization, so never
-            // turn that transient pose into "this zone has no navigation points". Fall back to
-            // every graph node in the localized zone and let A* select a reachable start.
-            if (candidates.Count == 0 || candidates.TrueForAll(string.IsNullOrEmpty))
-                foreach (var node in navigationGraph.Nodes)
-                    if (node.zone == currentZoneId) candidates.Add(node.id);
-
-            var bestCost = float.MaxValue;
-            List<string> bestPath = null;
-            startId = null;
-            foreach (var candidate in candidates)
-            {
-                if (string.IsNullOrEmpty(candidate)) continue;
-                var candidatePath = Pathfinding.AStar(navigationGraph, candidate, destinationKey);
-                if (candidatePath == null) continue;
-                var distanceToCandidate = IsFinite(currentPosition)
-                    ? HorizontalDistance(currentPosition, Pathfinding.Position(navigationGraph.Node(candidate)))
-                    : 0f;
-                var cost = distanceToCandidate + PathMeters(candidatePath);
-                if (cost >= bestCost) continue;
-                bestCost = cost;
-                startId = candidate;
-                bestPath = candidatePath;
-            }
-            // The closest recorded segment can belong to a disconnected draft fragment. If it
-            // does, try the rest of this zone before declaring the selected destination unroutable.
-            if (startId == null)
-            {
-                foreach (var node in navigationGraph.Nodes)
-                {
-                    if (node.zone != currentZoneId) continue;
-                    var candidatePath = Pathfinding.AStar(navigationGraph, node.id, destinationKey);
-                    if (candidatePath == null) continue;
-                    var distanceToCandidate = IsFinite(currentPosition)
-                        ? HorizontalDistance(currentPosition, Pathfinding.Position(node))
-                        : 0f;
-                    var cost = distanceToCandidate + PathMeters(candidatePath);
-                    if (cost >= bestCost) continue;
-                    bestCost = cost;
-                    startId = node.id;
-                    bestPath = candidatePath;
-                }
-            }
+            startId = BestAutomaticStart(destinationKey);
             if (startId == null)
             {
                 error = $"No connected route from {currentZoneId} to that destination.{UnreachableZoneHint(destinationKey)}";
                 return false;
             }
-
-            path = bestPath;
+            path = Pathfinding.AStar(navigationGraph, startId, destinationKey);
         }
         else
         {
@@ -774,6 +726,42 @@ public class RelocalizationController : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// The node in this zone where joining the route is cheapest: the straight walk to it plus the
+    /// route from it. Points you can walk to without crossing a wall win, so the route joins just
+    /// ahead of you instead of behind you or through the next room. Walking far off the graph
+    /// costs extra. Returns null when nothing in this zone reaches the destination.
+    /// </summary>
+    string BestAutomaticStart(string destinationKey)
+    {
+        const float nearMeters = 3f;
+        const float farApproachFactor = 3f;
+        var position = CameraArkitPosition();
+        // The pose can be non-finite right after relocalization; then only the route cost counts.
+        var poseKnown = IsFinite(position);
+        var costs = Pathfinding.CostsTo(navigationGraph, destinationKey);
+        var walls = zonePackages.TryGetValue(currentZoneId, out var package) ? package.graph?.Walls : null;
+        var here = new Vector2(position.x, position.z);
+
+        string bestClear = null, bestAny = null;
+        float bestClearCost = float.MaxValue, bestAnyCost = float.MaxValue;
+        foreach (var node in navigationGraph.Nodes)
+        {
+            if (node.zone != currentZoneId || node.position?.Length != 3) continue;
+            if (!costs.TryGetValue(node.id, out var remaining)) continue;
+            var approach = poseKnown ? HorizontalDistance(position, Pathfinding.Position(node)) : 0f;
+            var cost = remaining + (approach <= nearMeters ? approach : nearMeters + (approach - nearMeters) * farApproachFactor);
+            if (cost < bestAnyCost) { bestAnyCost = cost; bestAny = node.id; }
+            if (cost < bestClearCost && (!poseKnown ||
+                Pathfinding.IsClear(here, new Vector2(node.position[0], node.position[2]), walls, null)))
+            {
+                bestClearCost = cost;
+                bestClear = node.id;
+            }
+        }
+        return bestClear ?? bestAny;
+    }
+
     /// <summary>Explains a cross-zone failure: the destination's zone has no usable link, or its connector is cut off.</summary>
     string UnreachableZoneHint(string destinationKey)
     {
@@ -796,14 +784,6 @@ public class RelocalizationController : MonoBehaviour
             : $" {destinationZone} is linked through {NameOf(linked)}, but an elevator or connector is cut off from the walkable path on one of the floors. Connect each to a walkable waypoint on the website.";
         Debug.LogWarning("[Gnarly] Route to " + destinationKey + " failed." + message);
         return message;
-    }
-
-    float PathMeters(List<string> nodeIds)
-    {
-        var meters = 0f;
-        for (var i = 1; i < nodeIds.Count; i++)
-            meters += EdgeMeters(nodeIds[i - 1], nodeIds[i]);
-        return meters;
     }
 
     float EdgeMeters(string from, string to)

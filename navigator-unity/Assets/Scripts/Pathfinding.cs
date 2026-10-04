@@ -12,6 +12,9 @@ using UnityEngine;
 public static class Pathfinding
 {
     public const float MaxEdgeMeters = 18f;
+    /// <summary>Longest wall-clear link added from a recorded walk sample to another node.</summary>
+    public const float WalkLinkMeters = 3f;
+    public const float WalkLinkCostFactor = 1.1f;
     public const float MinEdgeMeters = 0.2f;
     /// <summary>How far past a door or opening a line may cross that opening's wall.</summary>
     public const float PortalMatchMeters = 0.15f;
@@ -171,6 +174,7 @@ public static class Pathfinding
         public readonly HashSet<string> DeviceHeightZones = new HashSet<string>();
         readonly Dictionary<string, List<Edge>> adjacency = new Dictionary<string, List<Edge>>();
         readonly Dictionary<string, Node> nodesById = new Dictionary<string, Node>();
+        readonly HashSet<string> edgeKeys = new HashSet<string>();
 
         public Node Node(string id) =>
             id != null && nodesById.TryGetValue(id, out var node) ? node : null;
@@ -187,11 +191,8 @@ public static class Pathfinding
 
         public void AddEdge(Edge edge)
         {
-            foreach (var existing in Edges)
-            {
-                if (existing.from == edge.from && existing.to == edge.to) return;
-                if (existing.from == edge.to && existing.to == edge.from) return;
-            }
+            var key = string.CompareOrdinal(edge.from, edge.to) <= 0 ? edge.from + "\n" + edge.to : edge.to + "\n" + edge.from;
+            if (!edgeKeys.Add(key)) return;
 
             Edges.Add(edge);
             AddAdjacency(edge.from, edge);
@@ -232,41 +233,6 @@ public static class Pathfinding
                 }
             }
             return nearest;
-        }
-
-        /// <summary>
-        /// Returns the two nodes at the ends of the recorded path segment nearest to the user.
-        /// They are candidates for an automatic route start; A* decides which direction reaches
-        /// the selected destination without first sending the user back along the segment.
-        /// </summary>
-        public List<string> NearestRecordedWalkEndpoints(Vector3 arkitPosition, string zone)
-        {
-            Edge closestEdge = null;
-            var closestDistanceSquared = float.MaxValue;
-            var flatPosition = new Vector2(arkitPosition.x, arkitPosition.z);
-
-            foreach (var edge in Edges)
-            {
-                var from = Node(edge.from);
-                var to = Node(edge.to);
-                if (from == null || to == null || from.zone != zone || to.zone != zone) continue;
-                if (!IsRecordedWalkEdge(edge, from, to)) continue;
-
-                var a = Xz(from.position);
-                var b = Xz(to.position);
-                var segment = b - a;
-                var lengthSquared = segment.sqrMagnitude;
-                if (lengthSquared < 1e-6f) continue;
-                var t = Mathf.Clamp01(Vector2.Dot(flatPosition - a, segment) / lengthSquared);
-                var distanceSquared = (flatPosition - (a + segment * t)).sqrMagnitude;
-                if (distanceSquared >= closestDistanceSquared) continue;
-                closestDistanceSquared = distanceSquared;
-                closestEdge = edge;
-            }
-
-            return closestEdge == null
-                ? new List<string>()
-                : new List<string> { closestEdge.from, closestEdge.to };
         }
 
         public List<Node> Destinations() =>
@@ -625,7 +591,6 @@ public static class Pathfinding
         var portals = BuildPortals(scan?.doors, scan?.openings);
         CloseCornerGaps(walls, portals);
         graph.Walls.AddRange(walls);
-        ConnectVisibility(graph, walls, portals);
 
         var dropped = 0;
         var trustedOverScan = 0;
@@ -665,6 +630,8 @@ public static class Pathfinding
             }
         }
 
+        // After building.json, so a recorded edge is not replaced by a synthetic one for the same pair.
+        ConnectVisibility(graph, walls, portals);
         ConnectIsolatedConnectors(graph, walls, portals);
 
         if (scan?.walls != null && scan.walls.Length > 0 && graph.Walls.Count == 0)
@@ -758,19 +725,21 @@ public static class Pathfinding
             {
                 var a = graph.Nodes[i];
                 var b = graph.Nodes[j];
-                // The mapper's sequential walk edges are the proven, traversable route. Adding a
-                // cheaper line-of-sight edge between two of those samples lets A* shortcut across
-                // a room and creates the backwards triangles seen in AR guidance.
-                // Never add a synthetic straight-line shortcut from a surveyed walk point.
-                // The sequential walked-path graph is the source of truth for navigation turns.
-                if (IsRecordedWalkNode(a) || IsRecordedWalkNode(b)) continue;
+                // Long line-of-sight shortcuts from walk samples cut across rooms and made the
+                // backwards triangles seen in AR guidance. Short wall-clear links are kept: they
+                // join passes of the walk that ran side by side, and join the walk to doors and
+                // places, so a route need not retrace every back-and-forth of the mapping session.
+                var touchesWalk = IsRecordedWalkNode(a) || IsRecordedWalkNode(b);
+                var meters = Vector3.Distance(Position(a), Position(b));
+                if (touchesWalk && meters > WalkLinkMeters) continue;
                 if (!CanConnect(a, b, walls, portals)) continue;
                 graph.AddEdge(new Edge
                 {
                     from = a.id,
                     to = b.id,
                     kind = a.type == "stairs" && b.type == "stairs" ? "stairs" : "hallway",
-                    meters = Vector3.Distance(Position(a), Position(b)),
+                    // Slightly prefer the recorded walk when it is as short.
+                    meters = touchesWalk ? meters * WalkLinkCostFactor : meters,
                     source = "visibility"
                 });
             }
@@ -970,6 +939,59 @@ public static class Pathfinding
         }
 
         return null;
+    }
+
+    /// <summary>Route cost from every reachable node to <paramref name="goalId"/> (Dijkstra; edges are two-way).</summary>
+    public static Dictionary<string, float> CostsTo(Graph graph, string goalId)
+    {
+        var costs = new Dictionary<string, float>();
+        if (graph?.Node(goalId) == null) return costs;
+        var heap = new List<(float cost, string id)>();
+        void Push(float cost, string id)
+        {
+            heap.Add((cost, id));
+            for (var i = heap.Count - 1; i > 0;)
+            {
+                var parent = (i - 1) / 2;
+                if (heap[parent].cost <= heap[i].cost) break;
+                (heap[parent], heap[i]) = (heap[i], heap[parent]);
+                i = parent;
+            }
+        }
+        (float cost, string id) Pop()
+        {
+            var top = heap[0];
+            heap[0] = heap[heap.Count - 1];
+            heap.RemoveAt(heap.Count - 1);
+            for (var i = 0; ;)
+            {
+                var smallest = i;
+                var left = i * 2 + 1;
+                var right = left + 1;
+                if (left < heap.Count && heap[left].cost < heap[smallest].cost) smallest = left;
+                if (right < heap.Count && heap[right].cost < heap[smallest].cost) smallest = right;
+                if (smallest == i) break;
+                (heap[smallest], heap[i]) = (heap[i], heap[smallest]);
+                i = smallest;
+            }
+            return top;
+        }
+
+        costs[goalId] = 0f;
+        Push(0f, goalId);
+        while (heap.Count > 0)
+        {
+            var (cost, id) = Pop();
+            if (cost > costs[id]) continue;
+            foreach (var edge in graph.Neighbors(id))
+            {
+                var next = cost + edge.meters;
+                if (costs.TryGetValue(edge.to, out var known) && next >= known) continue;
+                costs[edge.to] = next;
+                Push(next, edge.to);
+            }
+        }
+        return costs;
     }
 
     public static Route ToRoute(Graph graph, List<string> nodeIds, string zoneId)

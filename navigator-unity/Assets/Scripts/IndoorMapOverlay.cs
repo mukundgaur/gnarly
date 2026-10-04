@@ -253,14 +253,26 @@ public partial class IndoorMapOverlay : MonoBehaviour
             compactCaption.text = string.IsNullOrEmpty(caption) ? "MAP  ·  TAP TO PLAN A ROUTE" : caption;
     }
 
-    void Update()
+    /// <summary>
+    /// The user's position in the map's current presentation. Computed from the camera, not read
+    /// from the marker, which only follows on the next frame after the map changes coordinates.
+    /// </summary>
+    Vector3 UserMapPosition()
     {
-        if (userMarker == null || sessionSpace == null || arCamera == null) return;
         var position = sessionSpace.InverseTransformPoint(arCamera.transform.position);
         var localMapPosition = new Vector3(position.x, FloorHeight(position.y), position.z);
-        userMarker.localPosition = showingBuildingPlanner
+        return showingBuildingPlanner
             ? Quaternion.Euler(0f, currentZonePlannerRotation, 0f) * localMapPosition + currentZonePlannerOffset
             : localMapPosition;
+    }
+
+    bool HasUserPosition => userMarker != null && sessionSpace != null && arCamera != null;
+
+    void Update()
+    {
+        if (!HasUserPosition) return;
+        var position = sessionSpace.InverseTransformPoint(arCamera.transform.position);
+        userMarker.localPosition = UserMapPosition();
 #if UNITY_IOS && !UNITY_EDITOR
         // RoomPlan/USDZ uses ARKit's right-handed Z axis; Unity mirrors Z on import.
         GnarlyUpdateRoomModelPosition(position.x, position.y, -position.z);

@@ -53,13 +53,24 @@ public class RouteNavigator : MonoBehaviour
         material = new Material(Shader.Find("Sprites/Default"));
         BuildPath();
         targetIndex = NextWaypointAfterClosestPathPoint(arCamera.transform.position);
+        UpdateMarkers();
     }
 
     public void SetVisible(bool isVisible)
     {
         visible = isVisible;
         if (line != null) line.enabled = isVisible;
-        foreach (var marker in markers) marker.SetActive(isVisible);
+        UpdateMarkers();
+    }
+
+    /// <summary>Breadcrumbs behind the user are hidden so only the way ahead is drawn.</summary>
+    void UpdateMarkers()
+    {
+        for (var i = 0; i < markers.Count; i++)
+        {
+            var show = visible && i >= targetIndex;
+            if (markers[i].activeSelf != show) markers[i].SetActive(show);
+        }
     }
 
     /// <summary>
@@ -92,6 +103,7 @@ public class RouteNavigator : MonoBehaviour
 
         var cameraPosition = arCamera.transform.position;
         AdvanceTarget(cameraPosition);
+        UpdateMarkers();
         UpdateLine(cameraPosition);
         UpdateStatus(cameraPosition);
 
