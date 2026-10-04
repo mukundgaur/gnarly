@@ -57,6 +57,8 @@ public class LidarPulseView : MonoBehaviour
     [SerializeField] float nearDistance = 0.45f;
     [Tooltip("LiDAR distance (m) that maps to the mildest pulse. Closer obstacles pulse harder and faster.")]
     [SerializeField] float farDistance = 3.2f;
+    [Tooltip("Valid LiDAR returns required in the walking corridor before it is treated as an obstacle. This filters isolated depth noise.")]
+    [SerializeField, Range(1, 30)] int minimumBlockingHits = 5;
 
     const float PathStartSkip = 0.2f;
 
@@ -418,7 +420,8 @@ public class LidarPulseView : MonoBehaviour
 
     /// <summary>
     /// Classifies one LiDAR return against the route corridor. Floor and ceiling are ignored;
-    /// a solid return in the walking lane starts the obstacle pulse, and closer returns raise it.
+    /// a small cluster of solid returns in the walking lane starts the obstacle pulse, and closer
+    /// returns raise it. Requiring a cluster filters single noisy LiDAR points.
     /// </summary>
     void ConsiderPathObstacle(Vector3 world, float depth)
     {
@@ -467,7 +470,7 @@ public class LidarPulseView : MonoBehaviour
     void PublishObstacleIntensity(bool hasPath)
     {
         lastObstacleSampleAt = Time.unscaledTime;
-        obstacleDetected = hasPath && blockingHits > 0;
+        obstacleDetected = hasPath && blockingHits >= minimumBlockingHits;
         targetIntensity = obstacleDetected
             ? ObstacleCloseness(blockingHits, closenessSum, peakCloseness)
             : 0f;

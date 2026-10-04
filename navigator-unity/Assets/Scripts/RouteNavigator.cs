@@ -73,9 +73,11 @@ public class RouteNavigator : MonoBehaviour
         if (toTarget.sqrMagnitude < 0.01f || forward.sqrMagnitude < 0.01f) return false;
 
         var angle = Vector3.Angle(forward, toTarget);
-        // A little cue starts within roughly 50 degrees. It becomes clear inside 15 degrees,
-        // leaving enough tolerance for natural hand movement while walking.
-        alignment = Mathf.InverseLerp(58f, 12f, angle);
+        // Keep the compass nearly silent until the phone is genuinely aimed along the route.
+        // Squaring the narrow heading window creates a clear tactile "lock" only near the
+        // correct direction, without asking the user to hold the phone perfectly still.
+        var withinHeadingWindow = Mathf.InverseLerp(42f, 8f, angle);
+        alignment = withinHeadingWindow * withinHeadingWindow;
         return alignment > 0.01f;
     }
 
