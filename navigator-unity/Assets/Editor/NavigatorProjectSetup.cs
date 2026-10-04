@@ -24,7 +24,7 @@ using UnityEngine.XR.Management;
 public static class NavigatorProjectSetup
 {
     const string ScenePath = "Assets/Scenes/Navigator.unity";
-    const string BundleId = "com.grantlin.gnarly.navigator";
+    const string BundleId = "com.gnarly.navigator";
     const string ARKitLoaderType = "UnityEngine.XR.ARKit.ARKitLoader";
     static readonly string[] RendererPaths = { "Assets/Settings/Mobile_Renderer.asset", "Assets/Settings/PC_Renderer.asset" };
 

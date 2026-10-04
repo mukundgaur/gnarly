@@ -67,7 +67,8 @@ public class RelocalizationController : MonoBehaviour
     Route fallbackRoute;
     [Header("Guidance")]
     [Tooltip("Maximum gap between runtime route targets. Graph and map selection nodes remain unchanged.")]
-    [SerializeField, Range(0.2f, 1f)] float guidanceWaypointSpacingMeters = 0.45f;
+    [SerializeField, Range(0.1f, 1f)] float guidanceWaypointSpacingMeters = 0.2f;
+    Vector3? automaticRouteStartPosition;
     string currentZoneId;
     bool navigationLoaded;
     readonly Dictionary<string, ZonePackage> zonePackages = new Dictionary<string, ZonePackage>();
@@ -487,6 +488,7 @@ public class RelocalizationController : MonoBehaviour
 
         selectedStartKey = startKey;
         selectedDestinationKey = destinationKey;
+        automaticRouteStartPosition = startKey == null ? CameraArkitPosition() : null;
         indoorMap?.SetSelection(startKey, destinationKey);
         indoorMap?.SetNavigationActive(true);
         indoorMap?.SetCompactCaption($"TO {NameOf(destinationKey).ToUpperInvariant()}  ·  TAP TO CHANGE");
@@ -523,12 +525,33 @@ public class RelocalizationController : MonoBehaviour
         string startId;
         if (startKey == null)
         {
-            startId = navigationGraph.NearestNodeId(CameraArkitPosition(), currentZoneId);
+            var currentPosition = CameraArkitPosition();
+            var candidates = navigationGraph.NearestRecordedWalkEndpoints(currentPosition, currentZoneId);
+            if (candidates.Count == 0)
+                candidates.Add(navigationGraph.NearestNodeId(currentPosition, currentZoneId));
+
+            var bestCost = float.MaxValue;
+            List<string> bestPath = null;
+            startId = null;
+            foreach (var candidate in candidates)
+            {
+                if (string.IsNullOrEmpty(candidate)) continue;
+                var candidatePath = Pathfinding.AStar(navigationGraph, candidate, destinationKey);
+                if (candidatePath == null) continue;
+                var cost = HorizontalDistance(currentPosition, Pathfinding.Position(navigationGraph.Node(candidate))) +
+                           PathMeters(candidatePath);
+                if (cost >= bestCost) continue;
+                bestCost = cost;
+                startId = candidate;
+                bestPath = candidatePath;
+            }
             if (startId == null)
             {
                 error = $"{currentZoneId} has no navigation points near you.";
                 return false;
             }
+
+            path = bestPath;
         }
         else
         {
@@ -554,13 +577,29 @@ public class RelocalizationController : MonoBehaviour
             return false;
         }
 
-        path = Pathfinding.AStar(navigationGraph, startId, destinationKey);
+        if (path == null)
+            path = Pathfinding.AStar(navigationGraph, startId, destinationKey);
         if (path == null)
         {
             error = $"No walkable path from {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}. Try another point.";
             return false;
         }
         return true;
+    }
+
+    float PathMeters(List<string> nodeIds)
+    {
+        var meters = 0f;
+        for (var i = 1; i < nodeIds.Count; i++)
+        {
+            foreach (var edge in navigationGraph.Neighbors(nodeIds[i - 1]))
+            {
+                if (edge.to != nodeIds[i]) continue;
+                meters += edge.meters;
+                break;
+            }
+        }
+        return meters;
     }
 
     RoutePreview PreviewRoute(string startKey, string destinationKey)
@@ -709,12 +748,36 @@ public class RelocalizationController : MonoBehaviour
         }
 
         var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+        if (activeLegIndex == 0 && automaticRouteStartPosition.HasValue)
+            route = PrependAutomaticStart(route, automaticRouteStartPosition.Value);
         navigator.Begin(GuidanceRoute(route), origin.TrackablesParent, origin.Camera);
         indoorMap?.SetRoute(route);
         SetStatus(LegStatus());
     }
 
     Route GuidanceRoute(Route route) => Pathfinding.DensifyRoute(route, guidanceWaypointSpacingMeters);
+
+    static Route PrependAutomaticStart(Route route, Vector3 arkitPosition)
+    {
+        if (route?.waypoints == null || route.waypoints.Length == 0) return route;
+        var waypoints = new Route.Waypoint[route.waypoints.Length + 1];
+        // Keep the guidance polyline on the map's established floor height; only X/Z come from
+        // the live camera pose.
+        waypoints[0] = new Route.Waypoint
+        {
+            id = Route.GuidanceWaypointPrefix + "live-start",
+            position = new[] { arkitPosition.x, route.waypoints[0].position[1], arkitPosition.z }
+        };
+        Array.Copy(route.waypoints, 0, waypoints, 1, route.waypoints.Length);
+        return new Route
+        {
+            schemaVersion = route.schemaVersion,
+            zoneId = route.zoneId,
+            coordinateSystem = route.coordinateSystem,
+            heightReference = route.heightReference,
+            waypoints = waypoints
+        };
+    }
 
     string LegStatus()
     {
