@@ -168,7 +168,8 @@ public partial class IndoorMapOverlay
         EnsurePlannerTexture();
         topDown = true;
         zoom = 1f;
-        cameraFocus = userMarker != null ? ClampFocus(userMarker.localPosition) : center;
+        EnterBuildingPlannerView();
+        cameraFocus = userMarker != null && !showingBuildingPlanner ? ClampFocus(userMarker.localPosition) : center;
         if (mapCamera != null)
         {
             mapCamera.targetTexture = plannerTexture;
@@ -188,6 +189,7 @@ public partial class IndoorMapOverlay
         if (compactCard != null) compactCard.gameObject.SetActive(true);
         topDown = compactTopDown;
         zoom = 1f;
+        ExitBuildingPlannerView();
         if (mapCamera != null)
         {
             mapCamera.targetTexture = compactTexture;
@@ -365,8 +367,8 @@ public partial class IndoorMapOverlay
         var bestScore = float.MaxValue;
         foreach (var place in places)
         {
-            if (!place.inCurrentZone) continue;
-            var projected = mapCamera.WorldToViewportPoint(sessionSpace.TransformPoint(MarkerPosition(place)));
+            if (!place.inCurrentZone && (!showingBuildingPlanner || !place.hasPlannerPosition)) continue;
+            var projected = mapCamera.WorldToViewportPoint(MapPosition(place));
             if (projected.z < 0f) continue;
             var pixels = Vector2.Scale(new Vector2(projected.x - viewport.x, projected.y - viewport.y), size).magnitude;
             if (pixels > PickRadius) continue;
@@ -401,7 +403,44 @@ public partial class IndoorMapOverlay
         cameraFocus = userMarker != null ? ClampFocus(userMarker.localPosition) : center;
     }
 
-    void FocusOn(MapPlace place) => cameraFocus = ClampFocus(place.sessionPosition);
+    void FocusOn(MapPlace place) => cameraFocus = ClampFocus(MapPosition(place));
+
+    void EnterBuildingPlannerView()
+    {
+        showingBuildingPlanner = places.Exists(place => !place.inCurrentZone && place.hasPlannerPosition);
+        if (!showingBuildingPlanner) return;
+
+        compactCenter = center;
+        compactSpan = span;
+        var points = new List<Vector3>();
+        foreach (var place in places)
+            if (place.hasPlannerPosition) points.Add(place.plannerPosition);
+        if (points.Count == 0) return;
+        var min = points[0];
+        var max = points[0];
+        foreach (var point in points)
+        {
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+        center = (min + max) * 0.5f;
+        span = Mathf.Max(4f, Mathf.Max(max.x - min.x, max.z - min.z) + 3f);
+        center.y = min.y;
+        markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
+        lineWidth = Mathf.Clamp(span * 0.012f, 0.07f, 0.24f);
+        BuildPlaceMarkers(places);
+    }
+
+    void ExitBuildingPlannerView()
+    {
+        if (!showingBuildingPlanner) return;
+        showingBuildingPlanner = false;
+        center = compactCenter;
+        span = compactSpan;
+        markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
+        lineWidth = Mathf.Clamp(span * 0.012f, 0.07f, 0.24f);
+        BuildPlaceMarkers(places);
+    }
 
     Vector3 ClampFocus(Vector3 focus)
     {
@@ -459,7 +498,7 @@ public partial class IndoorMapOverlay
             var isWaypoint = label.place.key == ActiveFloorWaypoint();
             var selected = label.place.key == startKey || label.place.key == destinationKey || isWaypoint;
             var showLabel = label.place.major || selected;
-            var viewport = mapCamera.WorldToViewportPoint(sessionSpace.TransformPoint(MarkerPosition(label.place)));
+            var viewport = mapCamera.WorldToViewportPoint(MapPosition(label.place));
             var visible = showLabel && viewport.z > 0f && viewport.x > 0.02f && viewport.x < 0.98f && viewport.y > 0.02f && viewport.y < 0.95f;
             label.rect.gameObject.SetActive(visible);
             if (!visible) continue;
@@ -481,9 +520,10 @@ public partial class IndoorMapOverlay
             var destinationOnMap = key != null && placesByKey.TryGetValue(key, out var destination) && destination.inCurrentZone;
             if (!destinationOnMap) key = ActiveFloorWaypoint();
         }
-        var visible = key != null && placesByKey.TryGetValue(key, out var place) && place.inCurrentZone;
+        var visible = key != null && placesByKey.TryGetValue(key, out var place) &&
+            (place.inCurrentZone || (showingBuildingPlanner && place.hasPlannerPosition));
         pin.gameObject.SetActive(visible);
-        if (visible) pin.localPosition = MarkerPosition(placesByKey[key]) + Vector3.up * 0.05f;
+        if (visible) pin.localPosition = MapPosition(placesByKey[key]) + Vector3.up * 0.05f;
     }
 
     /// <summary>

@@ -270,8 +270,15 @@ public sealed partial class FirebaseNavigationPackageLoader
             buildingId = scan.BuildingId;
             zoneId = scan.ZoneId;
             RefreshCacheState();
-            BuildContent();
-            RefreshUi();
+            // A floor row means "I am here". Do not make the user select it, then press a
+            // second button before ARKit can start localizing.
+            if (onlineMapsAvailable && publishedLibrary != null &&
+                publishedLibrary.Exists(item => item.BuildingId == scan.BuildingId && item.ZoneId == scan.ZoneId))
+                _ = DownloadSelectionAsync(scan);
+            else if (repository.TryGetCachedPackage(scan.BuildingId, scan.ZoneId, out var package))
+                Complete(package, null, null);
+            else
+                SetStatus("That zone is not downloaded yet. Check the connection and try again.");
         });
         var floorName = FloorDisplay(scan);
         var title = MapUi.Label(MapUi.Rect("FloorName", row, new Vector2(0, 1), Vector2.one,

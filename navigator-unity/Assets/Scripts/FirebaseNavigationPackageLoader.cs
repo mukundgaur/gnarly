@@ -117,8 +117,9 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
             SetStatus($"Downloading {buildingId}/{zoneId}…");
             var package = await repository.DownloadActivePackageAsync(buildingId, zoneId);
             await DownloadOtherZonesAsync(scan);
-            busy = false;
-            PrepareRouteChoice(package);
+            // The selected zone is the user's physical starting area. Go straight to ARKit
+            // relocalization; the post-location minimap is the destination picker.
+            Complete(package, null, null);
         }
         catch (Exception exception)
         {
@@ -163,7 +164,7 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     {
         RememberSelection();
         if (repository.TryGetCachedPackage(buildingId, zoneId, out var package))
-            PrepareRouteChoice(package);
+            Complete(package, null, null);
         else
             SetStatus("No complete cached package exists for this building and zone.");
     }

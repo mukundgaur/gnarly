@@ -32,6 +32,24 @@ public class RelocalizationController : MonoBehaviour
         public Pathfinding.Graph graph;
     }
 
+    // Matches the website's building-layout.json. It is presentation metadata only: each zone's
+    // saved ARWorldMap remains in its own coordinate system.
+    [Serializable]
+    sealed class BuildingLayoutDocument
+    {
+        public ZoneLayout[] zones;
+    }
+
+    [Serializable]
+    sealed class ZoneLayout
+    {
+        public string zoneId;
+        public int floor;
+        public float x;
+        public float z;
+        public float rotationDegrees;
+    }
+
     [Serializable]
     sealed class IndoorMapRouteRequest
     {
@@ -72,6 +90,7 @@ public class RelocalizationController : MonoBehaviour
     string currentZoneId;
     bool navigationLoaded;
     readonly Dictionary<string, ZonePackage> zonePackages = new Dictionary<string, ZonePackage>();
+    readonly Dictionary<string, ZoneLayout> buildingLayout = new Dictionary<string, ZoneLayout>();
     /// <summary>All zones, keyed by <see cref="Pathfinding.ZoneKey"/>, joined by zone connections.</summary>
     Pathfinding.Graph navigationGraph;
     List<Pathfinding.RouteLeg> activeLegs;
@@ -241,6 +260,7 @@ public class RelocalizationController : MonoBehaviour
     void LoadNavigationData()
     {
         zonePackages.Clear();
+        LoadBuildingLayout();
         var connectionsPath = ZoneConnectionsPath;
         var connections = File.Exists(connectionsPath)
             ? Pathfinding.ParseConnections(File.ReadAllText(connectionsPath))
@@ -297,6 +317,29 @@ public class RelocalizationController : MonoBehaviour
         navigationLoaded = true;
         Debug.Log($"[Gnarly] Navigation zones loaded: {string.Join(", ", zonePackages.Keys)}; " +
                   $"{connections?.connections.Length ?? 0} zone connection(s).");
+    }
+
+    void LoadBuildingLayout()
+    {
+        buildingLayout.Clear();
+        // Firebase places this alongside the selected zone package. A bundled version is also
+        // supported for offline test packages.
+        var layoutPath = packageDirectory != null
+            ? Path.Combine(packageDirectory, "building-layout.json")
+            : Path.Combine(Application.streamingAssetsPath, "building-layout.json");
+        if (!File.Exists(layoutPath)) return;
+        try
+        {
+            var document = JsonUtility.FromJson<BuildingLayoutDocument>(File.ReadAllText(layoutPath));
+            if (document?.zones == null) return;
+            foreach (var layout in document.zones)
+                if (layout != null && !string.IsNullOrEmpty(layout.zoneId)) buildingLayout[layout.zoneId] = layout;
+            Debug.Log($"[Gnarly] Loaded authored map layout for {buildingLayout.Count} zone(s).");
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"[Gnarly] Couldn't read building-layout.json: {exception.Message}");
+        }
     }
 
     void LoadAndApplyZoneMap()
@@ -377,6 +420,12 @@ public class RelocalizationController : MonoBehaviour
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
         indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera, SurfaceColors.Load(zone.directory));
+        if (buildingLayout.TryGetValue(currentZoneId, out var currentLayout))
+            indoorMap?.SetPlannerCurrentZoneTransform(
+                new Vector3(currentLayout.x, currentLayout.floor * 4f, -currentLayout.z),
+                -currentLayout.rotationDegrees);
+        else
+            indoorMap?.SetPlannerCurrentZoneTransform(Vector3.zero, 0f);
         indoorMap?.SetPackagePaths(
             Path.Combine(zone.directory, "structure.usdz"),
             Path.Combine(zone.directory, "building.json"),
@@ -730,11 +779,27 @@ public class RelocalizationController : MonoBehaviour
                 inCurrentZone = inCurrentZone,
                 sessionPosition = inCurrentZone && node.position != null && node.position.Length == 3
                     ? new Vector3(node.position[0], node.position[1], -node.position[2])
-                    : Vector3.zero
+                    : Vector3.zero,
+                plannerPosition = PlannerPosition(node, node.zone),
+                // Remote zones are only safe to draw in the shared picker when the website has
+                // authored their placement. Their native ARKit coordinates are otherwise unrelated.
+                hasPlannerPosition = node.position != null && node.position.Length == 3 &&
+                    (node.zone == currentZoneId || buildingLayout.ContainsKey(node.zone))
             });
             placeNames[node.id] = name;
         }
         return places;
+    }
+
+    Vector3 PlannerPosition(Pathfinding.Node node, string nodeZone)
+    {
+        if (node.position == null || node.position.Length != 3) return Vector3.zero;
+        var local = new Vector3(node.position[0], node.position[1], -node.position[2]);
+        if (!buildingLayout.TryGetValue(nodeZone, out var layout)) return local;
+        // The web editor operates in ARKit X/Z. Unity's imported map mirrors Z, which also
+        // mirrors the authored Y-axis rotation.
+        var rotated = Quaternion.Euler(0f, -layout.rotationDegrees, 0f) * local;
+        return new Vector3(rotated.x + layout.x, rotated.y + layout.floor * 4f, rotated.z - layout.z);
     }
 
     static string PlaceKind(Pathfinding.Node node)

@@ -24,6 +24,12 @@ public sealed class MapPlace
     public bool inCurrentZone;
     /// <summary>Unity session-space position; only meaningful when <see cref="inCurrentZone"/>.</summary>
     public Vector3 sessionPosition;
+    /// <summary>
+    /// Authored building-layout position used only by the full-screen picker. This deliberately
+    /// never participates in ARKit relocalization or AR guidance coordinates.
+    /// </summary>
+    public Vector3 plannerPosition;
+    public bool hasPlannerPosition;
 
     public string KindLabel => kind switch
     {
@@ -114,6 +120,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
     float span = 8f;
     float markerSize = 0.2f;
     float lineWidth = 0.1f;
+    Vector3 compactCenter;
+    float compactSpan;
+    bool showingBuildingPlanner;
+    Vector3 currentZonePlannerOffset;
+    float currentZonePlannerRotation;
     string appleModelPath;
     string buildingJsonPath;
     string scanJsonPath;
@@ -170,6 +181,13 @@ public partial class IndoorMapOverlay : MonoBehaviour
         BuildUi();
     }
 
+    /// <summary>Sets the active zone's authored display transform for the full-screen building map.</summary>
+    public void SetPlannerCurrentZoneTransform(Vector3 offset, float rotationDegrees)
+    {
+        currentZonePlannerOffset = offset;
+        currentZonePlannerRotation = rotationDegrees;
+    }
+
     /// <summary>The route being followed in AR, drawn on both map views and the native model.</summary>
     public void SetRoute(Route route)
     {
@@ -199,7 +217,10 @@ public partial class IndoorMapOverlay : MonoBehaviour
     {
         if (userMarker == null || sessionSpace == null || arCamera == null) return;
         var position = sessionSpace.InverseTransformPoint(arCamera.transform.position);
-        userMarker.localPosition = new Vector3(position.x, FloorHeight(position.y), position.z);
+        var localMapPosition = new Vector3(position.x, FloorHeight(position.y), position.z);
+        userMarker.localPosition = showingBuildingPlanner
+            ? Quaternion.Euler(0f, currentZonePlannerRotation, 0f) * localMapPosition + currentZonePlannerOffset
+            : localMapPosition;
 #if UNITY_IOS && !UNITY_EDITOR
         // RoomPlan/USDZ uses ARKit's right-handed Z axis; Unity mirrors Z on import.
         GnarlyUpdateRoomModelPosition(position.x, position.y, -position.z);
@@ -207,7 +228,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
         var forward = sessionSpace.InverseTransformDirection(arCamera.transform.forward);
         forward.y = 0f;
         if (forward.sqrMagnitude > 0.001f)
-            userMarker.localRotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
+            userMarker.localRotation = Quaternion.Euler(0f, showingBuildingPlanner ? currentZonePlannerRotation : 0f, 0f) *
+                Quaternion.LookRotation(forward.normalized, Vector3.up);
     }
 
     void LateUpdate()
@@ -508,11 +530,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
         if (places == null) return;
         foreach (var place in places)
         {
-            if (!place.inCurrentZone) continue;
+            if (!place.inCurrentZone && (!showingBuildingPlanner || !place.hasPlannerPosition)) continue;
             var size = place.major ? markerSize : markerSize * 0.6f;
             var marker = Primitive(PrimitiveType.Cylinder, "Place-" + place.localId, markerRoot,
                 MarkerMaterial(place.Color, place.major ? 1 : 0));
-            marker.localPosition = MarkerPosition(place);
+            marker.localPosition = MapPosition(place);
             marker.localScale = new Vector3(size, 0.02f, size);
             scaledMarkers.Add((marker, size));
         }
@@ -523,6 +545,13 @@ public partial class IndoorMapOverlay : MonoBehaviour
         var position = place.sessionPosition;
         position.y = FloorHeight(position.y);
         return position;
+    }
+
+    /// <summary>Position in the map's current presentation mode: local AR zone or authored building plan.</summary>
+    Vector3 MapPosition(MapPlace place)
+    {
+        if (showingBuildingPlanner && place.hasPlannerPosition) return place.plannerPosition;
+        return MarkerPosition(place);
     }
 
     void DrawRoute(Transform root, Route route, Material material, float widthScale, Vector3? prefix)
