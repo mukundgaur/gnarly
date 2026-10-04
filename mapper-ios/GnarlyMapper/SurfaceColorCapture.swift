@@ -27,7 +27,9 @@ struct ColorKeyframe: Sendable {
 /// Saves sharp, well-spaced camera frames while RoomPlan scans so walls, floors, doors, and furniture
 /// can be colored from real photos after the final room is built.
 final class SurfaceColorRecorder {
-    static let maxKeyframes = 320
+    // Large floors need more evenly spaced camera coverage for color baking. This affects only
+    // optional surface-color capture, not RoomPlan's separate scene-size limit.
+    static let maxKeyframes = 960
     private static let storedWidth: CGFloat = 1280
 
     private let queue = DispatchQueue(label: "com.gnarly.mapper.surface-color-keyframes", qos: .utility)
