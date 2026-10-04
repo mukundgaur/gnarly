@@ -344,7 +344,7 @@ public sealed partial class FirebaseNavigationPackageLoader
                 + " · " + (selectedScan != null ? FloorDisplay(selectedScan) : DisplayName(pendingPackage?.ZoneId));
             if (launchStatus != null) launchStatus.text = status;
             if (launchPrimaryLabel != null) launchPrimaryLabel.text = busy ? "Preparing places…" : routeDestinationKey != null
-                ? "Continue to camera" : routeSkipDestination ? "Choose after locating" : "Select a destination";
+                ? "Continue to camera" : routeSkipDestination ? "Open minimap" : "Select a destination";
             if (launchPrimary != null) launchPrimary.interactable = !busy && (routeDestinationKey != null || routeSkipDestination);
             return;
         }

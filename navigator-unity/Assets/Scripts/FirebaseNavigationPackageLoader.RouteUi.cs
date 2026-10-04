@@ -138,14 +138,16 @@ public sealed partial class FirebaseNavigationPackageLoader
         pendingPackage = package;
         routeStartKey = null;
         routeDestinationKey = null;
-        routeSkipDestination = false;
+        // A destination list is optional metadata. Never block a user from entering the
+        // camera/minimap just because a building has no labelled places yet.
+        routeSkipDestination = true;
         routeChoosingStart = false;
         routePlaces.Clear();
         LoadRoutePlaces(package);
         routeSelectionMode = true;
         SetStatus(routePlaces.Count == 0
-            ? "No tagged places in this building yet. You can choose a destination after locating."
-            : "Select a destination. Your starting point defaults to your location.");
+            ? "No tagged places yet. Continue to the minimap, then tap a point after locating."
+            : "Choose a destination now, or continue to the minimap. Your start defaults to your location.");
         BuildContent();
         RefreshUi();
         if (launchScroll != null) launchScroll.verticalNormalizedPosition = 1f;
@@ -281,7 +283,7 @@ public sealed partial class FirebaseNavigationPackageLoader
         routeResultsHeight = routeResults.GetComponent<LayoutElement>();
         BuildRouteResults();
 
-        var skip = MapUi.Button(Block("ChooseLater", 82), "Choose destination after locating",
+        var skip = MapUi.Button(Block("ChooseLater", 82), "Choose on minimap after locating",
             MapUi.SurfaceRaised, MapUi.TextSecondary, 29, () =>
             {
                 routeDestinationKey = null;
