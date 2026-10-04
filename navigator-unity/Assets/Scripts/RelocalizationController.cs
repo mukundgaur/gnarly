@@ -97,6 +97,9 @@ public class RelocalizationController : MonoBehaviour
     bool navigationLoaded;
     readonly Dictionary<string, ZonePackage> zonePackages = new Dictionary<string, ZonePackage>();
     readonly Dictionary<string, ZoneLayout> buildingLayout = new Dictionary<string, ZoneLayout>();
+    /// <summary>Zones placed on the website; guessed placements are not trusted to align AR.</summary>
+    readonly HashSet<string> authoredLayoutZones = new HashSet<string>();
+    Transform zoneSpace;
     /// <summary>All zones, keyed by <see cref="Pathfinding.ZoneKey"/>, joined by zone connections.</summary>
     Pathfinding.Graph navigationGraph;
     List<Pathfinding.RouteLeg> activeLegs;
@@ -230,7 +233,9 @@ public class RelocalizationController : MonoBehaviour
                 {
                     LogCameraPose();
                     if (navigator.HasArrived && activeLegs != null && activeLegIndex < activeLegs.Count - 1)
-                        AwaitZoneTransition();
+                    {
+                        if (!TryContinueInSession()) AwaitZoneTransition();
+                    }
                     else
                         SetStatus(LegStatus());
                     if (navigator.HasArrived && !arrivalAnnounced && (activeLegs == null || activeLegIndex == activeLegs.Count - 1))
@@ -329,6 +334,7 @@ public class RelocalizationController : MonoBehaviour
     void LoadBuildingLayout()
     {
         buildingLayout.Clear();
+        authoredLayoutZones.Clear();
         // Firebase places this alongside the selected zone package. A bundled version is also
         // supported for offline test packages.
         var layoutPath = packageDirectory != null
@@ -340,7 +346,11 @@ public class RelocalizationController : MonoBehaviour
             var document = JsonUtility.FromJson<BuildingLayoutDocument>(File.ReadAllText(layoutPath));
             if (document?.zones == null) return;
             foreach (var layout in document.zones)
-                if (layout != null && !string.IsNullOrEmpty(layout.zoneId)) buildingLayout[layout.zoneId] = layout;
+                if (layout != null && !string.IsNullOrEmpty(layout.zoneId))
+                {
+                    buildingLayout[layout.zoneId] = layout;
+                    authoredLayoutZones.Add(layout.zoneId);
+                }
             Debug.Log($"[Gnarly] Loaded authored map layout for {buildingLayout.Count} zone(s).");
         }
         catch (Exception exception)
@@ -457,14 +467,8 @@ public class RelocalizationController : MonoBehaviour
             if (!zonePackages.TryGetValue(currentZoneId, out var package))
                 throw new DirectoryNotFoundException($"No navigation package for zone '{currentZoneId}'.");
 
-            var anchorPath = Path.Combine(package.directory, "test-anchor.json");
-            anchor = File.Exists(anchorPath)
-                ? TestAnchor.Parse(File.ReadAllText(anchorPath), currentZoneId)
-                : null;
-            var routePath = Path.Combine(package.directory, "route.json");
-            fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), currentZoneId) : null;
-            Pathfinding.SnapToFloor(fallbackRoute, package.graph);
-
+            LoadZoneExtras(package);
+            ResetZoneSpace();
             if (!skipWorldMap)
                 ApplyWorldMap(File.ReadAllBytes(Path.Combine(package.directory, $"worldmap-{currentZoneId}.bin")));
             sawRelocalizing = false;
@@ -481,6 +485,89 @@ public class RelocalizationController : MonoBehaviour
             Fail(e.Message);
         }
     }
+
+    void LoadZoneExtras(ZonePackage package)
+    {
+        var anchorPath = Path.Combine(package.directory, "test-anchor.json");
+        anchor = File.Exists(anchorPath)
+            ? TestAnchor.Parse(File.ReadAllText(anchorPath), currentZoneId)
+            : null;
+        var routePath = Path.Combine(package.directory, "route.json");
+        fallbackRoute = File.Exists(routePath) ? Route.Parse(File.ReadAllText(routePath), currentZoneId) : null;
+        Pathfinding.SnapToFloor(fallbackRoute, package.graph);
+    }
+
+    /// <summary>
+    /// The current zone's coordinates inside the AR session. After relocalizing in a zone's own
+    /// map this is the session itself; after walking into the next scan on the same floor it is
+    /// that scan's placement relative to the map the session was localized in.
+    /// </summary>
+    Transform ZoneSpace
+    {
+        get
+        {
+            if (zoneSpace == null)
+            {
+                zoneSpace = new GameObject("ZoneSpace").transform;
+                zoneSpace.SetParent(origin.TrackablesParent, false);
+            }
+            return zoneSpace;
+        }
+    }
+
+    void ResetZoneSpace() => ZoneSpace.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+
+    /// <summary>
+    /// Walking into the next scan on the same floor keeps the AR session. The continuation pair is
+    /// one physical spot and the website layout gives the turn between the two scans, so the next
+    /// zone is placed in this session instead of relocalizing in its own map. Elevators, and zones
+    /// without an authored layout, still relocalize.
+    /// </summary>
+    bool TryContinueInSession()
+    {
+        var leg = activeLegs[activeLegIndex];
+        var nextLeg = activeLegs[activeLegIndex + 1];
+        if (IsElevatorRide(activeLegs, activeLegIndex) || leg.nodeIds.Count == 0 || nextLeg.nodeIds.Count == 0) return false;
+        var exit = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
+        var entry = navigationGraph.Node(nextLeg.nodeIds[0]);
+        if (!Pathfinding.IsContinuation(exit) || !Pathfinding.IsContinuation(entry)) return false;
+        if (exit.position?.Length != 3 || entry.position?.Length != 3) return false;
+        if (!zonePackages.TryGetValue(nextLeg.zoneId, out var nextPackage)) return false;
+        if (!authoredLayoutZones.Contains(leg.zoneId) || !authoredLayoutZones.Contains(nextLeg.zoneId)) return false;
+        if (!buildingLayout.TryGetValue(leg.zoneId, out var fromLayout) ||
+            !buildingLayout.TryGetValue(nextLeg.zoneId, out var toLayout)) return false;
+
+        // A point u in the next zone sits at turn * (u - entry) + exit in this zone.
+        var turn = ZoneTurn(fromLayout, toLayout);
+        var space = ZoneSpace;
+        var exitPoint = ToUnity(exit.position);
+        var entryPoint = ToUnity(entry.position);
+        space.SetLocalPositionAndRotation(
+            space.localPosition + space.localRotation * (exitPoint - turn * entryPoint),
+            space.localRotation * turn);
+
+        Debug.Log($"[Gnarly] Continuing {currentZoneId} -> {nextLeg.zoneId} in the same AR session " +
+                  $"(turn {toLayout.rotationDegrees - fromLayout.rotationDegrees:0.#}°).");
+        activeLegIndex++;
+        currentZoneId = nextLeg.zoneId;
+        LoadZoneExtras(nextPackage);
+        if (navigator != null) navigator.Clear();
+        indoorMap?.Clear();
+        OnLocated();
+        return true;
+    }
+
+    /// <summary>
+    /// Rotation taking a direction in <paramref name="to"/>'s Unity axes to <paramref name="from"/>'s,
+    /// from the layout: zone → building → zone. ARKit Z is mirrored in Unity.
+    /// </summary>
+    static Quaternion ZoneTurn(ZoneLayout from, ZoneLayout to)
+    {
+        var radians = (to.rotationDegrees - from.rotationDegrees) * Mathf.Deg2Rad;
+        return Quaternion.LookRotation(new Vector3(-Mathf.Sin(radians), 0f, Mathf.Cos(radians)), Vector3.up);
+    }
+
+    static Vector3 ToUnity(float[] arkit) => new Vector3(arkit[0], arkit[1], -arkit[2]);
 
     void ApplyWorldMap(byte[] mapBytes)
     {
@@ -526,7 +613,7 @@ public class RelocalizationController : MonoBehaviour
         // Construct the map UI only after ARKit has accepted the saved world map. Creating a
         // second camera/render texture while ApplyWorldMap is starting can delay relocalization.
         var zone = zonePackages[currentZoneId];
-        indoorMap?.Configure(zone.scan, zone.graph, origin.TrackablesParent, origin.Camera, SurfaceColors.Load(zone.directory));
+        indoorMap?.Configure(zone.scan, zone.graph, ZoneSpace, origin.Camera, SurfaceColors.Load(zone.directory));
         if (buildingLayout.TryGetValue(currentZoneId, out var currentLayout))
             indoorMap?.SetPlannerCurrentZoneTransform(
                 new Vector3(currentLayout.x, currentLayout.floor * DisplayFloorSpacingMeters, -currentLayout.z),
@@ -557,7 +644,7 @@ public class RelocalizationController : MonoBehaviour
             var destinations = navigationGraph.Destinations();
             if (destinations.Count == 0 && fallbackRoute != null && navigator != null)
             {
-                navigator.Begin(GuidanceRoute(fallbackRoute), origin.TrackablesParent, origin.Camera);
+                navigator.Begin(GuidanceRoute(fallbackRoute), ZoneSpace, origin.Camera);
                 indoorMap?.SetRoute(fallbackRoute);
                 return;
             }
@@ -571,7 +658,7 @@ public class RelocalizationController : MonoBehaviour
         }
         else if (fallbackRoute != null && navigator != null)
         {
-            navigator.Begin(GuidanceRoute(fallbackRoute), origin.TrackablesParent, origin.Camera);
+            navigator.Begin(GuidanceRoute(fallbackRoute), ZoneSpace, origin.Camera);
             indoorMap?.SetRoute(fallbackRoute);
         }
         else
@@ -588,7 +675,7 @@ public class RelocalizationController : MonoBehaviour
             Destroy(cube.GetComponent<Collider>());
         }
 
-        cube.transform.SetParent(origin.TrackablesParent, false);
+        cube.transform.SetParent(ZoneSpace, false);
         cube.transform.localPosition = anchor.ToUnitySessionSpace();
         cube.transform.localRotation = Quaternion.identity;
         Debug.Log($"[Gnarly] Placed cube at session-space {cube.transform.localPosition}.");
@@ -596,7 +683,7 @@ public class RelocalizationController : MonoBehaviour
 
     Vector3 CameraArkitPosition()
     {
-        var session = origin.TrackablesParent.InverseTransformPoint(origin.Camera.transform.position);
+        var session = ZoneSpace.InverseTransformPoint(origin.Camera.transform.position);
         return new Vector3(session.x, session.y, -session.z);
     }
 
@@ -1065,7 +1152,7 @@ public class RelocalizationController : MonoBehaviour
         var route = LegRoute(leg);
         if (activeLegIndex == 0 && automaticRouteStartPosition.HasValue)
             route = PrependAutomaticStart(route, automaticRouteStartPosition.Value);
-        navigator.Begin(GuidanceRoute(route), origin.TrackablesParent, origin.Camera);
+        navigator.Begin(GuidanceRoute(route), ZoneSpace, origin.Camera);
         indoorMap?.SetRoute(route);
         ShowFloorWaypoint();
         SetStatus(LegStatus());
