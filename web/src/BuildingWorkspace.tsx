@@ -17,6 +17,9 @@ type PendingZoneLink={from:{zoneId:string;nodeId:string};targetZoneId:string;typ
 const types = ['entrance','hallway','elevator','stairs','destination','door','opening','waypoint'];
 const draftKey = (b: Building, mode: Mode) => ['gnarly-draft',mode,b.id,b.activeVersion||'sample',b.zoneId||'root'].join(':');
 const pendingLinkKey = (b: Building) => ['gnarly-zone-link',b.id,b.activeVersion||'sample'].join(':');
+const walkerKey = (b: Building) => ['gnarly-walker',b.id,b.activeVersion||'sample'].join(':');
+type SavedWalker={location:WalkLocation;walking:boolean};
+function readWalker(building:Building):SavedWalker|null{try{return JSON.parse(sessionStorage.getItem(walkerKey(building))||'null')}catch{return null}}
 const title = (node: Node) => (node.label ? node.label + ' · ' : '') + node.id;
 function Picker({ caption, nodes, value, change }: { caption: string; nodes: Node[]; value: string; change: (value: string) => void }) {
   const [query,setQuery] = useState('');
@@ -31,7 +34,7 @@ export default function BuildingWorkspace({building,onBack,onUpdate,onDirtyChang
   const [status,setStatus]=useState<Status>('loading'),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [editing,setEditing]=useState(false),[tool,setTool]=useState<Tool>('select'),[selectedId,setSelectedId]=useState(''),[target,setTarget]=useState('');
   const [floor,setFloor]=useState('all'),[start,setStart]=useState(''),[destination,setDestination]=useState(''),[showRoute,setShowRoute]=useState(false),[step,setStep]=useState(0),[playing,setPlaying]=useState(false),[reset,setReset]=useState(0);
-  const [walker,setWalker]=useState<WalkLocation|null>(null),[walking,setWalking]=useState(false),[placingWalker,setPlacingWalker]=useState(false),[walkDrop,setWalkDrop]=useState<DropRequest|null>(null),[draggingWalker,setDraggingWalker]=useState(false);
+  const [walker,setWalker]=useState<WalkLocation|null>(()=>readWalker(building)?.location||null),[walking,setWalking]=useState(()=>{const saved=readWalker(building);return Boolean(saved?.walking&&(!saved.location.zoneId||saved.location.zoneId===building.zoneId))}),[placingWalker,setPlacingWalker]=useState(false),[walkDrop,setWalkDrop]=useState<DropRequest|null>(null),[draggingWalker,setDraggingWalker]=useState(false);
   const [form,setForm]=useState({name:'',type:'waypoint',floor:'',x:'',y:'',z:''});
   const [linkOpen,setLinkOpen]=useState(false),[linkZone,setLinkZone]=useState(''),[linkNode,setLinkNode]=useState(''),[linkSaving,setLinkSaving]=useState(false);
   const [pendingLink,setPendingLink]=useState<PendingZoneLink|null>(()=>{try{return JSON.parse(sessionStorage.getItem(pendingLinkKey(building))||'null')}catch{return null}});
@@ -66,6 +69,7 @@ export default function BuildingWorkspace({building,onBack,onUpdate,onDirtyChang
   },[store,key]);
   useEffect(()=>{if(!base||!draft)return;if(dirty)localStorage.setItem(key,JSON.stringify({base,graph:draft}));else localStorage.removeItem(key)},[base,draft,dirty,key]);
   useEffect(()=>{if(!dirty)return;const guard=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard)},[dirty]);
+  useEffect(()=>{if(walker)sessionStorage.setItem(walkerKey(building),JSON.stringify({location:walker,walking} satisfies SavedWalker))},[walker,walking,building.id,building.activeVersion]);
   useEffect(()=>{if(!playing||!route?.ok)return;const timer=window.setTimeout(()=>{if(step>=route.nodes.length-1){setPlaying(false);return}setStep(step+1);setFloor(route.nodes[step+1].floor)},850);return()=>window.clearTimeout(timer)},[playing,route,step]);
   useEffect(()=>{if(selected)setForm({name:selected.label||'',type:selected.type,floor:selected.floor,x:String(selected.position[0]),y:String(selected.position[1]),z:String(selected.position[2])})},[selectedId,selected?.position,selected?.label,selected?.type,selected?.floor]);
   useEffect(()=>{if(!otherZones.some(zone=>zone.id===linkZone)){setLinkZone(otherZones[0]?.id||'');setLinkNode('')}},[building.zoneId,building.zones,linkZone]);
@@ -85,12 +89,17 @@ export default function BuildingWorkspace({building,onBack,onUpdate,onDirtyChang
   function placeWalker(location:WalkLocation|null){
     setDraggingWalker(false);
     if(!location){setError('Drop the person onto a visible floor inside the building.');return}
-    const floorInfo=graph.floors.find(item=>item.id===location.floorId);
+    const targetZone=location.zoneId?building.zones?.find(item=>item.id===location.zoneId):undefined;
+    const targetGraph=targetZone?.graph||graph,targetScan=targetZone?.scan||scan;
+    const floorInfo=targetGraph.floors.find(item=>item.id===location.floorId);
     const position:[number,number,number]=[location.position[0],floorInfo?.elevation??location.position[1],location.position[2]];
-    if(!pointOnFloor(position,location.floorId,graph,scan)){setError('Drop the person onto a walkable part of the floor.');return}
-    setWalker({position,floorId:location.floorId});setFloor(location.floorId);setWalking(true);setPlacingWalker(false);setPlaying(false);setError('');
+    if(!pointOnFloor(position,location.floorId,targetGraph,targetScan)){setError('Drop the person onto a walkable part of the floor.');return}
+    const placed:WalkLocation={position,floorId:location.floorId,zoneId:targetZone?.id||building.zoneId};
+    sessionStorage.setItem(walkerKey(building),JSON.stringify({location:placed,walking:true} satisfies SavedWalker));
+    if(targetZone&&targetZone.id!==building.zoneId){onUpdate({...building,zoneId:targetZone.id,graph:targetZone.graph,scan:targetZone.scan,graphPath:targetZone.graphPath,notice:targetZone.notice});return}
+    setWalker(placed);setFloor(location.floorId);setWalking(true);setPlacingWalker(false);setPlaying(false);setError('');
   }
-  function viewerFloorPick(position:[number,number,number],floorId:string){if(placingWalker)placeWalker({position,floorId});else floorPick(position,floorId)}
+  function viewerFloorPick(position:[number,number,number],floorId:string,zoneId?:string){if(placingWalker)placeWalker({position,floorId,zoneId});else if(!zoneId||zoneId===building.zoneId)floorPick(position,floorId)}
   function walkKey(code:string,down:boolean){window.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code,bubbles:true}))}
   function applyForm(){if(!selected)return;const position=[Number(form.x),Number(form.y),Number(form.z)] as [number,number,number];if([form.x,form.y,form.z].some(x=>x.trim()==='')||!position.every(Number.isFinite)){setError('Enter valid X, Y, Z coordinates.');return}
     try{const result=updateWaypoint(graph,{...selected,label:form.name.trim()||null,type:form.type,floor:form.floor,position},scan);if(result.removedEdges.length&&!window.confirm('This edit removes '+result.removedEdges.length+' blocked connection(s). Continue?'))return;change(result.graph,result.removedEdges.length?result.removedEdges.length+' blocked connection(s) removed.':'Waypoint updated.')}catch(e){setError(String(e))}}
@@ -108,7 +117,7 @@ export default function BuildingWorkspace({building,onBack,onUpdate,onDirtyChang
     else{if(!window.confirm('This will keep your complete draft as the next graph. Changes made in the remote graph since you started will not appear in it. The previous graph file remains in Storage. Continue only after reviewing both versions.'))return;baseRef.current=remote;setBase(remote);setStatus('unsynced');setNotice('Your draft is based on the latest revision. Review all connections before saving; the prior graph file remains in Storage.')}setRemote(null)}
   return <main className="inside"><div className="viewer-top"><div><button className="back" onClick={leave}><ArrowLeft size={17}/> Back to map</button><div className="viewer-title"><span>BUILDING EXPLORER</span><h1>{building.name}</h1></div></div><div className="viewer-badge"><span/> {building.demo?'SAMPLE EXPERIENCE':'LIVE BUILDING'}</div></div>
     <div className={'viewer '+(draggingWalker?'walker-dragging ':'')+(walking?'walking-view':'')} onDragOver={e=>{if(e.dataTransfer.types.includes('application/x-gnarly-walker')){e.preventDefault();e.dataTransfer.dropEffect='copy';setDraggingWalker(true)}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as globalThis.Node|null))setDraggingWalker(false)}} onDrop={e=>{if(!e.dataTransfer.types.includes('application/x-gnarly-walker'))return;e.preventDefault();setWalkDrop({clientX:e.clientX,clientY:e.clientY,id:Date.now()})}}>
-      <Viewer graph={graph} scan={scan} illustrative={Boolean(building.demo)} floor={floor} selected={selectedId||destination} onSelect={id=>{setSelectedId(id);setPlaying(false)}} path={route?.ok?route.nodes:[]} step={step} reset={reset} editing={editing} onFloorPick={editing||placingWalker?viewerFloorPick:undefined} walker={walker} walking={walking} dropRequest={walkDrop} onWalkerDrop={placeWalker} onWalkerMove={setWalker}/>
+      <Viewer graph={graph} scan={scan} illustrative={Boolean(building.demo)} floor={floor} selected={selectedId||destination} onSelect={id=>{setSelectedId(id);setPlaying(false)}} path={route?.ok?route.nodes:[]} step={step} reset={reset} editing={editing} onFloorPick={editing||placingWalker?viewerFloorPick:undefined} walker={walker} walking={walking} dropRequest={walkDrop} onWalkerDrop={placeWalker} onWalkerMove={setWalker} zones={building.zones} zoneConnections={building.zoneConnections} zoneId={building.zoneId}/>
       {!editing&&!walking&&<div className={'walker-control '+(placingWalker?'placing':'')}><button className="walker-person" draggable onDragStart={e=>{e.dataTransfer.setData('application/x-gnarly-walker','person');e.dataTransfer.setData('text/plain','Gnarly walk position');e.dataTransfer.effectAllowed='copy';e.dataTransfer.setDragImage(e.currentTarget,25,25);setDraggingWalker(true)}} onDragEnd={()=>setDraggingWalker(false)} onClick={()=>walker?(setFloor(walker.floorId),setWalking(true)):setPlacingWalker(value=>!value)} aria-label={walker?'Enter walk mode from the person marker':'Drag person onto a floor or click to place'}><PersonStanding size={45} strokeWidth={2.2}/></button><span>{walker?'Walk from here':'Drag person inside'}</span><small>{walker?'Drag person to move':'or click person, then floor'}</small></div>}
       {walking&&<><div className="walk-hud"><Footprints size={18}/><div><strong>Walk mode</strong><span>Drag to look · W/S or ↑/↓ move · A/D or ←/→ turn</span></div><button onClick={()=>setWalking(false)}>Exit</button></div><div className="walk-pad" aria-label="Walk controls"><button onPointerDown={()=>walkKey('KeyW',true)} onPointerUp={()=>walkKey('KeyW',false)} onPointerLeave={()=>walkKey('KeyW',false)} aria-label="Walk forward">↑</button><button onPointerDown={()=>walkKey('KeyA',true)} onPointerUp={()=>walkKey('KeyA',false)} onPointerLeave={()=>walkKey('KeyA',false)} aria-label="Turn left">↶</button><button onPointerDown={()=>walkKey('KeyS',true)} onPointerUp={()=>walkKey('KeyS',false)} onPointerLeave={()=>walkKey('KeyS',false)} aria-label="Walk backward">↓</button><button onPointerDown={()=>walkKey('KeyD',true)} onPointerUp={()=>walkKey('KeyD',false)} onPointerLeave={()=>walkKey('KeyD',false)} aria-label="Turn right">↷</button></div></>}
       {draggingWalker&&<div className="walker-drop-hint">Drop onto a floor to start walking</div>}{placingWalker&&<div className="editor-hint walker-place-hint">Click a floor to place the person</div>}

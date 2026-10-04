@@ -2,10 +2,11 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Text } from '@react-three/drei';
 import { useEffect, useMemo, useRef } from 'react';
 import { Box3, DoubleSide, Matrix4, PerspectiveCamera, Shape, ShapeGeometry, Vector2, Vector3 } from 'three';
-import type { Graph, Node, ScanFeature, ScanFeatures } from './data';
+import type { Graph, Node, ScanFeature, ScanFeatures, ZoneConnections, ZoneView } from './data';
+import { stackBuilding, stackPoint, type StackZone } from './buildingStack.ts';
 import { canWalkBetween, checkEdge } from './geometry';
 
-export type WalkLocation = { position: [number, number, number]; floorId: string };
+export type WalkLocation = { position: [number, number, number]; floorId: string; zoneId?: string };
 export type DropRequest = { clientX: number; clientY: number; id: number };
 
 type ViewerProps = {
@@ -19,12 +20,15 @@ type ViewerProps = {
   step: number;
   reset: number;
   editing?: boolean;
-  onFloorPick?: (position: [number, number, number], floorId: string) => void;
+  onFloorPick?: (position: [number, number, number], floorId: string, zoneId?: string) => void;
   walker?: WalkLocation | null;
   walking?: boolean;
   dropRequest?: DropRequest | null;
   onWalkerDrop?: (location: WalkLocation | null) => void;
   onWalkerMove?: (location: WalkLocation) => void;
+  zones?: ZoneView[];
+  zoneConnections?: ZoneConnections;
+  zoneId?: string;
 };
 
 function featureMatrix(feature: ScanFeature) {
@@ -48,7 +52,7 @@ function FeatureBox({ feature, color, opacity = 1 }: {
   </group>;
 }
 
-function ScannedFloor({ feature, floorId, onPick }: { feature: ScanFeature; floorId: string; onPick?: (position: [number, number, number]) => void }) {
+function ScannedFloor({ feature, floorId, zoneId, offset=[0,0,0], onPick }: { feature: ScanFeature; floorId: string; zoneId?: string; offset?:[number,number,number]; onPick?: (position: [number, number, number]) => void }) {
   const outline = feature.polygonCorners?.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const geometry = useMemo(() => {
     if (!outline || outline.length < 3) return null;
@@ -56,9 +60,11 @@ function ScannedFloor({ feature, floorId, onPick }: { feature: ScanFeature; floo
     return new ShapeGeometry(shape);
   }, [feature]);
   const matrix = useMemo(() => featureMatrix(feature), [feature]);
-  if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh userData={{ walkableFloor: true, floorId }} onClick={event=>{if(onPick){event.stopPropagation();onPick(event.point.toArray() as [number,number,number])}}}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
+  const localPoint=(point:Vector3):[number,number,number]=>[point.x-offset[0],point.y-offset[1],point.z-offset[2]];
+  const userData={walkableFloor:true,floorId,zoneId,stackOffset:offset};
+  if (!geometry || !outline) return <group matrix={matrix} matrixAutoUpdate={false}><mesh userData={userData} onClick={event=>{if(onPick){event.stopPropagation();onPick(localPoint(event.point))}}}><boxGeometry args={feature.dimensions.map(value=>Math.max(.025,value)) as [number,number,number]}/><meshStandardMaterial color="#d4e5e1" /></mesh></group>;
   return <group matrix={matrix} matrixAutoUpdate={false}>
-    <mesh geometry={geometry} userData={{ walkableFloor: true, floorId }} onClick={event => { if (onPick) { event.stopPropagation(); onPick(event.point.toArray() as [number, number, number]); } }}>
+    <mesh geometry={geometry} userData={userData} onClick={event => { if (onPick) { event.stopPropagation(); onPick(localPoint(event.point)); } }}>
       <meshStandardMaterial color="#d4e5e1" side={DoubleSide} />
     </mesh>
     <Line points={[...outline, outline[0]].map(([x, y]) => [x, y, .015])} color="#6faaa1" lineWidth={1.5} />
@@ -110,14 +116,14 @@ function Wall({ wall, portals }: { wall: ScanFeature; portals: ScanFeature[] }) 
   </group>;
 }
 
-function ScannedGeometry({ scan, graph, floor, onFloorPick }: { scan: ScanFeatures; graph: Graph; floor: string; onFloorPick?: ViewerProps['onFloorPick'] }) {
+function ScannedGeometry({ scan, graph, floor, zoneId, offset, onFloorPick }: { scan: ScanFeatures; graph: Graph; floor: string; zoneId?:string; offset?:[number,number,number]; onFloorPick?: ViewerProps['onFloorPick'] }) {
   const story = graph.floors.find(item => item.id === floor)?.story;
   const visible = (item: ScanFeature) => floor === 'all' || item.story == null || item.story === story;
   const portals = [...scan.doors, ...scan.openings, ...scan.windows].filter(visible);
   return <>
     {scan.floors.filter(visible).map(item => {
       const floorId = graph.floors.find(candidate => candidate.story === item.story)?.id || graph.floors[0]?.id;
-      return floorId ? <ScannedFloor key={item.identifier} feature={item} floorId={floorId} onPick={onFloorPick ? position => onFloorPick(position, floorId) : undefined} /> : null;
+      return floorId ? <ScannedFloor key={item.identifier} feature={item} floorId={floorId} zoneId={zoneId} offset={offset} onPick={onFloorPick ? position => onFloorPick(position, floorId, zoneId) : undefined} /> : null;
     })}
     {scan.walls.filter(visible).map(item => <Wall key={item.identifier} wall={item} portals={portals.filter(portal => portal.parentIdentifier === item.identifier)} />)}
     {scan.windows.filter(visible).map(item => <FeatureBox key={item.identifier} feature={item} color="#8fbfce" opacity={.32} />)}
@@ -127,7 +133,7 @@ function ScannedGeometry({ scan, graph, floor, onFloorPick }: { scan: ScanFeatur
   </>;
 }
 
-function GraphFloor({ graph, floor, illustrative, onFloorPick }: { graph: Graph; floor: string; illustrative?: boolean; onFloorPick?: ViewerProps['onFloorPick'] }) {
+function GraphFloor({ graph, floor, illustrative, zoneId, offset=[0,0,0], onFloorPick }: { graph: Graph; floor: string; illustrative?: boolean; zoneId?:string; offset?:[number,number,number]; onFloorPick?: ViewerProps['onFloorPick'] }) {
   return <>{graph.floors.filter(item => floor === 'all' || item.id === floor).map(item => {
     const nodes = graph.nodes.filter(node => node.floor === item.id);
     const xs = nodes.map(node => node.position[0]);
@@ -141,7 +147,7 @@ function GraphFloor({ graph, floor, illustrative, onFloorPick }: { graph: Graph;
     const width = Math.max(4, maxX - minX);
     const depth = Math.max(4, maxZ - minZ);
     return <group key={item.id}>
-      <mesh position={[cx, item.elevation - .08, cz]} userData={{ walkableFloor: true, floorId: item.id }} onClick={event => { if (onFloorPick) { event.stopPropagation(); onFloorPick(event.point.toArray() as [number, number, number], item.id); } }}>
+      <mesh position={[cx, item.elevation - .08, cz]} userData={{ walkableFloor: true, floorId: item.id, zoneId, stackOffset:offset }} onClick={event => { if (onFloorPick) { event.stopPropagation();onFloorPick([event.point.x-offset[0],event.point.y-offset[1],event.point.z-offset[2]],item.id,zoneId); } }}>
         <boxGeometry args={[width, .12, depth]} />
         <meshStandardMaterial color={item.story ? '#e7edf0' : '#edf1f2'} />
       </mesh>
@@ -191,6 +197,47 @@ function CameraRig({ graph, scan, floor, reset }: Pick<ViewerProps, 'graph' | 's
   return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={200} maxPolarAngle={Math.PI / 2.05} />;
 }
 
+function StackCameraRig({ zones, reset }: { zones: StackZone[]; reset:number }) {
+  const { camera } = useThree();
+  const controls = useRef<{ target: Vector3; update: () => void } | null>(null);
+  useEffect(()=>{
+    const box=new Box3();
+    for(const zone of zones){
+      const offset=new Vector3(...zone.offset);
+      zone.graph.nodes.forEach(node=>box.expandByPoint(new Vector3(...node.position).add(offset)));
+      for(const feature of [...(zone.scan?.floors||[]),...(zone.scan?.walls||[]),...(zone.scan?.objects||[])]){
+        const size=new Vector3(...feature.dimensions.map(value=>Math.max(.025,value)));
+        box.union(new Box3().setFromCenterAndSize(new Vector3(),size).applyMatrix4(featureMatrix(feature)).translate(offset));
+      }
+    }
+    if(box.isEmpty())box.expandByPoint(new Vector3());
+    const center=box.getCenter(new Vector3()),size=box.getSize(new Vector3());
+    const span=Math.max(10,size.x,size.z,size.y*1.4);
+    camera.position.copy(center).add(new Vector3(span*1.25,span*.9,span*1.25));camera.lookAt(center);
+    controls.current?.target.copy(center);controls.current?.update();
+  },[camera,zones,reset]);
+  return <OrbitControls ref={controls as never} enableDamping minDistance={2} maxDistance={300} maxPolarAngle={Math.PI*.88}/>;
+}
+
+function StackScene({ zones, connections, activeZoneId, selected, onSelect, onFloorPick, walker }:{zones:StackZone[];connections?:ZoneConnections;activeZoneId?:string;selected:string;onSelect:(id:string)=>void;onFloorPick?:ViewerProps['onFloorPick'];walker?:WalkLocation|null}){
+  const byId=new Map(zones.map(zone=>[zone.id,zone]));
+  return <>
+    <ambientLight intensity={2}/><directionalLight position={[10,22,14]} intensity={2}/>
+    <gridHelper args={[120,120,'#d7dee3','#e8edef']} position={[0,-.15,0]}/>
+    {zones.map(zone=><group key={zone.id} position={zone.offset}>
+      {zone.scan?<ScannedGeometry scan={zone.scan} graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>:<GraphFloor graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>}
+      {zone.graph.edges.map((edge,index)=>{const from=zone.graph.nodes.find(node=>node.id===edge.from),to=zone.graph.nodes.find(node=>node.id===edge.to);if(!from||!to)return null;return <Line key={index} points={[from.position,to.position]} color="#8abdb2" lineWidth={1} transparent opacity={.28}/>})}
+      {zone.graph.nodes.filter(node=>node.label||['entrance','destination','elevator'].includes(node.type)).map(node=><group key={node.id} position={node.position} onClick={event=>{event.stopPropagation();if(zone.id===activeZoneId)onSelect(node.id)}}>
+        <mesh position={[0,.35,0]}><cylinderGeometry args={[node.type==='elevator'?.22:.15,node.type==='elevator'?.22:.15,.7,20]}/><meshStandardMaterial color={node.type==='elevator'?'#8b5cf6':node.id===selected&&zone.id===activeZoneId?'#0b8b81':'#277ad1'}/></mesh>
+        {node.type==='elevator'&&<Html position={[0,.95,0]} center distanceFactor={15}><span className="elevator-label">Elevator · {zone.name}</span></Html>}
+      </group>)}
+      <Html position={[0,.15,0]} center distanceFactor={24}><span className="floor-stack-label">{zone.name}</span></Html>
+      {walker&&walker.zoneId===zone.id&&<WalkerMarker location={walker}/>}
+    </group>)}
+    {(connections?.connections||[]).map((connection,index)=>{const fromZone=byId.get(connection.from.zoneId),toZone=byId.get(connection.to.zoneId);const from=fromZone?.graph.nodes.find(node=>node.id===connection.from.nodeId),to=toZone?.graph.nodes.find(node=>node.id===connection.to.nodeId);if(!fromZone||!toZone||!from||!to)return null;return <Line key={'floor-link-'+index} points={[stackPoint(fromZone,from.position),stackPoint(toZone,to.position)]} color="#8b5cf6" lineWidth={3} dashed dashSize={.28} gapSize={.2} transparent opacity={.9}/>})}
+  </>;
+}
+
 function DropController({ request, onDrop }: { request?: DropRequest | null; onDrop?: ViewerProps['onWalkerDrop'] }) {
   const { camera, gl, raycaster, scene } = useThree();
   const handled = useRef<number | null>(null);
@@ -205,7 +252,8 @@ function DropController({ request, onDrop }: { request?: DropRequest | null; onD
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(scene.children, true)
       .find(item => item.object.userData.walkableFloor === true && typeof item.object.userData.floorId === 'string');
-    onDrop(hit ? { position: hit.point.toArray() as [number, number, number], floorId: hit.object.userData.floorId as string } : null);
+    const offset=(hit?.object.userData.stackOffset||[0,0,0]) as [number,number,number];
+    onDrop(hit ? { position: [hit.point.x-offset[0],hit.point.y-offset[1],hit.point.z-offset[2]], floorId: hit.object.userData.floorId as string, zoneId: hit.object.userData.zoneId as string|undefined } : null);
   }, [camera, gl, onDrop, raycaster, request, scene]);
   return null;
 }
@@ -362,7 +410,7 @@ function Scene(props: ViewerProps) {
     <ambientLight intensity={2} />
     <directionalLight position={[8, 15, 12]} intensity={2} />
     {!scan && <gridHelper args={[100, 100, '#d7dee3', '#e8edef']} position={[0, -.12, 0]} />}
-    {scan ? <ScannedGeometry scan={scan} graph={graph} floor={floor} onFloorPick={onFloorPick} /> : <GraphFloor graph={graph} floor={floor} illustrative={illustrative} onFloorPick={onFloorPick} />}
+    {scan ? <ScannedGeometry scan={scan} graph={graph} floor={floor} zoneId={props.zoneId} onFloorPick={onFloorPick} /> : <GraphFloor graph={graph} floor={floor} illustrative={illustrative} zoneId={props.zoneId} onFloorPick={onFloorPick} />}
     {(editing || !scan) && graph.edges.map((edge, index) => {
       const from = graph.nodes.find(node => node.id === edge.from);
       const to = graph.nodes.find(node => node.id === edge.to);
@@ -392,11 +440,13 @@ function Scene(props: ViewerProps) {
 }
 
 export default function Viewer(props: ViewerProps) {
+  const stacked=useMemo(()=>props.zones&&props.zones.length>1?stackBuilding(props.zones,props.zoneConnections):[],[props.zones,props.zoneConnections]);
+  const overview=stacked.length>1&&props.floor==='all'&&!props.editing&&!props.walking;
   return <Canvas camera={{ position: [24, 23, 27], fov: 42 }} gl={{ antialias: true }}>
-    <Scene {...props} />
+    {overview?<StackScene zones={stacked} connections={props.zoneConnections} activeZoneId={props.zoneId} selected={props.selected} onSelect={props.onSelect} onFloorPick={props.onFloorPick} walker={props.walker}/>:<Scene {...props} />}
     <DropController request={props.dropRequest} onDrop={props.onWalkerDrop} />
     {props.walking && props.walker
       ? <WalkCamera location={props.walker} graph={props.graph} scan={props.scan} onMove={props.onWalkerMove} />
-      : <CameraRig graph={props.graph} scan={props.scan} floor={props.floor} reset={props.reset} />}
+      : overview?<StackCameraRig zones={stacked} reset={props.reset}/>:<CameraRig graph={props.graph} scan={props.scan} floor={props.floor} reset={props.reset} />}
   </Canvas>;
 }
