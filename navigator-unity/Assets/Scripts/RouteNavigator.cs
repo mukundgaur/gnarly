@@ -34,6 +34,19 @@ public class RouteNavigator : MonoBehaviour
 
     public bool IsActive => route != null;
     public bool HasArrived { get; private set; }
+
+    /// <summary>
+    /// True while an unfinished route is active and the user is still inside the walking corridor.
+    /// </summary>
+    public bool IsOnRoute
+    {
+        get
+        {
+            if (route == null || HasArrived || arCamera == null || route.waypoints == null || route.waypoints.Length < 2)
+                return false;
+            return HorizontalDistanceToRoute(arCamera.transform.position) <= pathRecognitionRadius;
+        }
+    }
     public string TargetWaypointId =>
         route?.waypoints == null || route.waypoints.Length == 0
             ? null
@@ -171,6 +184,17 @@ public class RouteNavigator : MonoBehaviour
     {
         if (endpointIndex <= 0) return false;
         return HorizontalDistanceToSegment(position, WaypointWorld(endpointIndex - 1), WaypointWorld(endpointIndex)) < corridorRadius;
+    }
+
+    float HorizontalDistanceToRoute(Vector3 position)
+    {
+        var nearest = float.MaxValue;
+        for (var i = 0; i < route.waypoints.Length - 1; i++)
+        {
+            var distance = HorizontalDistanceToSegment(position, WaypointWorld(i), WaypointWorld(i + 1));
+            if (distance < nearest) nearest = distance;
+        }
+        return nearest;
     }
 
     static float HorizontalDistanceToSegment(Vector3 point, Vector3 start, Vector3 end)
