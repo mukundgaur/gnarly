@@ -17,6 +17,7 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var isStairScan = false
     @Published private(set) var zoneConnectionsJSON = ""
     @Published private(set) var scanPlan = ScanPlan.empty
+    @Published private(set) var diagnosticsText = "No RoomPlan scan has started yet."
     private var uploadAttemptID: UUID?
 
     private enum ScanTarget {
@@ -38,6 +39,11 @@ final class MapperViewModel: ObservableObject {
     private var lastPlanUpdate = Date.distantPast
     private var lastStairCount = 0
     private let automaticNodeSpacingMeters: Float = 0.75
+    private var scanStartedAt: Date?
+    private var roomUpdateCount = 0
+    private var lastRoomStats = "No captured-room updates yet"
+    private var lastInstruction = "none"
+    private var lastCaptureFailure: String?
 
     var canMarkAnchor: Bool {
         arSession.currentFrame != nil
@@ -82,10 +88,16 @@ final class MapperViewModel: ObservableObject {
         }
         scanPlan = .empty
         lastStairCount = 0
+        scanStartedAt = Date()
+        roomUpdateCount = 0
+        lastRoomStats = "Waiting for RoomPlan geometry"
+        lastInstruction = "none"
+        lastCaptureFailure = nil
         colorRecorder.reset()
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
         statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
+        updateDiagnostics()
         startPathSampling()
     }
 
@@ -94,13 +106,19 @@ final class MapperViewModel: ObservableObject {
         statusText = "Processing RoomPlan scan…"
         isScanning = false
         stopPathSampling()
+        updateDiagnostics()
         // Keep ARKit running so its coordinate system remains valid for map export.
         captureView?.captureSession.stop(pauseARSession: false)
     }
 
     func didFinishCapture(data: CapturedRoomData, error: Error?) {
         if let error {
-            showError("RoomPlan stopped with an error: \(error.localizedDescription)")
+            let diagnosis = captureFailureDescription(error)
+            lastCaptureFailure = diagnosis
+            isScanning = false
+            stopPathSampling()
+            updateDiagnostics()
+            showError("RoomPlan stopped: \(diagnosis)")
             return
         }
 
@@ -158,6 +176,7 @@ final class MapperViewModel: ObservableObject {
     }
 
     func noteRoomUpdate(_ room: CapturedRoom) {
+        roomUpdateCount += 1
         let stairs = room.objects.reduce(into: 0) { count, object in
             if object.category == .stairs { count += 1 }
         }
@@ -165,7 +184,85 @@ final class MapperViewModel: ObservableObject {
         guard stairs != lastStairCount || now.timeIntervalSince(lastPlanUpdate) > 0.3 else { return }
         lastPlanUpdate = now
         lastStairCount = stairs
+        lastRoomStats = roomStatistics(room)
+        updateDiagnostics()
         scanPlan = ScanPlan(room: room)
+    }
+
+    func noteCaptureInstruction(_ instruction: RoomCaptureSession.Instruction) {
+        lastInstruction = String(describing: instruction)
+        updateDiagnostics()
+    }
+
+    private func updateDiagnostics() {
+        let elapsed = scanStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let mode = isStairScan ? "stair zone" : "floor zone"
+        let failure = lastCaptureFailure.map { "\nLast stop: \($0)" } ?? ""
+        diagnosticsText = """
+        Mode: \(mode) · scanning: \(isScanning ? "yes" : "no") · elapsed: \(Int(elapsed)) s
+        AR tracking: \(trackingStateDescription()) · thermal: \(thermalStateDescription())
+        RoomPlan updates: \(roomUpdateCount) · last instruction: \(lastInstruction)
+        Geometry: \(lastRoomStats)
+        Recorded path nodes: \(recordedNodes.count)
+        \(failure)
+        """.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func roomStatistics(_ room: CapturedRoom) -> String {
+        let surfaces = room.walls + room.doors + room.openings + room.windows + room.floors
+        let centers = surfaces.map { SIMD2<Float>($0.transform.columns.3.x, $0.transform.columns.3.z) }
+        let span: String
+        if let first = centers.first {
+            let minX = centers.map(\.x).min() ?? first.x
+            let maxX = centers.map(\.x).max() ?? first.x
+            let minZ = centers.map(\.y).min() ?? first.y
+            let maxZ = centers.map(\.y).max() ?? first.y
+            span = String(format: "feature span %.1f m × %.1f m", maxX - minX, maxZ - minZ)
+        } else {
+            span = "no surface centers yet"
+        }
+        return "\(room.walls.count) walls · \(room.floors.count) floors · \(room.doors.count) doors · \(room.openings.count) openings · \(room.windows.count) windows · \(room.objects.count) objects · \(span)"
+    }
+
+    private func captureFailureDescription(_ error: Error) -> String {
+        guard let captureError = error as? RoomCaptureSession.CaptureError else {
+            return "\(String(describing: error)) (\(error.localizedDescription))"
+        }
+        switch captureError {
+        case .exceedSceneSizeLimit:
+            return "RoomPlan scene-size limit exceeded. Split this floor into smaller zones."
+        case .deviceTooHot:
+            return "Device is too hot for RoomPlan. Let it cool, remove the case if practical, then retry."
+        case .worldTrackingFailure:
+            return "ARKit world tracking failed. Return to a well-lit, feature-rich area and start a new zone."
+        case .invalidARConfiguration:
+            return "RoomPlan rejected the AR configuration. Restart the app and try again."
+        case .deviceNotSupported:
+            return "This device does not support RoomPlan/LiDAR capture."
+        case .internalError:
+            return "RoomPlan reported an internal error. Save the diagnostics and retry a smaller zone."
+        @unknown default:
+            return "RoomPlan stopped with an unknown capture error: \(String(describing: captureError))."
+        }
+    }
+
+    private func trackingStateDescription() -> String {
+        guard let state = arSession.currentFrame?.camera.trackingState else { return "no AR frame" }
+        switch state {
+        case .normal: return "normal"
+        case .notAvailable: return "not available"
+        case .limited(let reason): return "limited (\(String(describing: reason)))"
+        }
+    }
+
+    private func thermalStateDescription() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 
     func beginFloorScan() {

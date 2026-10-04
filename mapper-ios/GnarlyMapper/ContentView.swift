@@ -1,5 +1,6 @@
 import SwiftUI
 import RoomPlan
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
@@ -136,6 +137,15 @@ struct ContentView: View {
                         TextField("Version", text: $versionID)
                         TextField("Zone", text: $zoneID)
                         TextField("Floor", text: $floorID)
+                    }
+
+                    Section("Scan diagnostics") {
+                        Text(mapper.diagnosticsText)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button("Copy diagnostics") {
+                            UIPasteboard.general.string = mapper.diagnosticsText
+                        }
                     }
 
                     Section("Firebase") {
