@@ -148,6 +148,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     bool compactTopDown = true;
     Vector3 cameraFocus;
     float zoom = 1f;
+    float mapYawDegrees;
 
 #if UNITY_IOS && !UNITY_EDITOR
     [DllImport("__Internal")]
@@ -680,6 +681,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
         {
             var point = route.SessionSpacePosition(i);
             point.y = FloorHeight(point.y) + 0.02f;
+            // The full-screen planner renders a building-wide, authored coordinate frame.
+            // Guidance routes remain local to the currently relocalized ARKit zone, so convert
+            // their display copy here instead of drawing an apparent straight-line shortcut.
+            if (showingBuildingPlanner)
+                point = Quaternion.Euler(0f, currentZonePlannerRotation, 0f) * point + currentZonePlannerOffset;
             points.Add(point);
         }
 
@@ -720,15 +726,16 @@ public partial class IndoorMapOverlay : MonoBehaviour
             mapCamera.orthographicSize = span * 0.58f / zoom;
             mapCamera.transform.SetPositionAndRotation(
                 sessionSpace.TransformPoint(cameraFocus + Vector3.up * (span + 20f)),
-                sessionSpace.rotation * Quaternion.Euler(90f, 0f, 0f));
+                sessionSpace.rotation * Quaternion.Euler(90f, mapYawDegrees, 0f));
         }
         else
         {
             mapCamera.orthographicSize = span * 0.62f / zoom;
-            var offset = Quaternion.Euler(CompactPitch, 0f, 0f) * Vector3.back * (span + 20f);
+            var orbit = Quaternion.Euler(CompactPitch, mapYawDegrees, 0f);
+            var offset = orbit * Vector3.back * (span + 20f);
             mapCamera.transform.SetPositionAndRotation(
                 sessionSpace.TransformPoint(cameraFocus + offset),
-                sessionSpace.rotation * Quaternion.Euler(CompactPitch, 0f, 0f));
+                sessionSpace.rotation * orbit);
         }
     }
 

@@ -65,6 +65,14 @@ public partial class IndoorMapOverlay
     Button clearDestinationButton;
     Button swapButton;
     Button viewModeButton;
+    Button fullscreenButton;
+    RectTransform plannerHeader;
+    RectTransform plannerRouteCard;
+    RectTransform plannerMap;
+    RectTransform plannerSheet;
+    bool fullscreenMap;
+    Vector2 normalMapOffsetMin;
+    Vector2 normalMapOffsetMax;
     RectTransform hintChip;
     Image hintDot;
     Text hintText;
@@ -170,6 +178,8 @@ public partial class IndoorMapOverlay
         // overhead picker with the 2D/3D control.
         topDown = false;
         zoom = 1f;
+        mapYawDegrees = 0f;
+        SetFullscreenMap(false);
         EnterBuildingPlannerView();
         cameraFocus = userMarker != null && !showingBuildingPlanner ? ClampFocus(userMarker.localPosition) : center;
         if (mapCamera != null)
@@ -191,6 +201,8 @@ public partial class IndoorMapOverlay
         if (compactCard != null) compactCard.gameObject.SetActive(true);
         topDown = compactTopDown;
         zoom = 1f;
+        mapYawDegrees = 0f;
+        SetFullscreenMap(false);
         ExitBuildingPlannerView();
         if (mapCamera != null)
         {
@@ -391,6 +403,12 @@ public partial class IndoorMapOverlay
     void OnMapPanned(Vector2 delta)
     {
         if (mapCamera == null) return;
+        if (!topDown)
+        {
+            // A horizontal drag orbits the 3D building, like the website's overview.
+            mapYawDegrees = Mathf.Repeat(mapYawDegrees + delta.x * 0.22f, 360f);
+            return;
+        }
         var height = mapCamera.orthographicSize * 2f;
         var width = height * mapCamera.aspect;
         var groundDelta = topDown ? delta.y * height : delta.y * height / Mathf.Sin(CompactPitch * Mathf.Deg2Rad);
@@ -402,7 +420,31 @@ public partial class IndoorMapOverlay
     void Recenter()
     {
         zoom = 1f;
+        mapYawDegrees = 0f;
         cameraFocus = userMarker != null ? ClampFocus(userMarker.localPosition) : center;
+    }
+
+    void ToggleFullscreenMap() => SetFullscreenMap(!fullscreenMap);
+
+    /// <summary>Lets the building overview occupy the whole route-planner sheet without losing selection state.</summary>
+    void SetFullscreenMap(bool full)
+    {
+        fullscreenMap = full;
+        if (plannerMap == null) return;
+        if (plannerHeader != null) plannerHeader.gameObject.SetActive(!full);
+        if (plannerRouteCard != null) plannerRouteCard.gameObject.SetActive(!full);
+        if (plannerSheet != null) plannerSheet.gameObject.SetActive(!full);
+        plannerMap.anchorMin = full ? Vector2.zero : Vector2.zero;
+        plannerMap.anchorMax = full ? Vector2.one : Vector2.one;
+        plannerMap.offsetMin = full ? Vector2.zero : normalMapOffsetMin;
+        plannerMap.offsetMax = full ? Vector2.zero : normalMapOffsetMax;
+        if (fullscreenButton != null)
+        {
+            var label = MapUi.ButtonLabel(fullscreenButton);
+            if (label != null) label.text = full ? "×" : "⛶";
+        }
+        Canvas.ForceUpdateCanvases();
+        EnsurePlannerTexture();
     }
 
     void FocusOn(MapPlace place) => cameraFocus = ClampFocus(MapPosition(place));
@@ -561,17 +603,22 @@ public partial class IndoorMapOverlay
         const float footerHeight = 262f;
         const float gap = 18f;
 
-        BuildHeader(Top(content, 0f, headerHeight));
-        BuildRouteCard(Top(content, headerHeight + gap, cardHeight));
+        plannerHeader = Top(content, 0f, headerHeight);
+        BuildHeader(plannerHeader);
+        plannerRouteCard = Top(content, headerHeight + gap, cardHeight);
+        BuildRouteCard(plannerRouteCard);
         var mapTop = headerHeight + gap + cardHeight + gap;
         var mapBottom = footerHeight + gap + placesHeight - 40f;
-        BuildMap(MapUi.Rect("Map", content, Vector2.zero, Vector2.one, new Vector2(0, mapBottom), new Vector2(0, -mapTop)));
-        var sheet = MapUi.Rect("PlacesSheet", content, Vector2.zero, new Vector2(1, 0), Vector2.zero,
+        plannerMap = MapUi.Rect("Map", content, Vector2.zero, Vector2.one, new Vector2(0, mapBottom), new Vector2(0, -mapTop));
+        normalMapOffsetMin = plannerMap.offsetMin;
+        normalMapOffsetMax = plannerMap.offsetMax;
+        BuildMap(plannerMap);
+        plannerSheet = MapUi.Rect("PlacesSheet", content, Vector2.zero, new Vector2(1, 0), Vector2.zero,
             new Vector2(0, footerHeight + gap + placesHeight));
-        MapUi.Panel(sheet, MapUi.Surface, 42f, true);
-        BuildPlacesSection(MapUi.Rect("Places", sheet, Vector2.zero, new Vector2(1, 0),
+        MapUi.Panel(plannerSheet, MapUi.Surface, 42f, true);
+        BuildPlacesSection(MapUi.Rect("Places", plannerSheet, Vector2.zero, new Vector2(1, 0),
             new Vector2(20, footerHeight + gap), new Vector2(-20, footerHeight + gap + placesHeight - 12f)));
-        BuildFooter(MapUi.Rect("Footer", sheet, Vector2.zero, new Vector2(1, 0), new Vector2(20, 0), new Vector2(-20, footerHeight)));
+        BuildFooter(MapUi.Rect("Footer", plannerSheet, Vector2.zero, new Vector2(1, 0), new Vector2(20, 0), new Vector2(-20, footerHeight)));
 
         plannerRoot.gameObject.SetActive(false);
         RefreshSelection();
@@ -684,6 +731,9 @@ public partial class IndoorMapOverlay
             "-", MapUi.Surface, MapUi.TextPrimary, 52, () => OnMapZoomed(1f / 1.4f), 30f);
         MapUi.Button(MapUi.Rect("Recenter", controls, Vector2.zero, new Vector2(1, 0), Vector2.zero, new Vector2(0, 84)),
             "ME", MapUi.Surface, MapUi.User, 28, Recenter, 30f);
+
+        var full = MapUi.Sized("Fullscreen", mapViewport, new Vector2(0, 1), new Vector2(74, 74), new Vector2(48, -48));
+        fullscreenButton = MapUi.Button(full, "⛶", MapUi.Surface, MapUi.TextPrimary, 40, ToggleFullscreenMap, 30f);
 
         var legend = MapUi.Rect("Legend", mapViewport, Vector2.zero, Vector2.zero, new Vector2(20, 20), new Vector2(560, 76));
         MapUi.Panel(legend, new Color(1f, 1f, 1f, 0.94f), 28f);
