@@ -29,6 +29,7 @@ struct TestAnchor: Codable {
 enum GraphNodeType: String, Codable, CaseIterable, Identifiable {
     case entrance
     case hallway
+    case elevator
     case stairs
     case destination
     case door
@@ -41,6 +42,7 @@ enum GraphNodeType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .entrance: return "Entrance"
         case .hallway: return "Hallway"
+        case .elevator: return "Elevator"
         case .stairs: return "Stairs"
         case .destination: return "Destination"
         case .door: return "Door"

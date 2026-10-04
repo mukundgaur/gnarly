@@ -44,12 +44,12 @@ Tap **Stairs** after the floor scan. That starts a new world map for the stairwe
 
 Uploading from the mapper publishes raw `scan.json`, normalized `scan-features.json`, `structure.usdz`, `building.json`, and the zone ARWorldMap. The navigator requires all five files for a complete interactive-map package. Re-upload scans whose active Firebase version predates this package format.
 
-## Multi-zone buildings (floors and stairs)
+## Multi-floor buildings
 
-A zone is one scan with its own ARWorldMap. Scan each floor area as one zone and each staircase as its own zone (for example `floor-1`, `stairs-a`, `floor-2`). The Unity navigator plans A* across zones using `zone-connections.json` ([schema](../shared/zone-connections.schema.json), [example](../shared/examples/zone-connections.example.json)). Each connection links two nodes that are physically next to each other in different zones, and has A* weight 1.
+A building owns one version, and each floor is uploaded as its own zone/file set with its own `building.json`, scan files, structure, and ARWorldMap (for example `floor-1`, `floor-2`, `floor-3`). Label the same physical elevator as an `elevator` node in each floor graph. The web editor writes links between those nodes to `zone-connections.json` ([schema](../shared/zone-connections.schema.json), [example](../shared/examples/zone-connections.example.json)). The Unity navigator treats each link as bidirectional and plans A* across floors.
 
-RoomPlan’s `stairs` object is part of the floor scan. While scanning, the mapper draws a live floor plan and includes that object automatically; there is no separate control to turn stairs on. Export writes `zone-connections.json` when a stair was detected: the floor’s stair node links to `landing-below` or `landing-above` in the stair zone. `prev` is the floor below and `next` is the floor above. Uploading a package also uploads that file to `buildings/{buildingId}/{versionId}/zone-connections.json`, which the navigator already uses for multi-zone A*.
+The mapper’s manual waypoint type picker includes **Elevator**. Record or add the elevator point on each floor, upload every floor under the same building version, and connect the matching points in the web editor. Existing stair-zone packages remain compatible, but stairs are no longer the primary multi-floor workflow.
 
-Doors and other non-stair portals can still be added by editing the JSON before **Publish zone connections**. Firebase still needs each zone uploaded under the same version, with that zone’s own `building.json`.
+Firebase stores the shared connection file at `buildings/{buildingId}/{versionId}/zone-connections.json` and each floor graph under `buildings/{buildingId}/{versionId}/zones/{floorZoneId}/building.json`.
 
 `building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

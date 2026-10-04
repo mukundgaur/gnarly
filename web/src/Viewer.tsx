@@ -370,11 +370,11 @@ function Scene(props: ViewerProps) {
       const status = checkEdge(edge, graph, scan).status;
       return <Line key={index} points={[from.position, to.position]} color={status === 'blocked' ? '#d88a82' : status === 'unverified' ? '#d4ac62' : '#8abdb2'} lineWidth={editing ? 2 : 1} transparent opacity={editing ? .8 : .35} />;
     })}
-    {visibleNodes.filter(node => editing || node.label || node.type === 'entrance' || node.type === 'destination' || node.type === 'stairs').map(node =>
+    {visibleNodes.filter(node => editing || node.label || node.type === 'entrance' || node.type === 'destination' || node.type === 'elevator' || node.type === 'stairs').map(node =>
       <group key={node.id} position={node.position} onClick={event => { event.stopPropagation(); onSelect(node.id); }}>
         <mesh position={[0, .35, 0]}>
           <cylinderGeometry args={[.16, .16, .7, 20]} />
-          <meshStandardMaterial color={node.id === selected ? '#0b8b81' : node.type === 'stairs' ? '#e6a84d' : '#277ad1'} />
+          <meshStandardMaterial color={node.id === selected ? '#0b8b81' : node.type === 'elevator' ? '#8b5cf6' : node.type === 'stairs' ? '#e6a84d' : '#277ad1'} />
         </mesh>
         {(node.label || node.id === selected || !editing) && <Html position={[0, .9, 0]} center distanceFactor={13}>
           <button className={'scene-label ' + (node.id === selected ? 'chosen' : '')} onClick={() => onSelect(node.id)}>
