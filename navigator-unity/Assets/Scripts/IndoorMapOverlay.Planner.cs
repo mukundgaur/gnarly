@@ -28,6 +28,8 @@ public partial class IndoorMapOverlay
     }
 
     const float PickRadius = 80f;
+    /// <summary>Tap score pixels per meter of camera depth.</summary>
+    const float DepthPickPenalty = 3f;
     const float HintSeconds = 3.5f;
     const float MinZoom = 0.6f;
     const float MaxZoom = 6f;
@@ -72,6 +74,7 @@ public partial class IndoorMapOverlay
     RectTransform plannerMap;
     RectTransform plannerSheet;
     bool fullscreenMap;
+    float plannerTopY;
     Vector2 normalMapOffsetMin;
     Vector2 normalMapOffsetMax;
     RectTransform hintChip;
@@ -165,6 +168,7 @@ public partial class IndoorMapOverlay
     public void OpenPlanner(bool focusDestination)
     {
         if (plannerRoot == null) return;
+        var wasOpen = IsPlannerOpen;
         activeSlot = focusDestination || destinationKey == null ? Slot.Destination : Slot.Start;
         zoneFilter = null;
         plannerRoot.gameObject.SetActive(true);
@@ -177,9 +181,16 @@ public partial class IndoorMapOverlay
         EnsurePlannerTexture();
         // Match the website's building overview first; the user can switch to the precise
         // overhead picker with the 2D/3D control.
+        if (!wasOpen)
+        {
+            compactZoom = zoom;
+            compactYawDegrees = mapYawDegrees;
+            compactPitchDegrees = mapPitchDegrees;
+        }
         topDown = false;
         zoom = 1f;
         mapYawDegrees = 0f;
+        mapPitchDegrees = CompactPitch;
         SetFullscreenMap(false);
         EnterBuildingPlannerView();
         cameraFocus = userMarker != null && !showingBuildingPlanner ? ClampFocus(userMarker.localPosition) : center;
@@ -201,10 +212,12 @@ public partial class IndoorMapOverlay
         plannerRoot.gameObject.SetActive(false);
         if (compactCard != null) compactCard.gameObject.SetActive(true);
         topDown = compactTopDown;
-        zoom = 1f;
-        mapYawDegrees = 0f;
+        zoom = compactZoom;
+        mapYawDegrees = compactYawDegrees;
+        mapPitchDegrees = compactPitchDegrees;
         SetFullscreenMap(false);
         ExitBuildingPlannerView();
+        cameraFocus = center;
         if (mapCamera != null)
         {
             mapCamera.targetTexture = compactTexture;
@@ -258,7 +271,7 @@ public partial class IndoorMapOverlay
             if (startKey == place.key) startKey = null;
         }
         hintUntil = 0f;
-        if (place.inCurrentZone) FocusOn(place);
+        if (IsOnMap(place)) FocusOn(place);
         if (chosenStart && placeSearch != null)
             placeSearch.SetTextWithoutNotify("");
         BuildPlaceRows();
@@ -360,7 +373,7 @@ public partial class IndoorMapOverlay
         foreach (var place in places)
         {
             if (!place.inCurrentZone) continue;
-            var offset = place.sessionPosition - userMarker.localPosition;
+            var offset = MapPosition(place) - userMarker.localPosition;
             offset.y = 0f;
             var distance = offset.sqrMagnitude - (place.major ? 0.25f : 0f);
             if (distance < bestDistance)
@@ -382,12 +395,13 @@ public partial class IndoorMapOverlay
         var bestScore = float.MaxValue;
         foreach (var place in places)
         {
-            if (!place.inCurrentZone && (!showingBuildingPlanner || !place.hasPlannerPosition)) continue;
-            var projected = mapCamera.WorldToViewportPoint(MapPosition(place));
+            if (!IsOnMap(place)) continue;
+            var projected = mapCamera.WorldToViewportPoint(MapWorldPosition(place));
             if (projected.z < 0f) continue;
             var pixels = Vector2.Scale(new Vector2(projected.x - viewport.x, projected.y - viewport.y), size).magnitude;
             if (pixels > PickRadius) continue;
-            var score = pixels - (place.major ? 18f : 0f);
+            // Floors stack in the building view. Prefer the nearer floor, which is drawn on top.
+            var score = pixels - (place.major ? 18f : 0f) + projected.z * DepthPickPenalty;
             if (score < bestScore)
             {
                 bestScore = score;
@@ -406,14 +420,15 @@ public partial class IndoorMapOverlay
         if (mapCamera == null) return;
         if (!topDown)
         {
-            // A horizontal drag orbits the 3D building, like the website's overview.
-            mapYawDegrees = Mathf.Repeat(mapYawDegrees + delta.x * 0.22f, 360f);
+            // Dragging orbits and tilts the 3D building, like the website's overview.
+            Orbit(delta, true);
             return;
         }
         var height = mapCamera.orthographicSize * 2f;
         var width = height * mapCamera.aspect;
-        var groundDelta = topDown ? delta.y * height : delta.y * height / Mathf.Sin(CompactPitch * Mathf.Deg2Rad);
-        cameraFocus = ClampFocus(cameraFocus - new Vector3(delta.x * width, 0f, groundDelta));
+        // The top-down camera is yawed, so screen axes are rotated on the ground plane.
+        var ground = Quaternion.Euler(0f, mapYawDegrees, 0f) * new Vector3(delta.x * width, 0f, delta.y * height);
+        cameraFocus = ClampFocus(cameraFocus - ground);
     }
 
     void OnMapZoomed(float factor) => zoom = Mathf.Clamp(zoom * factor, MinZoom, MaxZoom);
@@ -422,6 +437,7 @@ public partial class IndoorMapOverlay
     {
         zoom = 1f;
         mapYawDegrees = 0f;
+        mapPitchDegrees = CompactPitch;
         cameraFocus = userMarker != null ? ClampFocus(userMarker.localPosition) : center;
     }
 
@@ -484,6 +500,7 @@ public partial class IndoorMapOverlay
         center = (min + max) * 0.5f;
         span = Mathf.Max(4f, Mathf.Max(max.x - min.x, max.z - min.z) + 3f);
         center.y = min.y;
+        plannerTopY = max.y;
         markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
         lineWidth = Mathf.Clamp(span * 0.012f, 0.07f, 0.24f);
         BuildPlaceMarkers(places);
@@ -505,9 +522,10 @@ public partial class IndoorMapOverlay
     Vector3 ClampFocus(Vector3 focus)
     {
         var limit = span * 0.6f;
+        // The building view may center on an upper floor; the zone view stays on its floor.
         return new Vector3(
             Mathf.Clamp(focus.x, center.x - limit, center.x + limit),
-            center.y,
+            showingBuildingPlanner ? Mathf.Clamp(focus.y, center.y, Mathf.Max(center.y, plannerTopY)) : center.y,
             Mathf.Clamp(focus.z, center.z - limit, center.z + limit));
     }
 
@@ -557,12 +575,14 @@ public partial class IndoorMapOverlay
         {
             var isWaypoint = label.place.key == ActiveFloorWaypoint();
             var selected = label.place.key == startKey || label.place.key == destinationKey || isWaypoint;
-            var showLabel = label.place.major || selected;
-            var viewport = mapCamera.WorldToViewportPoint(MapPosition(label.place));
+            var showLabel = (label.place.major || selected) && IsOnMap(label.place);
+            var viewport = mapCamera.WorldToViewportPoint(MapWorldPosition(label.place));
             var visible = showLabel && viewport.z > 0f && viewport.x > 0.02f && viewport.x < 0.98f && viewport.y > 0.02f && viewport.y < 0.95f;
             label.rect.gameObject.SetActive(visible);
             if (!visible) continue;
-            label.text.text = isWaypoint ? $"{label.place.name}  ·  waypoint" : label.place.name;
+            label.text.text = isWaypoint ? $"{label.place.name}  ·  waypoint"
+                : selected && !label.place.inCurrentZone ? $"{label.place.name}  ·  {label.place.zone}"
+                : label.place.name;
             label.rect.sizeDelta = new Vector2(Mathf.Min(420f, label.text.preferredWidth + 32f), 46f);
             label.rect.anchoredPosition = new Vector2(viewport.x * rect.width, viewport.y * rect.height + 28f);
             label.background.color = label.place.key == startKey ? MapUi.WithAlpha(MapUi.Start, 0.95f)
@@ -577,11 +597,12 @@ public partial class IndoorMapOverlay
         if (pin == null) return;
         if (pin == destinationPin)
         {
-            var destinationOnMap = key != null && placesByKey.TryGetValue(key, out var destination) && destination.inCurrentZone;
+            // In the building view the destination on another floor is drawn, so pin it there;
+            // its elevator is labelled as the waypoint. The single-zone minimap pins the elevator.
+            var destinationOnMap = key != null && placesByKey.TryGetValue(key, out var destination) && IsOnMap(destination);
             if (!destinationOnMap) key = ActiveFloorWaypoint();
         }
-        var visible = key != null && placesByKey.TryGetValue(key, out var place) &&
-            (place.inCurrentZone || (showingBuildingPlanner && place.hasPlannerPosition));
+        var visible = key != null && placesByKey.TryGetValue(key, out var place) && IsOnMap(place);
         pin.gameObject.SetActive(visible);
         if (visible) pin.localPosition = MapPosition(placesByKey[key]) + Vector3.up * 0.05f;
     }
@@ -897,8 +918,8 @@ public partial class IndoorMapOverlay
         mapLabels.Clear();
         foreach (var place in places)
         {
-            if (!place.inCurrentZone) continue;
-            var rect = MapUi.Rect("Label-" + place.localId, labelLayer, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero);
+            if (!place.inCurrentZone && !place.hasPlannerPosition) continue;
+            var rect = MapUi.Rect("Label-" + place.key, labelLayer, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero);
             rect.pivot = new Vector2(0.5f, 0f);
             var background = MapUi.Panel(rect, new Color(0.12f, 0.2f, 0.3f, 0.9f), 22f);
             var text = MapUi.Label(MapUi.Stretch("Text", rect), place.name, 24, Color.white, TextAnchor.MiddleCenter, FontStyle.Bold);

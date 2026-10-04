@@ -8,7 +8,7 @@ using UnityEngine.EventSystems;
 /// Positions are normalized to the image rect (0..1), which equals the map camera's viewport.
 /// </summary>
 public sealed class MapViewportInput : MonoBehaviour,
-    IPointerDownHandler, IPointerUpHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IScrollHandler
+    IPointerDownHandler, IPointerUpHandler, IPointerClickHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IScrollHandler
 {
     const float TapSlopPixels = 18f;
 
@@ -50,6 +50,9 @@ public sealed class MapViewportInput : MonoBehaviour,
         if (TryNormalize(eventData.position, eventData.pressEventCamera, out var normalized))
             Tapped?.Invoke(normalized);
     }
+
+    /// <summary>Taps are reported through <see cref="Tapped"/>; this keeps a click from also reaching a parent button.</summary>
+    public void OnPointerClick(PointerEventData eventData) { }
 
     public void OnBeginDrag(PointerEventData eventData) { }
 

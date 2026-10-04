@@ -97,6 +97,10 @@ public partial class IndoorMapOverlay : MonoBehaviour
     const int MarkerQueue = 3200;
     const int RouteQueue = 3100;
     const float CompactPitch = 61f;
+    const float MinPitch = 15f;
+    const float MaxPitch = 88f;
+    /// <summary>Degrees of yaw for a drag across the whole map, close to the native RealityKit viewer.</summary>
+    const float OrbitDegreesPerViewport = 180f;
 
     Transform sessionSpace;
     Camera arCamera;
@@ -149,6 +153,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
     Vector3 cameraFocus;
     float zoom = 1f;
     float mapYawDegrees;
+    float mapPitchDegrees = CompactPitch;
+    // The minimap keeps its own orbit while the planner is open.
+    float compactZoom = 1f;
+    float compactYawDegrees;
+    float compactPitchDegrees = CompactPitch;
 
 #if UNITY_IOS && !UNITY_EDITOR
     [DllImport("__Internal")]
@@ -578,7 +587,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         if (places == null) return;
         foreach (var place in places)
         {
-            if (!place.inCurrentZone && (!showingBuildingPlanner || !place.hasPlannerPosition)) continue;
+            if (!IsOnMap(place)) continue;
             var size = place.major ? markerSize : markerSize * 0.6f;
             var marker = Primitive(PrimitiveType.Cylinder, "Place-" + place.localId, markerRoot,
                 MarkerMaterial(place.Color, place.major ? 1 : 0));
@@ -601,6 +610,13 @@ public partial class IndoorMapOverlay : MonoBehaviour
         if (showingBuildingPlanner && place.hasPlannerPosition) return place.plannerPosition;
         return MarkerPosition(place);
     }
+
+    /// <summary>True when the place has a marker in the current presentation mode.</summary>
+    bool IsOnMap(MapPlace place) => place.inCurrentZone || (showingBuildingPlanner && place.hasPlannerPosition);
+
+    /// <summary>World position of a place's marker, for projecting through the map camera.</summary>
+    Vector3 MapWorldPosition(MapPlace place) =>
+        sessionSpace != null ? sessionSpace.TransformPoint(MapPosition(place)) : MapPosition(place);
 
     /// <summary>
     /// Render each downloaded RoomPlan zone in the website-authored arrangement. These copies
@@ -731,7 +747,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         else
         {
             mapCamera.orthographicSize = span * 0.62f / zoom;
-            var orbit = Quaternion.Euler(CompactPitch, mapYawDegrees, 0f);
+            var orbit = Quaternion.Euler(mapPitchDegrees, mapYawDegrees, 0f);
             var offset = orbit * Vector3.back * (span + 20f);
             mapCamera.transform.SetPositionAndRotation(
                 sessionSpace.TransformPoint(cameraFocus + offset),
@@ -758,7 +774,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
         mapFrame.gameObject.AddComponent<RectMask2D>();
         var image = MapUi.Stretch("MapImage", mapFrame).gameObject.AddComponent<RawImage>();
         image.texture = compactTexture;
-        image.raycastTarget = false;
+        image.raycastTarget = true;
+        var compactInput = image.gameObject.AddComponent<MapViewportInput>();
+        compactInput.Tapped += _ => OpenPlanner(true);
+        compactInput.Panned += delta => Orbit(delta, !compactTopDown);
+        compactInput.Zoomed += factor => zoom = Mathf.Clamp(zoom * factor, MinZoom, MaxZoom);
         compactModeButton = MapUi.Button(MapUi.Rect("MapMode", mapFrame, new Vector2(0, 1), new Vector2(0, 1),
                 new Vector2(14, -78), new Vector2(114, -14)), "3D", MapUi.Surface,
             MapUi.TextPrimary, 29, ToggleCompactMode, 25f);
@@ -787,6 +807,14 @@ public partial class IndoorMapOverlay : MonoBehaviour
         if (!IsPlannerOpen) topDown = compactTopDown;
         var label = MapUi.ButtonLabel(compactModeButton);
         if (label != null) label.text = compactTopDown ? "3D" : "2D";
+    }
+
+    /// <summary>Horizontal drag spins the map; vertical drag tilts it when <paramref name="tilt"/> is set.</summary>
+    void Orbit(Vector2 delta, bool tilt)
+    {
+        mapYawDegrees = Mathf.Repeat(mapYawDegrees + delta.x * OrbitDegreesPerViewport, 360f);
+        if (tilt)
+            mapPitchDegrees = Mathf.Clamp(mapPitchDegrees - delta.y * OrbitDegreesPerViewport * 0.5f, MinPitch, MaxPitch);
     }
 
     /// <summary>Opens the RealityKit model with the planner's current selection. Returns an error, or null.</summary>
@@ -897,6 +925,11 @@ public partial class IndoorMapOverlay : MonoBehaviour
         mapFloorY = float.NaN;
         topDown = false;
         zoom = 1f;
+        mapYawDegrees = 0f;
+        mapPitchDegrees = CompactPitch;
+        compactZoom = 1f;
+        compactYawDegrees = 0f;
+        compactPitchDegrees = CompactPitch;
         ResetPlannerUi();
     }
 
