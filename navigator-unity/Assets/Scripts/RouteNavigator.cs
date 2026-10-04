@@ -12,6 +12,8 @@ public class RouteNavigator : MonoBehaviour
     [SerializeField] float deviceHeightToFloor = -1.3f;
     [Tooltip("Horizontal distance (m) at which an intermediate waypoint counts as reached.")]
     [SerializeField] float reachRadius = 0.15f;
+    [Tooltip("Horizontal distance (m) from the walked route segment that advances nearby intermediate anchors.")]
+    [SerializeField] float pathRecognitionRadius = 1.25f;
     [Tooltip("Horizontal distance (m) to the final waypoint that counts as arrival.")]
     [SerializeField] float arriveRadius = 0.75f;
     // Old scenes serialized this at 1 m. Never allow a saved value to make the generated
@@ -142,11 +144,33 @@ public class RouteNavigator : MonoBehaviour
     {
         var last = route.waypoints.Length - 1;
         var intermediateReachRadius = Mathf.Clamp(reachRadius, 0.1f, MaximumIntermediateReachRadius);
-        while (targetIndex < last && HorizontalDistance(cameraPosition, WaypointWorld(targetIndex)) < intermediateReachRadius)
+        var corridorRadius = Mathf.Clamp(pathRecognitionRadius, intermediateReachRadius, 2.5f);
+        // Guidance points are dense visual anchors, not spots the user must step directly on.
+        // Once the user is inside the corridor around the segment leading to an anchor, hide that
+        // already-walked portion of the blue path and continue toward the next anchor.
+        while (targetIndex < last && IsAtOrNearPathSegment(cameraPosition, targetIndex, corridorRadius))
             targetIndex++;
 
         if (targetIndex == last && HorizontalDistance(cameraPosition, WaypointWorld(last)) < arriveRadius)
             HasArrived = true;
+    }
+
+    bool IsAtOrNearPathSegment(Vector3 position, int endpointIndex, float corridorRadius)
+    {
+        if (endpointIndex <= 0) return false;
+        return HorizontalDistanceToSegment(position, WaypointWorld(endpointIndex - 1), WaypointWorld(endpointIndex)) < corridorRadius;
+    }
+
+    static float HorizontalDistanceToSegment(Vector3 point, Vector3 start, Vector3 end)
+    {
+        var flatPoint = new Vector2(point.x, point.z);
+        var flatStart = new Vector2(start.x, start.z);
+        var segment = new Vector2(end.x - start.x, end.z - start.z);
+        var lengthSquared = segment.sqrMagnitude;
+        if (lengthSquared < 1e-6f) return Vector2.Distance(flatPoint, flatStart);
+
+        var t = Mathf.Clamp01(Vector2.Dot(flatPoint - flatStart, segment) / lengthSquared);
+        return Vector2.Distance(flatPoint, flatStart + segment * t);
     }
 
     void UpdateLine(Vector3 cameraPosition)
