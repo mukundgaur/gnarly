@@ -1,10 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 
 /// <summary>
-/// Draws a highlighted path through the route's waypoints and, when the next waypoint is off-screen,
-/// an arrow at the screen edge pointing toward it.
+/// Draws a highlighted path through the route's waypoints.
 /// </summary>
 public class RouteNavigator : MonoBehaviour
 {
@@ -16,9 +14,6 @@ public class RouteNavigator : MonoBehaviour
     [SerializeField] float reachRadius = 0.15f;
     [Tooltip("Horizontal distance (m) to the final waypoint that counts as arrival.")]
     [SerializeField] float arriveRadius = 0.75f;
-    [Tooltip("Fraction of the screen edge treated as out of view.")]
-    [SerializeField] float viewportMargin = 0.1f;
-
     // Old scenes serialized this at 1 m. Never allow a saved value to make the generated
     // sub-metre guidance points get skipped at runtime.
     const float MaximumIntermediateReachRadius = 0.18f;
@@ -34,12 +29,6 @@ public class RouteNavigator : MonoBehaviour
     LineRenderer line;
     readonly List<GameObject> markers = new List<GameObject>();
     readonly List<Vector3> linePoints = new List<Vector3>();
-
-    RectTransform canvasRect;
-    RectTransform arrow;
-    RectTransform arrowBackdrop;
-    RectTransform arrowLabelRect;
-    Text arrowLabel;
 
     public bool IsActive => route != null;
     public bool HasArrived { get; private set; }
@@ -61,7 +50,6 @@ public class RouteNavigator : MonoBehaviour
 
         material = new Material(Shader.Find("Sprites/Default"));
         BuildPath();
-        BuildArrowUi();
         targetIndex = NextWaypointAfterClosestPathPoint(arCamera.transform.position);
     }
 
@@ -70,7 +58,6 @@ public class RouteNavigator : MonoBehaviour
         visible = isVisible;
         if (line != null) line.enabled = isVisible;
         foreach (var marker in markers) marker.SetActive(isVisible);
-        if (!isVisible) SetArrowActive(false);
     }
 
     /// <summary>
@@ -91,7 +78,6 @@ public class RouteNavigator : MonoBehaviour
         foreach (var marker in markers) Destroy(marker);
         markers.Clear();
         if (line != null) Destroy(line.gameObject);
-        if (canvasRect != null) Destroy(canvasRect.parent != null ? canvasRect.parent.gameObject : canvasRect.gameObject);
         if (material != null) Destroy(material);
         StatusMessage = "";
     }
@@ -105,7 +91,6 @@ public class RouteNavigator : MonoBehaviour
         var cameraPosition = arCamera.transform.position;
         AdvanceTarget(cameraPosition);
         UpdateLine(cameraPosition);
-        UpdateArrow(WaypointWorld(targetIndex));
         UpdateStatus(cameraPosition);
 
         var pulse = 0.75f + 0.25f * Mathf.Sin(Time.time * 4f);
@@ -190,51 +175,6 @@ public class RouteNavigator : MonoBehaviour
         StatusMessage = $"Follow the path · {remaining:0.0} m to go";
     }
 
-    void UpdateArrow(Vector3 targetWorld)
-    {
-        var local = arCamera.transform.InverseTransformPoint(targetWorld);
-        var viewport = arCamera.WorldToViewportPoint(targetWorld);
-        var onScreen = local.z > 0 &&
-                       viewport.x > viewportMargin && viewport.x < 1 - viewportMargin &&
-                       viewport.y > viewportMargin && viewport.y < 1 - viewportMargin;
-
-        if (HasArrived || onScreen)
-        {
-            SetArrowActive(false);
-            return;
-        }
-
-        // Behind the user only left/right is meaningful.
-        var direction = new Vector2(local.x, local.z < 0 ? 0 : local.y);
-        if (direction.sqrMagnitude < 1e-4f) direction = Vector2.right;
-        direction.Normalize();
-
-        var half = canvasRect.rect.size * 0.5f - new Vector2(120, 220);
-        var scale = Mathf.Min(
-            Mathf.Abs(direction.x) > 1e-4f ? half.x / Mathf.Abs(direction.x) : float.MaxValue,
-            Mathf.Abs(direction.y) > 1e-4f ? half.y / Mathf.Abs(direction.y) : float.MaxValue);
-        var edgePosition = direction * scale;
-
-        arrow.anchoredPosition = edgePosition;
-        arrowBackdrop.anchoredPosition = edgePosition;
-        arrow.localEulerAngles = new Vector3(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
-        arrowLabelRect.anchoredPosition = edgePosition - direction * 170f;
-
-        var yaw = Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg;
-        if (Mathf.Abs(yaw) > 135f) arrowLabel.text = "Turn around";
-        else if (Mathf.Abs(direction.x) >= Mathf.Abs(direction.y)) arrowLabel.text = direction.x > 0 ? "Turn right" : "Turn left";
-        else arrowLabel.text = direction.y > 0 ? "Look up" : "Look down";
-
-        SetArrowActive(true);
-    }
-
-    void SetArrowActive(bool active)
-    {
-        if (arrow != null) arrow.gameObject.SetActive(active);
-        if (arrowBackdrop != null) arrowBackdrop.gameObject.SetActive(active);
-        if (arrowLabelRect != null) arrowLabelRect.gameObject.SetActive(active);
-    }
-
     void BuildPath()
     {
         var lineObject = new GameObject("RoutePath");
@@ -281,66 +221,4 @@ public class RouteNavigator : MonoBehaviour
         }
     }
 
-    void BuildArrowUi()
-    {
-        var canvasObject = new GameObject("RouteArrowCanvas", typeof(Canvas), typeof(CanvasScaler));
-        var canvas = canvasObject.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
-        var scaler = canvasObject.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1170, 2532);
-        canvasRect = new GameObject("SafeArea", typeof(RectTransform)).GetComponent<RectTransform>();
-        canvasRect.SetParent(canvasObject.transform, false);
-        canvasRect.gameObject.AddComponent<SafeAreaPanel>();
-
-        arrowBackdrop = new GameObject("TurnArrowBackdrop", typeof(RectTransform)).GetComponent<RectTransform>();
-        arrowBackdrop.SetParent(canvasRect, false);
-        arrowBackdrop.sizeDelta = new Vector2(220, 220);
-        arrowBackdrop.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.08f, 0.12f, 0.86f);
-
-        arrow = new GameObject("TurnArrow", typeof(RectTransform)).GetComponent<RectTransform>();
-        arrow.SetParent(canvasRect, false);
-        arrow.sizeDelta = new Vector2(180, 180);
-        var arrowImage = arrow.gameObject.AddComponent<Image>();
-        arrowImage.sprite = CreateArrowSprite();
-        arrowImage.color = pathColor;
-        arrowImage.raycastTarget = false;
-        arrow.gameObject.AddComponent<Outline>().effectColor = new Color(0f, 0f, 0f, 0.75f);
-
-        arrowLabelRect = new GameObject("TurnLabel", typeof(RectTransform)).GetComponent<RectTransform>();
-        arrowLabelRect.SetParent(canvasRect, false);
-        arrowLabelRect.sizeDelta = new Vector2(400, 100);
-        arrowLabel = arrowLabelRect.gameObject.AddComponent<Text>();
-        arrowLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        arrowLabel.fontSize = 52;
-        arrowLabel.fontStyle = FontStyle.Bold;
-        arrowLabel.alignment = TextAnchor.MiddleCenter;
-        arrowLabel.color = Color.white;
-        arrowLabel.raycastTarget = false;
-        arrowLabelRect.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, 0.8f);
-
-        SetArrowActive(false);
-    }
-
-    /// <summary>A right-pointing triangle, so the arrow's rotation equals the screen-space direction angle.</summary>
-    static Sprite CreateArrowSprite()
-    {
-        const int size = 128;
-        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
-        var pixels = new Color32[size * size];
-        for (var y = 0; y < size; y++)
-        {
-            var halfHeight = (size - 1) * 0.5f;
-            var distanceFromCenter = Mathf.Abs(y - halfHeight);
-            for (var x = 0; x < size; x++)
-            {
-                var inside = distanceFromCenter <= halfHeight * (1f - x / (float)(size - 1));
-                pixels[y * size + x] = inside ? new Color32(255, 255, 255, 255) : new Color32(0, 0, 0, 0);
-            }
-        }
-        texture.SetPixels32(pixels);
-        texture.Apply();
-        return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
-    }
 }
