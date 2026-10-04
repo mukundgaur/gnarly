@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Gnarly zone connections",
-  "description": "Building-level links between nodes in different floor zones. Each floor zone has its own ARWorldMap; matching elevator nodes connect floors. Connections are bidirectional and have A* weight 1.",
+  "description": "Building-level links between elevator nodes in different floor zones. Each floor zone has its own ARWorldMap; matching elevator nodes are the waypoints that connect floors. Connections are bidirectional. A ride's A* weight is a boarding cost plus a per-story cost.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "connections"],

@@ -46,6 +46,8 @@ public partial class IndoorMapOverlay
     string destinationKey;
     Slot activeSlot = Slot.Destination;
     RoutePreview preview;
+    /// <summary>Elevator on this floor that an active route uses to leave for another floor.</summary>
+    string navigationWaypointKey;
     bool navigationActive;
     float hintUntil;
 
@@ -115,7 +117,17 @@ public partial class IndoorMapOverlay
     public void SetNavigationActive(bool active)
     {
         navigationActive = active;
+        if (!active) navigationWaypointKey = null;
         RefreshFooter();
+    }
+
+    /// <summary>
+    /// Pins the minimap on the elevator that connects this floor to the next.
+    /// Pass null once the destination itself is on the floor being shown.
+    /// </summary>
+    public void SetFloorWaypoint(string placeKey)
+    {
+        navigationWaypointKey = placeKey != null && placesByKey.ContainsKey(placeKey) ? placeKey : null;
     }
 
     public void ShowPreview(RoutePreview routePreview)
@@ -135,6 +147,7 @@ public partial class IndoorMapOverlay
         }
         if (activeRouteRoot != null) activeRouteRoot.gameObject.SetActive(!(IsPlannerOpen && preview != null && preview.ok));
         RefreshFooter();
+        RefreshHint();
     }
 
     public void OpenPlanner(bool focusDestination)
@@ -426,15 +439,18 @@ public partial class IndoorMapOverlay
         var rect = labelLayer.rect;
         foreach (var label in mapLabels)
         {
-            var selected = label.place.key == startKey || label.place.key == destinationKey;
+            var isWaypoint = label.place.key == ActiveFloorWaypoint();
+            var selected = label.place.key == startKey || label.place.key == destinationKey || isWaypoint;
             var showLabel = label.place.major || selected;
             var viewport = mapCamera.WorldToViewportPoint(sessionSpace.TransformPoint(MarkerPosition(label.place)));
             var visible = showLabel && viewport.z > 0f && viewport.x > 0.02f && viewport.x < 0.98f && viewport.y > 0.02f && viewport.y < 0.95f;
             label.rect.gameObject.SetActive(visible);
             if (!visible) continue;
+            label.text.text = isWaypoint ? $"{label.place.name}  ·  waypoint" : label.place.name;
+            label.rect.sizeDelta = new Vector2(Mathf.Min(420f, label.text.preferredWidth + 32f), 46f);
             label.rect.anchoredPosition = new Vector2(viewport.x * rect.width, viewport.y * rect.height + 28f);
             label.background.color = label.place.key == startKey ? MapUi.WithAlpha(MapUi.Start, 0.95f)
-                : label.place.key == destinationKey ? MapUi.WithAlpha(MapUi.Destination, 0.95f)
+                : label.place.key == destinationKey || isWaypoint ? MapUi.WithAlpha(MapUi.Destination, 0.95f)
                 : new Color(0.12f, 0.2f, 0.3f, 0.9f);
             label.text.color = Color.white;
         }
@@ -443,9 +459,25 @@ public partial class IndoorMapOverlay
     void UpdatePin(Transform pin, string key)
     {
         if (pin == null) return;
+        if (pin == destinationPin)
+        {
+            var destinationOnMap = key != null && placesByKey.TryGetValue(key, out var destination) && destination.inCurrentZone;
+            if (!destinationOnMap) key = ActiveFloorWaypoint();
+        }
         var visible = key != null && placesByKey.TryGetValue(key, out var place) && place.inCurrentZone;
         pin.gameObject.SetActive(visible);
         if (visible) pin.localPosition = MarkerPosition(placesByKey[key]) + Vector3.up * 0.05f;
+    }
+
+    /// <summary>
+    /// While the planner is open, the preview's elevator. While navigating, the elevator of the active leg.
+    /// Null when the destination is already on this floor.
+    /// </summary>
+    string ActiveFloorWaypoint()
+    {
+        if (IsPlannerOpen)
+            return preview != null && preview.ok && !string.IsNullOrEmpty(preview.waypointKey) ? preview.waypointKey : null;
+        return navigationWaypointKey;
     }
 
     // ---------- UI ----------
@@ -715,8 +747,9 @@ public partial class IndoorMapOverlay
         "destination" => 0,
         "entrance" => 1,
         "room" => 2,
-        "stairs" => 3,
-        _ => 4
+        "elevator" => 3,
+        "stairs" => 4,
+        _ => 5
     };
 
     void BuildMapLabels()
@@ -788,6 +821,11 @@ public partial class IndoorMapOverlay
         {
             hintDot.color = MapUi.Start;
             hintText.text = "Tap a dot to set where the route starts";
+        }
+        else if (!string.IsNullOrEmpty(ActiveFloorWaypoint()) && placesByKey.TryGetValue(ActiveFloorWaypoint(), out var waypoint))
+        {
+            hintDot.color = MapUi.Destination;
+            hintText.text = $"This floor's route leads to {waypoint.name}, the waypoint onto the next floor";
         }
         else
         {

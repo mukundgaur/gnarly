@@ -21,6 +21,7 @@ public static class MapUi
     public static readonly Color PlaceDestination = new Color(0.87f, 0.53f, 0.1f, 1f);
     public static readonly Color PlaceRoom = new Color(0.45f, 0.4f, 0.7f, 1f);
     public static readonly Color PlaceStairs = new Color(0.26f, 0.44f, 0.75f, 1f);
+    public static readonly Color PlaceElevator = new Color(0.55f, 0.36f, 0.96f, 1f);
     public static readonly Color PlaceEntrance = new Color(0.24f, 0.56f, 0.36f, 1f);
     public static readonly Color PlaceMinor = new Color(0.42f, 0.55f, 0.64f, 0.9f);
     public static readonly Color Preview = new Color(0.25f, 0.62f, 1f, 0.96f);

@@ -15,8 +15,12 @@ public static class Pathfinding
     public const float MinEdgeMeters = 0.2f;
     /// <summary>How far past a door or opening a line may cross that opening's wall.</summary>
     public const float PortalMatchMeters = 0.15f;
-    public const float ZoneTransferCost = 1f;
-    public const string ZoneTransferKind = "zone-transfer";
+    /// <summary>Walking-meter equivalent of calling and boarding an elevator (about 25 s at 1.2 m/s).</summary>
+    public const float ElevatorBoardCost = 30f;
+    /// <summary>Walking-meter equivalent of riding one story (about 5 s at 1.2 m/s).</summary>
+    public const float ElevatorStoryCost = 6f;
+    public const string ElevatorKind = "elevator";
+    public const string ElevatorType = "elevator";
 
     [Serializable]
     public class ScanFeatures
@@ -143,6 +147,10 @@ public static class Pathfinding
     {
         public string zoneId;
         public string floorId = "ground";
+        /// <summary>building.json story of this zone's floor, when known.</summary>
+        public int? story;
+        /// <summary>In a combined graph: story per zone, only when every zone has a distinct one.</summary>
+        public readonly Dictionary<string, int> ZoneStories = new Dictionary<string, int>();
         public readonly List<Node> Nodes = new List<Node>();
         public readonly List<Edge> Edges = new List<Edge>();
         /// <summary>RoomPlan walls (plus windows and short corner seals) that neighbor tests cannot cross.</summary>
@@ -299,13 +307,19 @@ public static class Pathfinding
 
     public static string ZoneKey(string zoneId, string nodeId) => zoneId + "/" + nodeId;
 
+    public static bool IsElevator(Node node) => node?.type == ElevatorType;
+
     /// <summary>
     /// Merges per-zone graphs into one graph keyed by <see cref="ZoneKey"/>. Each zone keeps its own
-    /// ARKit coordinates; zone connections become bidirectional edges with weight <see cref="ZoneTransferCost"/>.
+    /// ARKit coordinates. Floors connect only through elevator waypoints: a link between two elevator
+    /// nodes becomes a ride (see <see cref="AddElevatorRides"/>) whose A* weight is
+    /// <see cref="ElevatorBoardCost"/> plus <see cref="ElevatorStoryCost"/> for every story travelled.
     /// </summary>
     public static Graph Combine(IReadOnlyDictionary<string, Graph> zoneGraphs, ZoneConnections connections)
     {
         var combined = new Graph { floorId = null };
+        foreach (var story in ZoneStories(zoneGraphs))
+            combined.ZoneStories[story.Key] = story.Value;
         foreach (var pair in zoneGraphs)
         {
             var zone = pair.Key;
@@ -341,6 +355,7 @@ public static class Pathfinding
         }
 
         if (connections?.connections == null) return combined;
+        var elevatorLinks = new Dictionary<string, List<string>>();
         foreach (var connection in connections.connections)
         {
             var from = ZoneKey(connection.from.zoneId, connection.from.nodeId);
@@ -350,16 +365,121 @@ public static class Pathfinding
                 Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: a node or zone package is missing.");
                 continue;
             }
-            combined.AddEdge(new Edge
+            if (IsElevator(combined.Node(from)) && IsElevator(combined.Node(to)))
             {
-                from = from,
-                to = to,
-                kind = ZoneTransferKind,
-                meters = ZoneTransferCost,
-                source = "manual"
-            });
+                Link(elevatorLinks, from, to);
+                Link(elevatorLinks, to, from);
+                continue;
+            }
+            Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: floors connect through elevator waypoints.");
         }
+        AddElevatorRides(combined, elevatorLinks);
         return combined;
+    }
+
+    static void Link(Dictionary<string, List<string>> links, string from, string to)
+    {
+        if (!links.TryGetValue(from, out var list)) links[from] = list = new List<string>();
+        if (!list.Contains(to)) list.Add(to);
+    }
+
+    /// <summary>
+    /// The web editor links an elevator on adjacent floors only. Linked elevator nodes form one shaft,
+    /// and every pair of floors in a shaft gets a direct ride edge, so floor 1 to floor 3 is one ride
+    /// instead of a stop (and a relocalization) on floor 2. A ride costs <see cref="ElevatorBoardCost"/>
+    /// plus <see cref="ElevatorStoryCost"/> per story travelled.
+    /// </summary>
+    static void AddElevatorRides(Graph graph, Dictionary<string, List<string>> links)
+    {
+        foreach (var start in links.Keys)
+        {
+            var hops = new Dictionary<string, int> { [start] = 0 };
+            var queue = new Queue<string>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var id = queue.Dequeue();
+                foreach (var next in links[id])
+                {
+                    if (hops.ContainsKey(next)) continue;
+                    hops[next] = hops[id] + 1;
+                    queue.Enqueue(next);
+                }
+            }
+
+            var from = graph.Node(start);
+            foreach (var stop in hops)
+            {
+                if (string.CompareOrdinal(start, stop.Key) >= 0) continue;
+                var to = graph.Node(stop.Key);
+                if (from.zone == to.zone) continue;
+                graph.AddEdge(new Edge
+                {
+                    from = start,
+                    to = stop.Key,
+                    kind = ElevatorKind,
+                    meters = ElevatorBoardCost + ElevatorStoryCost * StoriesBetween(graph, from.zone, to.zone, stop.Value),
+                    source = "manual"
+                });
+            }
+        }
+    }
+
+    /// <summary>Story difference when every floor's story is known; otherwise the number of linked floors between them.</summary>
+    public static int StoriesBetween(Graph graph, string zoneA, string zoneB, int linkedHops)
+    {
+        if (graph.ZoneStories.TryGetValue(zoneA, out var a) && graph.ZoneStories.TryGetValue(zoneB, out var b) && a != b)
+            return Math.Abs(a - b);
+        return Math.Max(1, linkedHops);
+    }
+
+    /// <summary>
+    /// RoomPlan reports story 0 for every separate floor scan, so building.json stories are only trusted
+    /// when they differ for every zone. Otherwise a floor number in the floor or zone id ("floor-3") is used.
+    /// </summary>
+    static Dictionary<string, int> ZoneStories(IReadOnlyDictionary<string, Graph> zoneGraphs)
+    {
+        var fromFloors = new Dictionary<string, int>();
+        var fromNames = new Dictionary<string, int>();
+        foreach (var pair in zoneGraphs)
+        {
+            if (pair.Value.story.HasValue) fromFloors[pair.Key] = pair.Value.story.Value;
+            if (TryFloorNumber(pair.Value.floorId, out var number) || TryFloorNumber(pair.Key, out number))
+                fromNames[pair.Key] = number;
+        }
+        if (AllDistinct(fromFloors, zoneGraphs.Count)) return fromFloors;
+        if (AllDistinct(fromNames, zoneGraphs.Count)) return fromNames;
+        return new Dictionary<string, int>();
+    }
+
+    static bool AllDistinct(Dictionary<string, int> stories, int zoneCount) =>
+        stories.Count == zoneCount && new HashSet<int>(stories.Values).Count == zoneCount;
+
+    static readonly System.Text.RegularExpressions.Regex FloorNumber =
+        new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z0-9])-?\d+|\d+");
+
+    static bool TryFloorNumber(string name, out int number)
+    {
+        number = 0;
+        if (string.IsNullOrEmpty(name)) return false;
+        var match = FloorNumber.Match(name);
+        return match.Success && int.TryParse(match.Value, out number);
+    }
+
+    /// <summary>
+    /// Elevator on <paramref name="legIndex"/> that the path uses to leave that floor.
+    /// It is the waypoint connecting this floor to the next. Null when the leg is the last,
+    /// or when the crossing is not an elevator ride.
+    /// </summary>
+    public static string ElevatorWaypoint(Graph graph, List<RouteLeg> legs, int legIndex)
+    {
+        if (graph == null || legs == null || legIndex < 0 || legIndex >= legs.Count - 1) return null;
+        var leg = legs[legIndex];
+        if (leg.nodeIds.Count == 0 || legs[legIndex + 1].nodeIds.Count == 0) return null;
+        var id = leg.nodeIds[leg.nodeIds.Count - 1];
+        var next = legs[legIndex + 1].nodeIds[0];
+        if (!IsElevator(graph.Node(id)) || !IsElevator(graph.Node(next))) return null;
+        return id;
     }
 
     /// <summary>Splits an A* path wherever it crosses a zone connection.</summary>
@@ -387,7 +507,8 @@ public static class Pathfinding
         var graph = new Graph
         {
             zoneId = scan?.zoneId ?? building?.zoneId,
-            floorId = floorId
+            floorId = floorId,
+            story = FloorStory(building, floorId)
         };
 
         if (scan != null)
@@ -477,6 +598,14 @@ public static class Pathfinding
         Debug.Log($"[Gnarly] Zone '{graph.zoneId}': {graph.Nodes.Count} nodes, {graph.Edges.Count} edges, {graph.Walls.Count} walls. Dropped {dropped} blocked edge(s).");
 
         return graph;
+    }
+
+    static int? FloorStory(BuildingDocument building, string floorId)
+    {
+        if (building?.floors == null || building.floors.Length == 0) return null;
+        foreach (var floor in building.floors)
+            if (floor.id == floorId) return floor.story;
+        return building.floors[0].story;
     }
 
     /// <summary>
@@ -683,7 +812,7 @@ public static class Pathfinding
         var open = new List<string> { startId };
         var cameFrom = new Dictionary<string, string>();
         var gScore = new Dictionary<string, float> { [startId] = 0f };
-        var fScore = new Dictionary<string, float> { [startId] = Heuristic(start, goal) };
+        var fScore = new Dictionary<string, float> { [startId] = Heuristic(graph, start, goal) };
 
         while (open.Count > 0)
         {
@@ -712,7 +841,7 @@ public static class Pathfinding
 
                 cameFrom[edge.to] = current;
                 gScore[edge.to] = tentative;
-                fScore[edge.to] = tentative + Heuristic(graph.Node(edge.to), goal);
+                fScore[edge.to] = tentative + Heuristic(graph, graph.Node(edge.to), goal);
                 if (!open.Contains(edge.to))
                     open.Add(edge.to);
             }
@@ -820,9 +949,23 @@ public static class Pathfinding
         return path;
     }
 
-    /// <summary>Straight-line distance is meaningless between two zones' coordinate systems, so it is 0 there.</summary>
-    static float Heuristic(Node a, Node b) =>
-        a.zone == b.zone ? Vector3.Distance(Position(a), Position(b)) : 0f;
+    /// <summary>
+    /// Same-floor cost is straight-line distance. A different floor costs at least one elevator boarding
+    /// plus <see cref="ElevatorStoryCost"/> per story, which matches the ride edges and never exceeds them.
+    /// Positions from different world maps are not comparable, so they are not used across zones.
+    /// </summary>
+    static float Heuristic(Graph graph, Node a, Node b)
+    {
+        if (a == null || b == null) return 0f;
+        if (a.zone == b.zone) return Vector3.Distance(Position(a), Position(b));
+        var stories = 1;
+        if (a.zone != null && b.zone != null &&
+            graph.ZoneStories.TryGetValue(a.zone, out var from) &&
+            graph.ZoneStories.TryGetValue(b.zone, out var to) &&
+            from != to)
+            stories = Math.Abs(from - to);
+        return ElevatorBoardCost + ElevatorStoryCost * stories;
+    }
 
     public static Vector3 Position(Node node) => new Vector3(node.position[0], node.position[1], node.position[2]);
 

@@ -17,7 +17,7 @@ public sealed class MapPlace
     public string localId;
     public string zone;
     public string name;
-    /// <summary>destination, entrance, room, stairs, door, opening, or waypoint.</summary>
+    /// <summary>destination, entrance, room, elevator, stairs, door, opening, or waypoint.</summary>
     public string kind;
     /// <summary>Named places are listed and labelled; minor ones (doors, openings) are only map dots.</summary>
     public bool major;
@@ -30,6 +30,7 @@ public sealed class MapPlace
         "destination" => "Destination",
         "entrance" => "Entrance",
         "room" => "Room",
+        "elevator" => "Elevator",
         "stairs" => "Stairs",
         "door" => "Door",
         "opening" => "Opening",
@@ -41,6 +42,7 @@ public sealed class MapPlace
         "destination" => MapUi.PlaceDestination,
         "entrance" => MapUi.PlaceEntrance,
         "room" => MapUi.PlaceRoom,
+        "elevator" => MapUi.PlaceElevator,
         "stairs" => MapUi.PlaceStairs,
         _ => MapUi.PlaceMinor
     };
@@ -53,6 +55,11 @@ public sealed class RoutePreview
     public string error;
     /// <summary>The part of the route inside the zone shown on the map, or null.</summary>
     public Route mapRoute;
+    /// <summary>
+    /// Elevator on the floor shown on the map. Set when the destination is on another floor;
+    /// the route leads here, and this node is the waypoint onto the next floor.
+    /// </summary>
+    public string waypointKey;
     public string summary;
     public string details;
 }

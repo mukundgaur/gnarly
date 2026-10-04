@@ -276,7 +276,10 @@ public class RelocalizationController : MonoBehaviour
             if (building != null && !string.IsNullOrEmpty(building.zoneId) && building.zoneId != zone)
                 throw new FormatException($"building.json in '{zone}' is for zone '{building.zoneId}'.");
 
-            var zoneFloorId = zone == zoneId ? floorId
+            // RoomPlan nodes must share the floor id of building.json nodes (such as web-placed
+            // elevators), or they never get visibility edges to each other.
+            var zoneFloorId = building?.floors != null && building.floors.Length == 1 ? building.floors[0].id
+                : zone == zoneId ? floorId
                 : building?.floors != null && building.floors.Length > 0 ? building.floors[0].id
                 : zone;
             zonePackages[zone] = new ZonePackage
@@ -491,7 +494,6 @@ public class RelocalizationController : MonoBehaviour
         automaticRouteStartPosition = startKey == null ? CameraArkitPosition() : null;
         indoorMap?.SetSelection(startKey, destinationKey);
         indoorMap?.SetNavigationActive(true);
-        indoorMap?.SetCompactCaption($"TO {NameOf(destinationKey).ToUpperInvariant()}  ·  TAP TO CHANGE");
         arrivalAnnounced = false;
         if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(false);
 
@@ -591,15 +593,42 @@ public class RelocalizationController : MonoBehaviour
     {
         var meters = 0f;
         for (var i = 1; i < nodeIds.Count; i++)
-        {
-            foreach (var edge in navigationGraph.Neighbors(nodeIds[i - 1]))
-            {
-                if (edge.to != nodeIds[i]) continue;
-                meters += edge.meters;
-                break;
-            }
-        }
+            meters += EdgeMeters(nodeIds[i - 1], nodeIds[i]);
         return meters;
+    }
+
+    float EdgeMeters(string from, string to)
+    {
+        foreach (var edge in navigationGraph.Neighbors(from))
+            if (edge.to == to) return edge.meters;
+        return 0f;
+    }
+
+    /// <summary>True when leg <paramref name="index"/> ends at an elevator that carries the user to the next leg's floor.</summary>
+    bool IsElevatorRide(List<Pathfinding.RouteLeg> legs, int index)
+    {
+        if (legs == null || index < 0 || index >= legs.Count - 1) return false;
+        var leg = legs[index];
+        return Pathfinding.IsElevator(navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1])) &&
+               Pathfinding.IsElevator(navigationGraph.Node(legs[index + 1].nodeIds[0]));
+    }
+
+    string ConnectorName(Pathfinding.RouteLeg leg)
+    {
+        var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
+        if (placeNames.TryGetValue(connector.id, out var name)) return name;
+        return string.IsNullOrEmpty(connector.label) ? Humanize(connector.localId) : connector.label;
+    }
+
+    static string FloorName(string zone) => Humanize(zone);
+
+    /// <summary>"up" or "down" when both floors have known stories, otherwise null.</summary>
+    string RideDirection(string fromZone, string toZone)
+    {
+        if (!navigationGraph.ZoneStories.TryGetValue(fromZone, out var from) ||
+            !navigationGraph.ZoneStories.TryGetValue(toZone, out var to) || from == to)
+            return null;
+        return to > from ? "up" : "down";
     }
 
     RoutePreview PreviewRoute(string startKey, string destinationKey)
@@ -609,37 +638,59 @@ public class RelocalizationController : MonoBehaviour
 
         var legs = Pathfinding.SplitByZone(navigationGraph, path);
         var meters = 0f;
+        var rideMeters = 0f;
         if (startKey == null) meters += HorizontalDistance(CameraArkitPosition(), Pathfinding.Position(navigationGraph.Node(path[0])));
         for (var i = 1; i < path.Count; i++)
         {
             var a = navigationGraph.Node(path[i - 1]);
             var b = navigationGraph.Node(path[i]);
             if (a.zone == b.zone) meters += HorizontalDistance(Pathfinding.Position(a), Pathfinding.Position(b));
+            else if (Pathfinding.IsElevator(a) && Pathfinding.IsElevator(b)) rideMeters += EdgeMeters(a.id, b.id);
         }
 
         Route mapRoute = null;
-        foreach (var leg in legs)
+        string waypointKey = null;
+        for (var legIndex = 0; legIndex < legs.Count; legIndex++)
         {
-            if (leg.zoneId != currentZoneId) continue;
-            mapRoute = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
+            if (legs[legIndex].zoneId != currentZoneId) continue;
+            mapRoute = Pathfinding.ToRoute(navigationGraph, legs[legIndex].nodeIds, legs[legIndex].zoneId);
+            waypointKey = Pathfinding.ElevatorWaypoint(navigationGraph, legs, legIndex);
             break;
         }
 
-        var minutes = Mathf.CeilToInt(meters / 1.2f / 60f);
-        var summary = $"{meters:0} m  ·  {(minutes <= 1 ? "about 1 min" : $"{minutes} min")} walk";
+        var minutes = Mathf.CeilToInt((meters + rideMeters) / 1.2f / 60f);
+        var summary = $"{meters:0} m  ·  {(minutes <= 1 ? "about 1 min" : $"{minutes} min")}{(rideMeters > 0f ? "" : " walk")}";
         string details;
         if (legs.Count > 1)
         {
-            var zones = new List<string>();
-            foreach (var leg in legs) zones.Add(leg.zoneId);
-            summary += $"  ·  {legs.Count - 1} zone change{(legs.Count > 2 ? "s" : "")}";
-            details = "Via " + string.Join(" → ", zones) + ". You'll confirm each new zone on arrival.";
+            var steps = new List<string>();
+            var rides = 0;
+            for (var i = 0; i < legs.Count - 1; i++)
+            {
+                if (IsElevatorRide(legs, i))
+                {
+                    rides++;
+                    steps.Add($"{ConnectorName(legs[i])} to {FloorName(legs[i + 1].zoneId)}");
+                }
+                else
+                {
+                    steps.Add($"{ConnectorName(legs[i])} into {FloorName(legs[i + 1].zoneId)}");
+                }
+            }
+            var changes = legs.Count - 1;
+            summary += rides == changes
+                ? $"  ·  {rides} elevator ride{(rides > 1 ? "s" : "")}"
+                : $"  ·  {changes} floor change{(changes > 1 ? "s" : "")}";
+            var lead = waypointKey == null
+                ? ""
+                : $"Walk to {NameOf(waypointKey)}. That elevator is the waypoint onto the next floor. ";
+            details = lead + "Take " + string.Join(", then ", steps) + ". You'll confirm each floor on arrival.";
         }
         else
         {
             details = $"From {(startKey == null ? "your location" : NameOf(startKey))} to {NameOf(destinationKey)}  ·  {path.Count} waypoints";
         }
-        return new RoutePreview { ok = true, mapRoute = mapRoute, summary = summary, details = details };
+        return new RoutePreview { ok = true, mapRoute = mapRoute, waypointKey = waypointKey, summary = summary, details = details };
     }
 
     static float HorizontalDistance(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
@@ -670,7 +721,7 @@ public class RelocalizationController : MonoBehaviour
                 zone = node.zone,
                 name = name,
                 kind = kind,
-                major = kind is "destination" or "entrance" or "room" or "stairs" ||
+                major = kind is "destination" or "entrance" or "room" or "elevator" or "stairs" ||
                         (kind == "waypoint" && !string.IsNullOrEmpty(node.label)),
                 inCurrentZone = inCurrentZone,
                 sessionPosition = inCurrentZone && node.position != null && node.position.Length == 3
@@ -688,6 +739,7 @@ public class RelocalizationController : MonoBehaviour
         {
             case "destination":
             case "entrance":
+            case "elevator":
             case "stairs":
             case "door":
             case "opening":
@@ -711,6 +763,8 @@ public class RelocalizationController : MonoBehaviour
             case "door": return Numbered("Door");
             case "opening": return Numbered("Opening");
             case "room": return Numbered(Humanize(node.label ?? node.localId.Substring("section-".Length)));
+            case "elevator":
+                return Numbered(string.IsNullOrEmpty(node.label) ? "Elevator" : node.label);
             case "stairs":
                 return Numbered(string.IsNullOrEmpty(node.label) || node.label == "stairs" ? "Stairs" : node.label);
             default:
@@ -752,6 +806,7 @@ public class RelocalizationController : MonoBehaviour
             route = PrependAutomaticStart(route, automaticRouteStartPosition.Value);
         navigator.Begin(GuidanceRoute(route), origin.TrackablesParent, origin.Camera);
         indoorMap?.SetRoute(route);
+        ShowFloorWaypoint();
         SetStatus(LegStatus());
     }
 
@@ -779,29 +834,56 @@ public class RelocalizationController : MonoBehaviour
         };
     }
 
+    /// <summary>
+    /// On this floor the route ends at the elevator when the destination is upstairs or downstairs.
+    /// That elevator is the waypoint the minimap leads to.
+    /// </summary>
+    void ShowFloorWaypoint()
+    {
+        var connector = Pathfinding.ElevatorWaypoint(navigationGraph, activeLegs, activeLegIndex);
+        indoorMap?.SetFloorWaypoint(connector);
+        if (connector != null)
+            indoorMap?.SetCompactCaption($"TO {ConnectorName(activeLegs[activeLegIndex]).ToUpperInvariant()}  ·  THEN {NameOf(selectedDestinationKey).ToUpperInvariant()}");
+        else if (selectedDestinationKey != null)
+            indoorMap?.SetCompactCaption($"TO {NameOf(selectedDestinationKey).ToUpperInvariant()}  ·  TAP TO CHANGE");
+    }
+
     string LegStatus()
     {
         if (activeLegs == null || activeLegIndex >= activeLegs.Count - 1) return navigator.StatusMessage;
-        var leg = activeLegs[activeLegIndex];
-        var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
-        var connectorName = string.IsNullOrEmpty(connector.label) ? connector.localId : connector.label;
-        return $"{navigator.StatusMessage} to {connectorName}, then continue to {Humanize(activeLegs[activeLegIndex + 1].zoneId)}";
+        var connectorName = ConnectorName(activeLegs[activeLegIndex]);
+        var nextFloor = FloorName(activeLegs[activeLegIndex + 1].zoneId);
+        return IsElevatorRide(activeLegs, activeLegIndex)
+            ? $"{navigator.StatusMessage} to {connectorName}, then ride it to {nextFloor}"
+            : $"{navigator.StatusMessage} to {connectorName}, then continue to {nextFloor}";
     }
 
     void AwaitZoneTransition()
     {
         var nextZone = activeLegs[activeLegIndex + 1].zoneId;
-        var leg = activeLegs[activeLegIndex];
-        var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
-        var connectorName = string.IsNullOrEmpty(connector.label) ? "the connection" : connector.label;
+        var nextFloor = FloorName(nextZone);
+        var connectorName = ConnectorName(activeLegs[activeLegIndex]);
         state = State.AwaitingZoneTransition;
         navigator.SetVisible(false);
-        if (transitionHeading != null) transitionHeading.text = $"Continue to {Humanize(nextZone)}";
-        if (transitionInstructions != null)
-            transitionInstructions.text = $"You've reached {connectorName}. Continue to {Humanize(nextZone)}. When you're there, load its map and look around to locate yourself.";
-        if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm at {Humanize(nextZone)}";
+        if (IsElevatorRide(activeLegs, activeLegIndex))
+        {
+            var direction = RideDirection(currentZoneId, nextZone);
+            var ride = direction == null ? $"to {nextFloor}" : $"{direction} to {nextFloor}";
+            if (transitionHeading != null) transitionHeading.text = $"Take the elevator {ride}";
+            if (transitionInstructions != null)
+                transitionInstructions.text = $"You've reached {connectorName}. Ride it {ride}. When you step out, tap below and look around so we can find you on {nextFloor}.";
+            if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm on {nextFloor}";
+            SetStatus($"At {connectorName}. Ride {ride}, then confirm below.");
+        }
+        else
+        {
+            if (transitionHeading != null) transitionHeading.text = $"Continue to {nextFloor}";
+            if (transitionInstructions != null)
+                transitionInstructions.text = $"You've reached {connectorName}. Continue to {nextFloor}. When you're there, load its map and look around to locate yourself.";
+            if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm at {nextFloor}";
+            SetStatus($"At {connectorName}. Continue to {nextFloor}, then confirm below.");
+        }
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(true);
-        SetStatus($"At {connectorName}. Continue to {Humanize(nextZone)}, then confirm below.");
         Debug.Log($"[Gnarly] Waiting at connector {currentZoneId} -> {nextZone} for the user to enter the next zone.");
     }
 
