@@ -3,7 +3,8 @@
 ## Web viewer CORS
 
 `cors.web.local.json` allows the local Vite viewer at
-`http://localhost:5173` to download navigation assets from Cloud Storage.
+`http://localhost:4173` or `http://localhost:5173` to download and upload
+navigation assets in Cloud Storage.
 
 Bucket CORS updates replace the whole CORS array. Inspect the current config
 and merge the local viewer rule into it before applying:
@@ -24,7 +25,7 @@ Verify both the preflight and actual response before testing the viewer again:
 
 ```sh
 curl -i -X OPTIONS \
-  -H 'Origin: http://localhost:5173' \
+  -H 'Origin: http://localhost:4173' \
   -H 'Access-Control-Request-Method: GET' \
   'https://firebasestorage.googleapis.com/v0/b/gnarly-e65c1.firebasestorage.app/o/OBJECT'
 ```
