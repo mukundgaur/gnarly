@@ -219,6 +219,41 @@ public static class Pathfinding
             return nearest;
         }
 
+        /// <summary>
+        /// Returns the two nodes at the ends of the recorded path segment nearest to the user.
+        /// They are candidates for an automatic route start; A* decides which direction reaches
+        /// the selected destination without first sending the user back along the segment.
+        /// </summary>
+        public List<string> NearestRecordedWalkEndpoints(Vector3 arkitPosition, string zone)
+        {
+            Edge closestEdge = null;
+            var closestDistanceSquared = float.MaxValue;
+            var flatPosition = new Vector2(arkitPosition.x, arkitPosition.z);
+
+            foreach (var edge in Edges)
+            {
+                var from = Node(edge.from);
+                var to = Node(edge.to);
+                if (from == null || to == null || from.zone != zone || to.zone != zone) continue;
+                if (!IsRecordedWalkEdge(edge, from, to)) continue;
+
+                var a = Xz(from.position);
+                var b = Xz(to.position);
+                var segment = b - a;
+                var lengthSquared = segment.sqrMagnitude;
+                if (lengthSquared < 1e-6f) continue;
+                var t = Mathf.Clamp01(Vector2.Dot(flatPosition - a, segment) / lengthSquared);
+                var distanceSquared = (flatPosition - (a + segment * t)).sqrMagnitude;
+                if (distanceSquared >= closestDistanceSquared) continue;
+                closestDistanceSquared = distanceSquared;
+                closestEdge = edge;
+            }
+
+            return closestEdge == null
+                ? new List<string>()
+                : new List<string> { closestEdge.from, closestEdge.to };
+        }
+
         public List<Node> Destinations() =>
             Nodes.FindAll(n => n.type == "destination");
 
@@ -518,6 +553,10 @@ public static class Pathfinding
             {
                 var a = graph.Nodes[i];
                 var b = graph.Nodes[j];
+                // The mapper's sequential walk edges are the proven, traversable route. Adding a
+                // cheaper line-of-sight edge between two of those samples lets A* shortcut across
+                // a room and creates the backwards triangles seen in AR guidance.
+                if (IsRecordedWalkEdge(null, a, b)) continue;
                 if (!CanConnect(a, b, walls, portals)) continue;
                 graph.AddEdge(new Edge
                 {
@@ -530,6 +569,17 @@ public static class Pathfinding
             }
         }
     }
+
+    // Older Firebase packages label samples only by id (walk-1, walk-2, …), while newer mapper
+    // packages also use source: "walked-path". Treat both as the recorded walk network.
+    static bool IsRecordedWalkNode(Node node) =>
+        node != null && (node.source == "walked-path" ||
+                         node.type == "waypoint" ||
+                         (!string.IsNullOrEmpty(node.id) && node.id.StartsWith("walk-", StringComparison.Ordinal)) ||
+                         (!string.IsNullOrEmpty(node.localId) && node.localId.StartsWith("walk-", StringComparison.Ordinal)));
+
+    static bool IsRecordedWalkEdge(Edge edge, Node from, Node to) =>
+        edge?.source == "walked-path" || (IsRecordedWalkNode(from) && IsRecordedWalkNode(to));
 
     /// <summary>
     /// Same floor, not too close, not farther than <see cref="MaxEdgeMeters"/>, and the

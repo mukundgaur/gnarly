@@ -706,6 +706,7 @@ MonoBehaviour:
   navigator: {fileID: 2072909953}
   zoneId: zone-a
   cubeSize: 0.2
+  guidanceWaypointSpacingMeters: 0.2
   skipWorldMap: 0
 --- !u!114 &2072909953
 MonoBehaviour:
@@ -722,7 +723,7 @@ MonoBehaviour:
   pathColor: {r: 0.1, g: 0.9, b: 1, a: 0.85}
   pathWidth: 0.25
   deviceHeightToFloor: -1.3
-  reachRadius: 0.3
+  reachRadius: 0.15
   arriveRadius: 0.75
   viewportMargin: 0.1
 --- !u!4 &2072909954

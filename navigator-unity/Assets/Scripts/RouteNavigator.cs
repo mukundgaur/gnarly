@@ -13,7 +13,7 @@ public class RouteNavigator : MonoBehaviour
     [Tooltip("Height change (m) applied when route.json uses heightReference \"device\", to move phone-height waypoints down to the floor.")]
     [SerializeField] float deviceHeightToFloor = -1.3f;
     [Tooltip("Horizontal distance (m) at which an intermediate waypoint counts as reached.")]
-    [SerializeField] float reachRadius = 0.3f;
+    [SerializeField] float reachRadius = 0.15f;
     [Tooltip("Horizontal distance (m) to the final waypoint that counts as arrival.")]
     [SerializeField] float arriveRadius = 0.75f;
     [Tooltip("Fraction of the screen edge treated as out of view.")]
@@ -21,7 +21,7 @@ public class RouteNavigator : MonoBehaviour
 
     // Old scenes serialized this at 1 m. Never allow a saved value to make the generated
     // sub-metre guidance points get skipped at runtime.
-    const float MaximumIntermediateReachRadius = 0.35f;
+    const float MaximumIntermediateReachRadius = 0.18f;
 
     Route route;
     Transform sessionSpace;
@@ -62,7 +62,7 @@ public class RouteNavigator : MonoBehaviour
         material = new Material(Shader.Find("Sprites/Default"));
         BuildPath();
         BuildArrowUi();
-        targetIndex = NearestWaypointIndex(arCamera.transform.position);
+        targetIndex = NextWaypointAfterClosestPathPoint(arCamera.transform.position);
     }
 
     public void SetVisible(bool isVisible)
@@ -120,20 +120,37 @@ public class RouteNavigator : MonoBehaviour
     static float HorizontalDistance(Vector3 a, Vector3 b) =>
         Vector2.Distance(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
 
-    int NearestWaypointIndex(Vector3 position)
+    /// <summary>
+    /// Starts guidance at the point after the user's nearest location on the route polyline,
+    /// rather than at the nearest vertex. A dense point that is a few centimetres behind the user
+    /// would otherwise make the first instruction say "Turn around" and draw a triangle back over
+    /// an already-walked segment.
+    /// </summary>
+    int NextWaypointAfterClosestPathPoint(Vector3 position)
     {
-        var nearest = 0;
-        var nearestDistance = float.MaxValue;
-        for (var i = 0; i < route.waypoints.Length; i++)
+        if (route.waypoints.Length < 2) return 0;
+
+        var next = 1;
+        var nearestDistanceSquared = float.MaxValue;
+        var flatPosition = new Vector2(position.x, position.z);
+        for (var i = 0; i < route.waypoints.Length - 1; i++)
         {
-            var distance = HorizontalDistance(position, WaypointWorld(i));
-            if (distance < nearestDistance)
+            var a = WaypointWorld(i);
+            var b = WaypointWorld(i + 1);
+            var segment = new Vector2(b.x - a.x, b.z - a.z);
+            var lengthSquared = segment.sqrMagnitude;
+            if (lengthSquared < 1e-6f) continue;
+
+            var t = Mathf.Clamp01(Vector2.Dot(flatPosition - new Vector2(a.x, a.z), segment) / lengthSquared);
+            var closest = new Vector2(a.x, a.z) + segment * t;
+            var distanceSquared = (flatPosition - closest).sqrMagnitude;
+            if (distanceSquared < nearestDistanceSquared)
             {
-                nearest = i;
-                nearestDistance = distance;
+                nearestDistanceSquared = distanceSquared;
+                next = i + 1;
             }
         }
-        return nearest;
+        return next;
     }
 
     void AdvanceTarget(Vector3 cameraPosition)
@@ -238,9 +255,6 @@ public class RouteNavigator : MonoBehaviour
         {
             var isDestination = i == last;
             var isGuidancePoint = Route.IsGuidanceWaypoint(route.waypoints[i]);
-            // Interpolated guidance points make the arrow and corridor precise without filling
-            // the room with a visible marble every half metre.
-            if (isGuidancePoint && !isDestination) continue;
             var marker = GameObject.CreatePrimitive(isDestination ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
             marker.name = isDestination ? "RouteDestination" : $"Waypoint-{route.waypoints[i].id}";
             Destroy(marker.GetComponent<Collider>());
@@ -254,7 +268,9 @@ public class RouteNavigator : MonoBehaviour
             }
             else
             {
-                marker.transform.localScale = Vector3.one * 0.12f;
+                // Fine route targets are breadcrumbs, not the larger graph/place nodes. Showing
+                // them makes the 20 cm guidance route readable without filling the room.
+                marker.transform.localScale = Vector3.one * (isGuidancePoint ? 0.045f : 0.12f);
                 marker.transform.localPosition = basePosition + Vector3.up * 0.06f;
             }
 
