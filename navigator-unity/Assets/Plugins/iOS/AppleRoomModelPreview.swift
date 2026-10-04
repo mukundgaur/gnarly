@@ -218,20 +218,20 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusLabel)
 
-        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
+        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
         panel.layer.cornerRadius = 20
         panel.clipsToBounds = true
         panel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(panel)
 
         selectedLabel.text = "Tap a dot to pick a room, door, or destination"
-        selectedLabel.textColor = .white
+        selectedLabel.textColor = .label
         selectedLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         selectedLabel.numberOfLines = 2
 
         configureActionButton(setStartButton, title: "Set as Start", color: .systemGreen, action: #selector(setSelectedAsStart))
         configureActionButton(setDestinationButton, title: "Set as Destination", color: .systemPink, action: #selector(setSelectedAsDestination))
-        configureActionButton(showRouteButton, title: "Start Navigation", color: .systemTeal, action: #selector(showRoute))
+        configureActionButton(showRouteButton, title: "Navigate in AR", color: .systemBlue, action: #selector(showRoute))
         configureActionButton(myLocationButton, title: "My Location", color: .systemGray, action: #selector(useMyLocation))
         configureActionButton(swapButton, title: "Swap", color: .systemGray, action: #selector(swapSelection))
         configureActionButton(clearButton, title: "Clear", color: .systemGray, action: #selector(clearSelection))
@@ -239,7 +239,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         setDestinationButton.isEnabled = false
         showRouteButton.isEnabled = false
 
-        summaryLabel.textColor = .white
+        summaryLabel.textColor = .label
         summaryLabel.font = .systemFont(ofSize: 16, weight: .medium)
         summaryLabel.numberOfLines = 2
         updateSummary()
@@ -431,9 +431,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         do {
             let route = try JSONDecoder().decode(NativeRoute.self, from: Data(json.utf8))
             drawRoute(route)
-            statusLabel.text = "Navigation started. Tap Back to follow it in AR."
-            statusLabel.isHidden = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.statusLabel.isHidden = true }
+            dismiss(animated: true)
         } catch {
             showError("Could not draw the selected route.\n\(error.localizedDescription)")
         }

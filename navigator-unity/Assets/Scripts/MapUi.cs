@@ -4,26 +4,26 @@ using UnityEngine.UI;
 /// <summary>Shared palette and runtime uGUI builders for the map and route planner.</summary>
 public static class MapUi
 {
-    public static readonly Color Sheet = new Color(0.035f, 0.07f, 0.11f, 0.985f);
-    public static readonly Color Surface = new Color(0.075f, 0.135f, 0.195f, 1f);
-    public static readonly Color SurfaceRaised = new Color(0.11f, 0.2f, 0.27f, 1f);
-    public static readonly Color SurfaceActive = new Color(0.12f, 0.29f, 0.36f, 1f);
+    public static readonly Color Sheet = new Color(0.97f, 0.98f, 1f, 1f);
+    public static readonly Color Surface = Color.white;
+    public static readonly Color SurfaceRaised = new Color(0.91f, 0.94f, 0.98f, 1f);
+    public static readonly Color SurfaceActive = new Color(0.83f, 0.9f, 1f, 1f);
     public static readonly Color MapBackground = new Color(0.015f, 0.035f, 0.06f, 1f);
-    public static readonly Color Accent = new Color(0.08f, 0.95f, 0.82f, 1f);
-    public static readonly Color AccentText = new Color(0.02f, 0.12f, 0.12f, 1f);
-    public static readonly Color TextPrimary = Color.white;
-    public static readonly Color TextSecondary = new Color(0.64f, 0.75f, 0.83f, 1f);
-    public static readonly Color Eyebrow = new Color(0.45f, 0.83f, 0.95f, 1f);
-    public static readonly Color Warning = new Color(1f, 0.62f, 0.45f, 1f);
-    public static readonly Color Start = new Color(0.24f, 0.88f, 0.5f, 1f);
-    public static readonly Color Destination = new Color(1f, 0.38f, 0.62f, 1f);
-    public static readonly Color User = new Color(0.08f, 0.95f, 0.82f, 1f);
-    public static readonly Color PlaceDestination = new Color(1f, 0.74f, 0.28f, 1f);
-    public static readonly Color PlaceRoom = new Color(0.68f, 0.56f, 1f, 1f);
-    public static readonly Color PlaceStairs = new Color(0.45f, 0.6f, 1f, 1f);
-    public static readonly Color PlaceEntrance = new Color(0.55f, 0.9f, 0.62f, 1f);
-    public static readonly Color PlaceMinor = new Color(0.36f, 0.62f, 0.72f, 0.85f);
-    public static readonly Color Preview = new Color(1f, 1f, 1f, 0.92f);
+    public static readonly Color Accent = new Color(0.1f, 0.37f, 0.83f, 1f);
+    public static readonly Color AccentText = Color.white;
+    public static readonly Color TextPrimary = new Color(0.1f, 0.16f, 0.24f, 1f);
+    public static readonly Color TextSecondary = new Color(0.39f, 0.46f, 0.55f, 1f);
+    public static readonly Color Eyebrow = new Color(0.33f, 0.43f, 0.55f, 1f);
+    public static readonly Color Warning = new Color(0.78f, 0.24f, 0.15f, 1f);
+    public static readonly Color Start = new Color(0.18f, 0.58f, 0.35f, 1f);
+    public static readonly Color Destination = new Color(0.79f, 0.22f, 0.34f, 1f);
+    public static readonly Color User = new Color(0.1f, 0.44f, 0.92f, 1f);
+    public static readonly Color PlaceDestination = new Color(0.87f, 0.53f, 0.1f, 1f);
+    public static readonly Color PlaceRoom = new Color(0.45f, 0.4f, 0.7f, 1f);
+    public static readonly Color PlaceStairs = new Color(0.26f, 0.44f, 0.75f, 1f);
+    public static readonly Color PlaceEntrance = new Color(0.24f, 0.56f, 0.36f, 1f);
+    public static readonly Color PlaceMinor = new Color(0.42f, 0.55f, 0.64f, 0.9f);
+    public static readonly Color Preview = new Color(0.25f, 0.62f, 1f, 0.96f);
 
     const int RoundedTextureSize = 96;
     const int RoundedRadius = 32;

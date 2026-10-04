@@ -564,13 +564,16 @@ public class LidarPulseView : MonoBehaviour
         var scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1170, 2532);
+        var safeRoot = new GameObject("SafeArea", typeof(RectTransform)).GetComponent<RectTransform>();
+        safeRoot.SetParent(canvasObject.transform, false);
+        safeRoot.gameObject.AddComponent<SafeAreaPanel>();
 
         var button = new GameObject("LidarButton", typeof(RectTransform)).GetComponent<RectTransform>();
-        button.SetParent(canvasObject.transform, false);
+        button.SetParent(safeRoot, false);
         button.anchorMin = new Vector2(0.5f, 0);
         button.anchorMax = new Vector2(0.5f, 0);
-        button.offsetMin = new Vector2(-565, 88);
-        button.offsetMax = new Vector2(-210, 190);
+        button.offsetMin = new Vector2(-565, 16);
+        button.offsetMax = new Vector2(-210, 112);
         buttonBackground = button.gameObject.AddComponent<Image>();
         button.gameObject.AddComponent<Button>().onClick.AddListener(Toggle);
 

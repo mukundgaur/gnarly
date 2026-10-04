@@ -69,6 +69,9 @@ public partial class IndoorMapOverlay
     RectTransform placesContent;
     Text placesHeading;
     Text placesEmpty;
+    InputField placeSearch;
+    Text zoneFilterLabel;
+    string zoneFilter;
     Text summaryText;
     Text detailsText;
     Button startNavigationButton;
@@ -92,6 +95,7 @@ public partial class IndoorMapOverlay
             }
         }
         BuildPlaceMarkers(places);
+        zoneFilter = null;
         BuildPlaceRows();
         BuildMapLabels();
         if (startKey != null && !placesByKey.ContainsKey(startKey)) startKey = null;
@@ -417,8 +421,8 @@ public partial class IndoorMapOverlay
             label.rect.anchoredPosition = new Vector2(viewport.x * rect.width, viewport.y * rect.height + 28f);
             label.background.color = label.place.key == startKey ? MapUi.WithAlpha(MapUi.Start, 0.95f)
                 : label.place.key == destinationKey ? MapUi.WithAlpha(MapUi.Destination, 0.95f)
-                : new Color(0.03f, 0.07f, 0.11f, 0.86f);
-            label.text.color = selected ? MapUi.AccentText : MapUi.TextPrimary;
+                : new Color(0.12f, 0.2f, 0.3f, 0.9f);
+            label.text.color = Color.white;
         }
     }
 
@@ -438,25 +442,26 @@ public partial class IndoorMapOverlay
         MapUi.Panel(plannerRoot, MapUi.Sheet, 0f, true);
 
         var scale = Mathf.Max(1f, Screen.width) / 1170f;
-        var safe = Screen.safeArea;
-        var topInset = Mathf.Max(48f, (Screen.height - safe.yMax) / scale) + 16f;
-        var bottomInset = Mathf.Max(24f, safe.yMin / scale) + 16f;
-        var content = MapUi.Rect("Content", plannerRoot, Vector2.zero, Vector2.one, new Vector2(32, bottomInset), new Vector2(-32, -topInset));
+        var safeHeight = Screen.safeArea.height / scale;
+        var content = MapUi.Rect("Content", plannerRoot, Vector2.zero, Vector2.one, new Vector2(32, 20), new Vector2(-32, -20));
 
-        const float headerHeight = 120f;
+        const float headerHeight = 170f;
         const float cardHeight = 300f;
-        const float placesHeight = 420f;
+        var placesHeight = Mathf.Clamp(safeHeight * 0.19f, 320f, 420f);
         const float footerHeight = 262f;
         const float gap = 18f;
 
         BuildHeader(Top(content, 0f, headerHeight));
         BuildRouteCard(Top(content, headerHeight + gap, cardHeight));
         var mapTop = headerHeight + gap + cardHeight + gap;
-        var mapBottom = footerHeight + gap + placesHeight + gap;
+        var mapBottom = footerHeight + gap + placesHeight - 40f;
         BuildMap(MapUi.Rect("Map", content, Vector2.zero, Vector2.one, new Vector2(0, mapBottom), new Vector2(0, -mapTop)));
-        BuildPlacesSection(MapUi.Rect("Places", content, Vector2.zero, new Vector2(1, 0),
-            new Vector2(0, footerHeight + gap), new Vector2(0, footerHeight + gap + placesHeight)));
-        BuildFooter(MapUi.Rect("Footer", content, Vector2.zero, new Vector2(1, 0), Vector2.zero, new Vector2(0, footerHeight)));
+        var sheet = MapUi.Rect("PlacesSheet", content, Vector2.zero, new Vector2(1, 0), Vector2.zero,
+            new Vector2(0, footerHeight + gap + placesHeight));
+        MapUi.Panel(sheet, MapUi.Surface, 42f, true);
+        BuildPlacesSection(MapUi.Rect("Places", sheet, Vector2.zero, new Vector2(1, 0),
+            new Vector2(20, footerHeight + gap), new Vector2(-20, footerHeight + gap + placesHeight - 12f)));
+        BuildFooter(MapUi.Rect("Footer", sheet, Vector2.zero, new Vector2(1, 0), new Vector2(20, 0), new Vector2(-20, footerHeight)));
 
         plannerRoot.gameObject.SetActive(false);
         RefreshSelection();
@@ -470,13 +475,23 @@ public partial class IndoorMapOverlay
         header.name = "Header";
         plannerSubtitle = MapUi.Label(MapUi.Rect("Eyebrow", header, new Vector2(0, 1), new Vector2(1, 1), new Vector2(4, -44), new Vector2(-360, 0)),
             "ROUTE PLANNER", 24, MapUi.Eyebrow, TextAnchor.MiddleLeft, FontStyle.Bold);
-        MapUi.Label(MapUi.Rect("Title", header, Vector2.zero, Vector2.one, new Vector2(4, 0), new Vector2(-360, -40)),
-            "Where to?", 52, MapUi.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
+        var searchBox = MapUi.Rect("Search", header, Vector2.zero, new Vector2(1, 0), new Vector2(0, 0), new Vector2(0, 84));
+        var searchBackground = MapUi.Panel(searchBox, MapUi.Surface, 34f, true);
+        placeSearch = searchBox.gameObject.AddComponent<InputField>();
+        placeSearch.targetGraphic = searchBackground;
+        var placeholder = MapUi.Label(MapUi.Stretch("Placeholder", searchBox, 28f), "Where to? Search rooms and places", 33,
+            MapUi.TextSecondary, TextAnchor.MiddleLeft);
+        var typed = MapUi.Label(MapUi.Stretch("Input", searchBox, 28f), "", 33,
+            MapUi.TextPrimary, TextAnchor.MiddleLeft);
+        typed.supportRichText = false;
+        placeSearch.placeholder = placeholder;
+        placeSearch.textComponent = typed;
+        placeSearch.onValueChanged.AddListener(_ => { BuildPlaceRows(); RefreshSelection(); });
 
-        var close = MapUi.Sized("Close", header, new Vector2(1, 0.5f), new Vector2(104, 104), new Vector2(-52, 0));
+        var close = MapUi.Sized("Close", header, new Vector2(1, 1), new Vector2(80, 80), new Vector2(-40, -40));
         MapUi.Button(close, "×", MapUi.SurfaceRaised, MapUi.TextPrimary, 60, ClosePlanner, 52f);
 
-        var native = MapUi.Sized("Model3D", header, new Vector2(1, 0.5f), new Vector2(200, 104), new Vector2(-232, 0));
+        var native = MapUi.Sized("Model3D", header, new Vector2(1, 1), new Vector2(190, 80), new Vector2(-185, -40));
         nativeModelButton = MapUi.Button(native, "3D view", MapUi.SurfaceRaised, MapUi.TextPrimary, 30, OpenNativeFromPlanner, 52f);
         nativeModelButton.gameObject.SetActive(false);
     }
@@ -545,7 +560,7 @@ public partial class IndoorMapOverlay
         labelLayer = MapUi.Stretch("Labels", mapViewport);
 
         hintChip = MapUi.Rect("Hint", mapViewport, new Vector2(0, 1), Vector2.one, new Vector2(20, -96), new Vector2(-20, -20));
-        MapUi.Panel(hintChip, new Color(0.02f, 0.05f, 0.08f, 0.9f), 38f);
+        MapUi.Panel(hintChip, new Color(1f, 1f, 1f, 0.96f), 38f);
         hintDot = MapUi.Dot(MapUi.Sized("Dot", hintChip, new Vector2(0, 0.5f), new Vector2(22, 22), new Vector2(38, 0)), MapUi.Destination);
         hintText = MapUi.Label(MapUi.Rect("Text", hintChip, Vector2.zero, Vector2.one, new Vector2(64, 0), new Vector2(-20, 0)),
             "", 27, MapUi.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
@@ -559,7 +574,7 @@ public partial class IndoorMapOverlay
             "ME", MapUi.Surface, MapUi.User, 28, Recenter, 30f);
 
         var legend = MapUi.Rect("Legend", mapViewport, Vector2.zero, Vector2.zero, new Vector2(20, 20), new Vector2(560, 76));
-        MapUi.Panel(legend, new Color(0.02f, 0.05f, 0.08f, 0.86f), 28f);
+        MapUi.Panel(legend, new Color(1f, 1f, 1f, 0.94f), 28f);
         AddLegendItem(legend, 0, "You", MapUi.User);
         AddLegendItem(legend, 1, "Start", MapUi.Start);
         AddLegendItem(legend, 2, "Destination", MapUi.Destination);
@@ -576,7 +591,11 @@ public partial class IndoorMapOverlay
     void BuildPlacesSection(RectTransform section)
     {
         placesHeading = MapUi.Label(MapUi.Rect("Heading", section, new Vector2(0, 1), Vector2.one, new Vector2(8, -44), Vector2.zero),
-            "PLACES", 24, MapUi.Eyebrow, TextAnchor.MiddleLeft, FontStyle.Bold);
+            "DESTINATIONS", 24, MapUi.Eyebrow, TextAnchor.MiddleLeft, FontStyle.Bold);
+
+        var filter = MapUi.Rect("FloorFilter", section, new Vector2(1, 1), Vector2.one, new Vector2(-250, -52), new Vector2(0, 0));
+        var filterButton = MapUi.Button(filter, "All areas", MapUi.SurfaceRaised, MapUi.TextPrimary, 25, CycleZoneFilter, 26f);
+        zoneFilterLabel = MapUi.ButtonLabel(filterButton);
 
         var scrollRect = MapUi.Rect("List", section, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(0, -56));
         MapUi.Panel(scrollRect, MapUi.Surface, 36f);
@@ -594,7 +613,20 @@ public partial class IndoorMapOverlay
         scroll.scrollSensitivity = 30f;
 
         placesEmpty = MapUi.Label(MapUi.Stretch("Empty", scrollRect, 30f),
-            "No named places in this map yet. Tap any dot on the map to pick a point.", 28, MapUi.TextSecondary, TextAnchor.MiddleCenter);
+            "No matching places. Try another name or floor.", 28, MapUi.TextSecondary, TextAnchor.MiddleCenter);
+    }
+
+    void CycleZoneFilter()
+    {
+        var zones = new List<string>();
+        foreach (var place in places)
+            if (place.major && !zones.Contains(place.zone)) zones.Add(place.zone);
+        zones.Sort(StringComparer.OrdinalIgnoreCase);
+        if (zones.Count == 0) return;
+        var index = zoneFilter == null ? -1 : zones.IndexOf(zoneFilter);
+        zoneFilter = index + 1 < zones.Count ? zones[index + 1] : null;
+        BuildPlaceRows();
+        RefreshSelection();
     }
 
     void BuildFooter(RectTransform footer)
@@ -618,7 +650,11 @@ public partial class IndoorMapOverlay
         foreach (Transform child in placesContent) Destroy(child.gameObject);
         placeRows.Clear();
 
-        var listed = places.FindAll(place => place.major);
+        var query = placeSearch != null ? placeSearch.text.Trim() : "";
+        var listed = places.FindAll(place => place.major &&
+            (zoneFilter == null || place.zone == zoneFilter) &&
+            (query.Length == 0 || place.name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+             place.zone.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0));
         listed.Sort((a, b) =>
         {
             if (a.inCurrentZone != b.inCurrentZone) return a.inCurrentZone ? -1 : 1;
@@ -657,7 +693,8 @@ public partial class IndoorMapOverlay
         placesContent.sizeDelta = new Vector2(0, listed.Count * (rowHeight + spacing));
         if (placesEmpty != null) placesEmpty.gameObject.SetActive(listed.Count == 0);
         if (placesHeading != null)
-            placesHeading.text = listed.Count == 0 ? "PLACES" : $"PLACES  ·  {listed.Count}";
+            placesHeading.text = listed.Count == 0 ? "DESTINATIONS" : $"DESTINATIONS  ·  {listed.Count}";
+        if (zoneFilterLabel != null) zoneFilterLabel.text = zoneFilter ?? "All areas";
     }
 
     static int KindOrder(string kind) => kind switch
@@ -679,8 +716,8 @@ public partial class IndoorMapOverlay
             if (!place.inCurrentZone) continue;
             var rect = MapUi.Rect("Label-" + place.localId, labelLayer, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero);
             rect.pivot = new Vector2(0.5f, 0f);
-            var background = MapUi.Panel(rect, new Color(0.03f, 0.07f, 0.11f, 0.86f), 22f);
-            var text = MapUi.Label(MapUi.Stretch("Text", rect), place.name, 24, MapUi.TextPrimary, TextAnchor.MiddleCenter, FontStyle.Bold);
+            var background = MapUi.Panel(rect, new Color(0.12f, 0.2f, 0.3f, 0.9f), 22f);
+            var text = MapUi.Label(MapUi.Stretch("Text", rect), place.name, 24, Color.white, TextAnchor.MiddleCenter, FontStyle.Bold);
             text.horizontalOverflow = HorizontalWrapMode.Overflow;
             rect.sizeDelta = new Vector2(Mathf.Min(420f, text.preferredWidth + 32f), 46f);
             rect.gameObject.SetActive(false);
@@ -790,6 +827,9 @@ public partial class IndoorMapOverlay
         hintChip = null;
         hintText = null;
         placesContent = null;
+        placeSearch = null;
+        zoneFilterLabel = null;
+        zoneFilter = null;
         summaryText = null;
         placeRows.Clear();
         mapLabels.Clear();

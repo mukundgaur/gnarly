@@ -3,6 +3,7 @@ import { checkEdge, distance3D, pointOnFloor } from './geometry.ts';
 
 export type EditResult = { graph: Graph; removedEdges: Edge[] };
 export function addWaypoint(graph: Graph, node: Node, scan?: ScanFeatures): Graph {
+  if (!node.id.trim() || !node.position.every(Number.isFinite)) throw Error('Provide an ID and finite coordinates.');
   if (graph.nodes.some(item => item.id === node.id)) throw Error('Waypoint ID already exists.');
   if (!graph.floors.some(item => item.id === node.floor)) throw Error('Choose a valid floor.');
   if (!pointOnFloor(node.position, node.floor, graph, scan)) throw Error('Waypoint must be on the scanned floor.');
@@ -12,14 +13,18 @@ export function updateWaypoint(graph: Graph, node: Node, scan?: ScanFeatures): E
   if (!graph.nodes.some(item => item.id === node.id)) throw Error('Waypoint no longer exists.');
   if (!graph.floors.some(item => item.id === node.floor)) throw Error('Choose a valid floor.');
   if (!node.position.every(Number.isFinite)) throw Error('Coordinates must be finite numbers.');
-  if (!pointOnFloor(node.position, node.floor, graph, scan)) throw Error('Waypoint must be on the scanned floor.');
   const next: Graph = { ...graph, nodes: graph.nodes.map(item => item.id === node.id ? node : item) };
+  const previous = graph.nodes.find(item=>item.id===node.id)!;
+  if(previous.floor===node.floor && previous.type===node.type && previous.position.every((value,index)=>value===node.position[index]))return {graph:next,removedEdges:[]};
+  if (!pointOnFloor(node.position, node.floor, graph, scan)) throw Error('Waypoint must be on the scanned floor.');
   const removedEdges: Edge[] = [];
   next.edges = graph.edges.flatMap(edge => {
     if (edge.from !== node.id && edge.to !== node.id) return [edge];
     const from = next.nodes.find(item => item.id === edge.from)!;
     const to = next.nodes.find(item => item.id === edge.to)!;
-    const updated = { ...edge, meters: distance3D(from, to) };
+    if(!from||!to){removedEdges.push(edge);return []}
+    const moved=previous.floor!==node.floor||previous.position.some((value,index)=>value!==node.position[index]);
+    const updated = { ...edge, meters: moved ? distance3D(from, to) : edge.meters };
     if (checkEdge(updated, next, scan).status === 'blocked') { removedEdges.push(edge); return []; }
     return [updated];
   });

@@ -8,7 +8,7 @@ import {
 } from 'firebase/auth';
 import { collection, deleteField, doc, GeoPoint, getDoc, getDocs, getFirestore, onSnapshot, runTransaction, Timestamp, type DocumentData } from 'firebase/firestore';
 import { getDownloadURL, getMetadata, getStorage, ref, uploadBytes } from 'firebase/storage';
-import type { Building, Graph, Node, ScanFeatures, ZoneView } from './data';
+import type { Building, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneView } from './data';
 import { graphDigest } from './graphStore.ts';
 
 const config = {
@@ -24,7 +24,7 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const storage = app ? getStorage(app) : null;
 
-export async function fetchStorageJSON(path: string): Promise<unknown> {
+async function fetchStorage(path: string): Promise<Response> {
   if (!storage) throw Error('Firebase Storage is not configured');
   const downloadURL = await getDownloadURL(ref(storage, path));
   const url = new URL(downloadURL);
@@ -34,7 +34,37 @@ export async function fetchStorageJSON(path: string): Promise<unknown> {
   }
   const response = await fetch('/__firebase_storage' + url.pathname + url.search);
   if (!response.ok) throw Error('Storage download returned HTTP ' + response.status);
-  return response.json();
+  return response;
+}
+
+export async function fetchStorageJSON(path: string): Promise<unknown> {
+  return (await fetchStorage(path)).json();
+}
+
+/** Optional photo-based colors; a zone without them still renders with the default palette. */
+async function loadSurfaceColors(jsonPath: string, atlasPath: string): Promise<SurfaceColors | undefined> {
+  try {
+    const raw = await fetchStorageJSON(jsonPath) as {
+      atlasWidth?: number; atlasHeight?: number;
+      surfaces?: { identifier: string; faces: SurfaceColorFace[] }[];
+    };
+    if (!Array.isArray(raw.surfaces)) return undefined;
+    const surfaces: SurfaceColors['surfaces'] = {};
+    for (const surface of raw.surfaces) {
+      surfaces[surface.identifier] = Object.fromEntries((surface.faces || []).map(face => [face.face, face]));
+    }
+    let atlasUrl: string | undefined;
+    if (raw.atlasWidth && raw.atlasHeight) {
+      try {
+        atlasUrl = URL.createObjectURL(await (await fetchStorage(atlasPath)).blob());
+      } catch {
+        atlasUrl = undefined;
+      }
+    }
+    return { atlasUrl, atlasWidth: raw.atlasWidth || 1, atlasHeight: raw.atlasHeight || 1, surfaces };
+  } catch {
+    return undefined;
+  }
 }
 
 export function normalizeGraph(raw: unknown): Graph {
@@ -113,7 +143,11 @@ export async function loadBuilding(input: Building): Promise<Building> {
       const graph = normalizeGraph(await fetchStorageJSON(graphPath));
       const scanPath = zone.scanFeaturesPath || storageBase + '/zones/' + item.id + '/scan-features.json';
       const scanResult = await loadScan(scanPath);
-      const scan = scanResult.scan;
+      const zoneBase = storageBase + '/zones/' + item.id;
+      const colors = scanResult.scan
+        ? await loadSurfaceColors(zone.surfaceColorsPath || zoneBase + '/surface-colors.json', zone.surfaceColorAtlasPath || zoneBase + '/surface-colors.jpg')
+        : undefined;
+      const scan = scanResult.scan && colors ? { ...scanResult.scan, colors } : scanResult.scan;
       let rawScanStatus = '';
       if (!scan && storage) {
         const rawPath = zone.scanJsonPath || storageBase + '/zones/' + item.id + '/scan.json';
@@ -131,7 +165,7 @@ export async function loadBuilding(input: Building): Promise<Building> {
         graph,
         graphPath,
         scan,
-        notice: scan ? 'RoomPlan scan geometry' : 'Scan unavailable: ' + scanResult.error + rawScanStatus,
+        notice: scan ? (scan.colors ? 'RoomPlan scan geometry with real colors' : 'RoomPlan scan geometry') : 'Scan unavailable: ' + scanResult.error + rawScanStatus,
       });
     } catch (error) {
       errors.push(item.id + ': ' + (error instanceof Error ? error.message : String(error)));
@@ -293,11 +327,13 @@ export function createFirebaseGraphStore(input: Building): import('./graphStore.
     subscribe(onChange, onError) {
       let disposed = false;
       let lastRevision = '';
+      let request = 0;
       const check = async () => {
+        const currentRequest=++request;
         try {
           const snapshot = await load();
-          if (!disposed && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
-        } catch (error) { if (!disposed) onError(error instanceof Error ? error : Error(String(error))); }
+          if (!disposed && currentRequest===request && snapshot.revision !== lastRevision) { lastRevision = snapshot.revision; onChange(snapshot); }
+        } catch (error) { if (!disposed && currentRequest===request) onError(error instanceof Error ? error : Error(String(error))); }
       };
       const unsubscribe = onSnapshot(documentRef, () => void check(), error => onError(error));
       const interval = window.setInterval(() => void check(), 15000);

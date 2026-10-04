@@ -29,6 +29,7 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var errorMessage = ""
 
     let arSession = ARSession()
+    private let colorRecorder = SurfaceColorRecorder()
     private weak var captureView: RoomCaptureView?
     private var capturedRoom: CapturedRoom?
     private var testAnchor: TestAnchor?
@@ -81,6 +82,7 @@ final class MapperViewModel: ObservableObject {
         }
         scanPlan = .empty
         lastStairCount = 0
+        colorRecorder.reset()
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
         statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
@@ -261,38 +263,60 @@ final class MapperViewModel: ObservableObject {
 
         let anchor = (testAnchor ?? fallbackAnchor()).withZoneID(packageZoneID)
         let recorded = recordedNodes
-        statusText = asStairs
+        let savingStatus = asStairs
             ? "Saving the stair zone world map and RoomPlan stair links…"
             : "Saving ARWorldMap, RoomPlan scan, and building graph…"
-        arSession.getCurrentWorldMap { [weak self] worldMap, error in
-            Task { @MainActor in
-                guard let self else { return }
-                guard let worldMap else {
-                    self.showError("Unable to retrieve the ARWorldMap: \(error?.localizedDescription ?? "unknown error")")
-                    return
-                }
+        let surfaces = BakeSurface.all(in: room)
+        let keyframes = colorRecorder.keyframes
+        let capturedAt = ISO8601DateFormatter().string(from: Date())
+        statusText = keyframes.isEmpty ? savingStatus : "Coloring the model from \(keyframes.count) scan photos…"
 
-                do {
-                    self.exportURL = try POCPackageExporter.export(
-                        room: room,
-                        worldMap: worldMap,
-                        anchor: anchor,
-                        recordedNodes: recorded,
-                        floorID: floorID,
-                        map: map,
-                        stairs: draft.stairs.isEmpty ? nil : draft
-                    )
-                    try StairCatalogStore.save(draft)
-                    self.catalog = draft
-                    self.zoneConnectionsJSON = draft.navigatorZoneConnectionsJSON()
-                    let linkCount = draft.navigatorZoneConnections().connections.count
-                    if linkCount == 0 {
-                        self.statusText = "Package saved. No RoomPlan stair object was linked yet."
-                    } else {
-                        self.statusText = "Package saved. \(linkCount) RoomPlan stair link(s) written to zone-connections.json."
+        Task { @MainActor [weak self] in
+            // Baking is CPU-heavy (every photo is projected onto every visible face), so keep it off the main actor.
+            let colors = await Task.detached(priority: .userInitiated) {
+                SurfaceColorBaker.bake(surfaces: surfaces, keyframes: keyframes, zoneID: packageZoneID, capturedAt: capturedAt) { fraction in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.statusText.hasPrefix("Coloring the model") else { return }
+                        self.statusText = "Coloring the model from scan photos… \(Int(fraction * 100))%"
                     }
-                } catch {
-                    self.showError("Package export failed: \(error.localizedDescription)")
+                }
+            }.value
+            guard let self else { return }
+            if !keyframes.isEmpty, colors == nil {
+                self.uploadLogger.error("Surface color bake produced no output from \(keyframes.count) keyframes.")
+            }
+            self.statusText = savingStatus
+            self.arSession.getCurrentWorldMap { [weak self] worldMap, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard let worldMap else {
+                        self.showError("Unable to retrieve the ARWorldMap: \(error?.localizedDescription ?? "unknown error")")
+                        return
+                    }
+
+                    do {
+                        self.exportURL = try POCPackageExporter.export(
+                            room: room,
+                            worldMap: worldMap,
+                            anchor: anchor,
+                            recordedNodes: recorded,
+                            floorID: floorID,
+                            map: map,
+                            stairs: draft.stairs.isEmpty ? nil : draft,
+                            surfaceColors: colors
+                        )
+                        try StairCatalogStore.save(draft)
+                        self.catalog = draft
+                        self.zoneConnectionsJSON = draft.navigatorZoneConnectionsJSON()
+                        let linkCount = draft.navigatorZoneConnections().connections.count
+                        let stairStatus = linkCount == 0
+                            ? "No RoomPlan stair object was linked yet."
+                            : "\(linkCount) RoomPlan stair link(s) written to zone-connections.json."
+                        let colorStatus = colors?.summary ?? "No real colors: no usable scan photos were recorded."
+                        self.statusText = "Package saved. \(colorStatus) \(stairStatus)"
+                    } catch {
+                        self.showError("Package export failed: \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -366,6 +390,13 @@ final class MapperViewModel: ObservableObject {
                 statusText = "Uploading 3D room model…"
                 try await repository.uploadZoneStructure(from: structure, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
+                let colorsJSON = packageURL.appendingPathComponent(SurfaceColorBakeResult.jsonFileName)
+                let colorsAtlas = packageURL.appendingPathComponent(SurfaceColorBakeResult.atlasFileName)
+                if FileManager.default.fileExists(atPath: colorsJSON.path), FileManager.default.fileExists(atPath: colorsAtlas.path) {
+                    statusText = "Uploading real surface colors…"
+                    try await repository.uploadZoneSurfaceColors(json: colorsJSON, atlas: colorsAtlas, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
+                    try Task.checkCancellation()
+                }
                 statusText = "Uploading AR world map…"
                 try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
@@ -440,6 +471,7 @@ final class MapperViewModel: ObservableObject {
         pathSamplingTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self, self.isScanning else { return }
             self.sampleWalkedPathIfNeeded()
+            if let frame = self.arSession.currentFrame { self.colorRecorder.consider(frame) }
         }
     }
 

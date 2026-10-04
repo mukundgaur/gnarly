@@ -10,7 +10,8 @@ enum POCPackageExporter {
         recordedNodes: [RecordedGraphNode],
         floorID: String,
         map: ExportedMap = .floor,
-        stairs: StairCatalog? = nil
+        stairs: StairCatalog? = nil,
+        surfaceColors: SurfaceColorBakeResult? = nil
     ) throws -> URL {
         let documentsDirectory = try FileManager.default.url(
             for: .documentDirectory,
@@ -88,6 +89,12 @@ enum POCPackageExporter {
         ]
         if recordedNodes.count >= 2 {
             files.append("route.json")
+        }
+        if let surfaceColors {
+            try surfaceColors.json.write(to: packageURL.appendingPathComponent(SurfaceColorBakeResult.jsonFileName), options: .atomic)
+            try surfaceColors.atlas.write(to: packageURL.appendingPathComponent(SurfaceColorBakeResult.atlasFileName), options: .atomic)
+            files.append(SurfaceColorBakeResult.jsonFileName)
+            files.append(SurfaceColorBakeResult.atlasFileName)
         }
         if let stairs, !stairs.stairs.isEmpty {
             files.append("stairs.json")

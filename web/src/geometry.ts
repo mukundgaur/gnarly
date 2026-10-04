@@ -58,9 +58,9 @@ function surfaceSegment(feature: ScanFeature): [P, P] {
   return [xz(world(feature, [-half, 0, 0])), xz(world(feature, [half, 0, 0]))];
 }
 export function pointOnFloor(position: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): boolean {
+  if (!position.every(Number.isFinite) || !graph.floors.some(floor=>floor.id===floorId)) return false;
   if (!scan?.floors?.length) {
     const nodes = graph.nodes.filter(node => node.floor === floorId);
-    if (!nodes.length) return false;
     return position[0] >= Math.min(0, ...nodes.map(node => node.position[0])) - 2 &&
       position[0] <= Math.max(0, ...nodes.map(node => node.position[0])) + 2 &&
       position[2] >= Math.min(0, ...nodes.map(node => node.position[2])) - 2 &&
@@ -70,29 +70,47 @@ export function pointOnFloor(position: [number, number, number], floorId: string
   const floors = scan.floors.filter(item => story == null || item.story == null || item.story === story);
   return floors.some(item => inPolygon(xz(position), floorPolygon(item), .25));
 }
-export function canWalkBetween(from: [number, number, number], to: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): boolean {
-  if (!pointOnFloor(to, floorId, graph, scan)) return false;
-  if (!scan?.floors?.length) return true;
-  const story = graph.floors.find(floor => floor.id === floorId)?.story;
-  const portals = [...(scan.doors || []), ...(scan.openings || [])];
-  const a = xz(from), b = xz(to);
-  for (const wall of scan.walls || []) {
-    if (story != null && wall.story != null && wall.story !== story) continue;
-    const [c, d] = surfaceSegment(wall);
-    if (overlapsWall(a, b, c, d)) return false;
-    const hit = segmentHit(a, b, c, d);
-    if (!hit) continue;
-    const doorway = portals.some(portal => {
-      if (portal.parentIdentifier && portal.parentIdentifier !== wall.identifier) return false;
-      const [left, right] = surfaceSegment(portal);
-      return distanceToSegment(hit, left, right) <= .12;
-    });
-    if (!doorway) return false;
+// Split at every polygon boundary, so short gaps and concave corners cannot be skipped.
+function segmentOnFloors(a: P, b: P, polygons: P[][]): boolean {
+  const distance=length(a,b);
+  const cuts=[0,1];
+  for(const polygon of polygons)for(let i=0;i<polygon.length;i++){
+    const hit=segmentHit(a,b,polygon[i],polygon[(i+1)%polygon.length]);
+    if(hit&&distance>eps)cuts.push(length(a,hit)/distance);
   }
-  return true;
+  cuts.sort((x,y)=>x-y);
+  const inside=(t:number)=>polygons.some(polygon=>inPolygon([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t],polygon,.02));
+  return inside(0)&&inside(1)&&cuts.slice(1).every((t,i)=>inside((cuts[i]+t)/2));
+}
+function wallObstruction(a:P,b:P,story:number|undefined,scan:ScanFeatures):string|null {
+  const portals=[...(scan.doors||[]),...(scan.openings||[])];
+  for(const wall of scan.walls||[]){
+    if(story!=null&&wall.story!=null&&wall.story!==story)continue;
+    const [c,d]=surfaceSegment(wall);
+    if(overlapsWall(a,b,c,d))return 'Connection runs along a wall';
+    const hit=segmentHit(a,b,c,d);
+    if(!hit)continue;
+    const doorway=portals.some(portal=>{
+      if(story!=null&&portal.story!=null&&portal.story!==story)return false;
+      if(wall.story!=null&&portal.story!=null&&wall.story!==portal.story)return false;
+      if(portal.parentIdentifier&&portal.parentIdentifier!==wall.identifier)return false;
+      const [left,right]=surfaceSegment(portal);
+      return distanceToSegment(hit,left,right)<=.12;
+    });
+    if(!doorway)return 'Connection crosses a wall outside a doorway';
+  }
+  return null;
+}
+export function canWalkBetween(from: [number, number, number], to: [number, number, number], floorId: string, graph: Graph, scan?: ScanFeatures): boolean {
+  if(!pointOnFloor(from,floorId,graph,scan)||!pointOnFloor(to,floorId,graph,scan))return false;
+  if(!scan?.floors?.length)return true;
+  const story=graph.floors.find(floor=>floor.id===floorId)?.story;
+  const polygons=scan.floors.filter(item=>story==null||item.story==null||item.story===story).map(floorPolygon);
+  return segmentOnFloors(xz(from),xz(to),polygons)&&!wallObstruction(xz(from),xz(to),story,scan);
 }
 function isWalked(edge: Edge): boolean { return ['manual', 'recorded', 'walked-path'].includes(edge.source || ''); }
 export function checkEdge(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCheck {
+  if (!Number.isFinite(edge.meters) || edge.meters <= 0) return { status: 'blocked', reason: 'Invalid connection distance' };
   const from = graph.nodes.find(node => node.id === edge.from);
   const to = graph.nodes.find(node => node.id === edge.to);
   if (!from || !to) return { status: 'blocked', reason: 'Missing endpoint' };
@@ -112,25 +130,9 @@ export function checkEdge(edge: Edge, graph: Graph, scan?: ScanFeatures): EdgeCh
   const story = graph.floors.find(floor => floor.id === from.floor)?.story;
   const floors = scan.floors.filter(item => story == null || item.story == null || item.story === story).map(floorPolygon);
   if (!floors.length) return { status: 'blocked', reason: 'No scanned surface for this floor' };
-  for (let i = 0; i <= Math.ceil(distance / .2); i++) {
-    const t = i / Math.ceil(distance / .2);
-    const p: P = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    if (!floors.some(polygon => inPolygon(p, polygon, .25))) return { status: 'blocked', reason: 'Connection leaves the scanned floor' };
-  }
-  const portals = [...(scan.doors || []), ...(scan.openings || [])];
-  for (const wall of scan.walls || []) {
-    if (story != null && wall.story != null && wall.story !== story) continue;
-    const [c, d] = surfaceSegment(wall);
-    if (overlapsWall(a, b, c, d)) return { status: 'blocked', reason: 'Connection runs along a wall' };
-    const hit = segmentHit(a, b, c, d);
-    if (!hit) continue;
-    const doorway = portals.some(portal => {
-      if (portal.parentIdentifier && portal.parentIdentifier !== wall.identifier) return false;
-      const [left, right] = surfaceSegment(portal);
-      return distanceToSegment(hit, left, right) <= .12;
-    });
-    if (!doorway) return { status: 'blocked', reason: 'Connection crosses a wall outside a doorway' };
-  }
+  if(!segmentOnFloors(a,b,floors))return {status:'blocked',reason:'Connection leaves the scanned floor'};
+  const obstruction=wallObstruction(a,b,story,scan);
+  if(obstruction)return {status:'blocked',reason:obstruction};
   return { status: 'valid', reason: 'Inside floor and clear of walls' };
 }
 export function distance3D(a: Node, b: Node): number {

@@ -25,12 +25,15 @@ export function createLocalGraphStore(building: Building): GraphStore {
   return {
     async load() { return read(); },
     async save(graph, expected) {
-      if (read().revision !== expected.revision) throw Error('Local graph changed in another tab. Review the conflict before saving.');
-      localStorage.setItem(key, JSON.stringify(graph));
-      return read();
+      const write=()=>{
+        if (read().revision !== expected.revision) throw Error('Local graph changed in another tab. Review the conflict before saving.');
+        localStorage.setItem(key, JSON.stringify(graph));
+        return read();
+      };
+      return navigator.locks ? navigator.locks.request(key,write) : write();
     },
-    subscribe(onChange) {
-      const listener = (event: StorageEvent) => { if (event.key === key) onChange(read()); };
+    subscribe(onChange,onError) {
+      const listener = (event: StorageEvent) => { if (event.key === key || event.key === null) {try{onChange(read())}catch(error){onError(error instanceof Error?error:new Error(String(error)))}} };
       window.addEventListener('storage', listener);
       return () => window.removeEventListener('storage', listener);
     },

@@ -53,6 +53,7 @@ All five files are downloaded to `Application.persistentDataPath/navigation-cach
 | `building.json` | Yes | Graph nodes/edges plus destination labels ([schema](../shared/building.schema.json)) |
 | `structure.usdz` | Yes | Original RoomPlan building geometry rendered in the expanded iPhone map |
 | `route.json` | No | Fallback polyline if A* has no destination ([schema](../shared/route.schema.json)) |
+| `surface-colors.json` + `.jpg` | No | Real photo colors for the minimap walls, floors, doors and objects ([schema](../shared/surface-colors.schema.json)); downloaded from the zone folder when present |
 | `stairs.json` | No | Separate stair zones, with `prev`/`next` floors and the floor lookup ([schema](../shared/stairs.schema.json)) |
 
 The mapper exports `scan-features.json` and a visibility `building.json`. Record a destination node (for example Room 204) so A* has a goal. `route.json` is only a fallback walk-order path.

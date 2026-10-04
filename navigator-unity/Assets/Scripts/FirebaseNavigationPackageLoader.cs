@@ -24,6 +24,8 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
     bool busy;
     bool hasCachedPackage;
     bool hasSavedSession;
+    bool showManualIds;
+    Vector2 scrollPosition;
     System.Collections.Generic.List<FirebaseScanChoice> library;
 
     public void Begin(
@@ -53,67 +55,112 @@ public sealed class FirebaseNavigationPackageLoader : MonoBehaviour
         if (!visible) return;
 
         const float referenceWidth = 1170f;
-        var scale = Mathf.Max(0.55f, Screen.width / referenceWidth);
+        var scale = Screen.width / referenceWidth;
+        var safe = Screen.safeArea;
+        var left = safe.xMin / scale + 32f;
+        var right = (Screen.width - safe.xMax) / scale + 32f;
+        var top = (Screen.height - safe.yMax) / scale + 24f;
+        var bottom = safe.yMin / scale + 24f;
+        var width = referenceWidth - left - right;
+        var height = Screen.height / scale - top - bottom;
         var oldMatrix = GUI.matrix;
+        var oldColor = GUI.color;
+        var oldBackground = GUI.backgroundColor;
         GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, Vector3.one * scale);
-        var width = referenceWidth - 120f;
-        var height = 1000f;
-        var top = Mathf.Max(380f, Screen.height / scale * 0.5f - height * 0.5f);
+        GUI.color = new Color(0.04f, 0.09f, 0.15f);
+        GUI.DrawTexture(new Rect(0, 0, referenceWidth, Screen.height / scale), Texture2D.whiteTexture);
+        GUI.color = Color.white;
 
         var oldLabelSize = GUI.skin.label.fontSize;
+        var oldLabelWrap = GUI.skin.label.wordWrap;
+        var oldLabelColor = GUI.skin.label.normal.textColor;
         var oldTextSize = GUI.skin.textField.fontSize;
         var oldButtonSize = GUI.skin.button.fontSize;
-        GUI.skin.label.fontSize = 38;
-        GUI.skin.textField.fontSize = 38;
-        GUI.skin.button.fontSize = 38;
+        GUI.skin.label.fontSize = 31;
+        GUI.skin.label.wordWrap = true;
+        GUI.skin.label.normal.textColor = new Color(0.86f, 0.92f, 0.98f);
+        GUI.skin.textField.fontSize = 33;
+        GUI.skin.button.fontSize = 32;
 
-        GUILayout.BeginArea(new Rect(60f, top, width, height), GUI.skin.box);
-        GUILayout.Space(20);
-        GUILayout.Label("Firebase navigation package");
-        GUILayout.Space(14);
-        GUILayout.Label("Email");
-        email = GUILayout.TextField(email, GUILayout.Height(64));
-        GUILayout.Label("Password");
-        password = GUILayout.PasswordField(password, '•', GUILayout.Height(64));
-        GUILayout.Label("Building ID");
-        var updatedBuilding = GUILayout.TextField(buildingId, GUILayout.Height(64));
-        GUILayout.Label("Zone ID");
-        var updatedZone = GUILayout.TextField(zoneId, GUILayout.Height(64));
-        if (updatedBuilding != buildingId || updatedZone != zoneId)
+        var titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 57, fontStyle = FontStyle.Bold };
+        var sectionStyle = new GUIStyle(GUI.skin.label) { fontSize = 35, fontStyle = FontStyle.Bold };
+        GUILayout.BeginArea(new Rect(left, top, width, height));
+        scrollPosition = GUILayout.BeginScrollView(scrollPosition, false, true);
+        GUILayout.Space(28);
+        GUILayout.Label("Choose a map", titleStyle);
+        GUILayout.Label("Pick the area where you'll start. Your route can continue to connected floors.");
+        GUILayout.Space(30);
+
+        if (library != null && library.Count > 0)
         {
-            buildingId = updatedBuilding.Trim();
-            zoneId = updatedZone.Trim();
-            RefreshCacheState();
+            GUILayout.Label("AVAILABLE MAPS", sectionStyle);
+            foreach (var scan in library)
+            {
+                GUI.enabled = !busy;
+                GUI.backgroundColor = new Color(0.27f, 0.62f, 0.96f);
+                if (GUILayout.Button($"{scan.BuildingId}  ·  {scan.ZoneId}   ›", GUILayout.Height(106)))
+                    _ = DownloadSelectionAsync(scan);
+                GUILayout.Space(12);
+            }
+        }
+
+        GUI.enabled = !busy && hasCachedPackage;
+        GUI.backgroundColor = new Color(0.27f, 0.62f, 0.96f);
+        if (GUILayout.Button($"Open saved map offline  ·  {buildingId} / {zoneId}", GUILayout.Height(94)))
+            UseCachedPackage();
+        GUI.enabled = true;
+        GUI.backgroundColor = oldBackground;
+        GUILayout.Space(24);
+        GUILayout.Label(status, GUILayout.MinHeight(86));
+        GUILayout.Space(20);
+
+        if (library == null || library.Count == 0)
+        {
+            GUILayout.Label("SIGN IN TO LOAD MAPS", sectionStyle);
+            GUILayout.Label("Email");
+            email = GUILayout.TextField(email, GUILayout.Height(76));
+            GUILayout.Label("Password");
+            password = GUILayout.PasswordField(password, '•', GUILayout.Height(76));
+            GUI.enabled = !busy && firebaseConfig != null;
+            if (GUILayout.Button(busy ? "Loading maps…" : "Show available maps", GUILayout.Height(94)))
+                _ = SignInAndDownloadAsync();
+            GUI.enabled = true;
         }
 
         GUILayout.Space(18);
-        GUILayout.Label(status, GUILayout.MinHeight(110));
-        GUILayout.Space(10);
-
-        GUI.enabled = !busy && firebaseConfig != null;
-        if (GUILayout.Button(busy ? "Working…" : "Sign in and download", GUILayout.Height(82)))
-            _ = SignInAndDownloadAsync();
-
-        if (library != null)
-            foreach (var scan in library)
-                if (GUILayout.Button($"{scan.BuildingId} / {scan.ZoneId}", GUILayout.Height(64))) _ = DownloadSelectionAsync(scan);
-
-        GUI.enabled = !busy && hasCachedPackage;
-        if (GUILayout.Button("Use downloaded package offline", GUILayout.Height(82)))
-            UseCachedPackage();
-        GUI.enabled = !busy && hasSavedSession;
-        if (GUILayout.Button("Forget saved login", GUILayout.Height(56)))
+        if (GUILayout.Button(showManualIds ? "Hide map IDs" : "Manual map ID / offline setup", GUILayout.Height(68)))
+            showManualIds = !showManualIds;
+        if (showManualIds)
         {
-            repository.ForgetSavedSession();
-            hasSavedSession = false;
-            SetStatus("Saved Firebase login removed.");
+            GUILayout.Label("Building ID");
+            var updatedBuilding = GUILayout.TextField(buildingId, GUILayout.Height(74));
+            GUILayout.Label("Starting zone ID");
+            var updatedZone = GUILayout.TextField(zoneId, GUILayout.Height(74));
+            if (updatedBuilding != buildingId || updatedZone != zoneId)
+            {
+                buildingId = updatedBuilding.Trim();
+                zoneId = updatedZone.Trim();
+                RefreshCacheState();
+            }
+            GUI.enabled = !busy && hasSavedSession;
+            if (GUILayout.Button("Forget saved login", GUILayout.Height(68)))
+            {
+                repository.ForgetSavedSession();
+                hasSavedSession = false;
+                SetStatus("Saved Firebase login removed.");
+            }
         }
         GUI.enabled = true;
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
 
         GUI.skin.label.fontSize = oldLabelSize;
+        GUI.skin.label.wordWrap = oldLabelWrap;
+        GUI.skin.label.normal.textColor = oldLabelColor;
         GUI.skin.textField.fontSize = oldTextSize;
         GUI.skin.button.fontSize = oldButtonSize;
+        GUI.backgroundColor = oldBackground;
+        GUI.color = oldColor;
         GUI.matrix = oldMatrix;
     }
 
