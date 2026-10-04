@@ -636,16 +636,14 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         }
     }
 
-    private func uploadFile(_ localURL: URL, storagePath: String, contentType: String, onProgress: ((Progress?) -> Void)? = nil) async throws {
-        try requireAuthenticated()
-        let metadata = StorageMetadata()
-        metadata.contentType = contentType
-        do {
-            _ = try await storage.reference(withPath: storagePath)
-                .putFileAsync(from: localURL, metadata: metadata, onProgress: onProgress)
-        } catch {
-            throw FirebaseDataError.storage(operation: "upload", path: storagePath, underlying: error)
-        }
+    /// Firebase's file-stream uploader intermittently leaves device requests at 0% after a
+    /// successful upload. Read the package artifact once and use the same data API that reliably
+    /// uploads graphs and JSON metadata.
+    private func uploadFile(_ localURL: URL, storagePath: String, contentType: String) async throws {
+        try validateNonemptyFile(localURL)
+        let data = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+        uploadLogger.info("Uploading \(data.count) bytes to Storage as data: \(storagePath, privacy: .public)")
+        try await uploadData(data, storagePath: storagePath, contentType: contentType)
     }
 
     private func uploadData(_ data: Data, storagePath: String, contentType: String) async throws {
