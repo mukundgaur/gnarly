@@ -62,7 +62,7 @@ public partial class IndoorMapOverlay
     Button useMyLocationButton;
     Button clearDestinationButton;
     Button swapButton;
-    Button nativeModelButton;
+    Button viewModeButton;
     RectTransform hintChip;
     Image hintDot;
     Text hintText;
@@ -143,7 +143,7 @@ public partial class IndoorMapOverlay
         activeSlot = focusDestination || destinationKey == null ? Slot.Destination : Slot.Start;
         plannerRoot.gameObject.SetActive(true);
         if (compactCard != null) compactCard.gameObject.SetActive(false);
-        if (nativeModelButton != null) nativeModelButton.gameObject.SetActive(NativeModelAvailable);
+        UpdateViewModeButton();
         if (plannerSubtitle != null)
             plannerSubtitle.text = string.IsNullOrEmpty(currentZone) ? "ROUTE PLANNER" : $"ROUTE PLANNER  ·  YOU ARE IN {currentZone.ToUpperInvariant()}";
 
@@ -168,7 +168,7 @@ public partial class IndoorMapOverlay
         if (plannerRoot == null) return;
         plannerRoot.gameObject.SetActive(false);
         if (compactCard != null) compactCard.gameObject.SetActive(true);
-        topDown = false;
+        topDown = compactTopDown;
         zoom = 1f;
         if (mapCamera != null)
         {
@@ -176,6 +176,19 @@ public partial class IndoorMapOverlay
             mapCamera.ResetAspect();
         }
         ClearPreview();
+    }
+
+    void TogglePlannerMode()
+    {
+        topDown = !topDown;
+        UpdateViewModeButton();
+    }
+
+    void UpdateViewModeButton()
+    {
+        if (viewModeButton == null) return;
+        var label = MapUi.ButtonLabel(viewModeButton);
+        if (label != null) label.text = topDown ? "3D view" : "2D view";
     }
 
     void ClearPreview()
@@ -346,7 +359,8 @@ public partial class IndoorMapOverlay
         if (mapCamera == null) return;
         var height = mapCamera.orthographicSize * 2f;
         var width = height * mapCamera.aspect;
-        cameraFocus = ClampFocus(cameraFocus - new Vector3(delta.x * width, 0f, delta.y * height));
+        var groundDelta = topDown ? delta.y * height : delta.y * height / Mathf.Sin(CompactPitch * Mathf.Deg2Rad);
+        cameraFocus = ClampFocus(cameraFocus - new Vector3(delta.x * width, 0f, groundDelta));
     }
 
     void OnMapZoomed(float factor) => zoom = Mathf.Clamp(zoom * factor, MinZoom, MaxZoom);
@@ -491,9 +505,8 @@ public partial class IndoorMapOverlay
         var close = MapUi.Sized("Close", header, new Vector2(1, 1), new Vector2(80, 80), new Vector2(-40, -40));
         MapUi.Button(close, "×", MapUi.SurfaceRaised, MapUi.TextPrimary, 60, ClosePlanner, 52f);
 
-        var native = MapUi.Sized("Model3D", header, new Vector2(1, 1), new Vector2(190, 80), new Vector2(-185, -40));
-        nativeModelButton = MapUi.Button(native, "3D view", MapUi.SurfaceRaised, MapUi.TextPrimary, 30, OpenNativeFromPlanner, 52f);
-        nativeModelButton.gameObject.SetActive(false);
+        var mode = MapUi.Sized("MapViewMode", header, new Vector2(1, 1), new Vector2(190, 80), new Vector2(-185, -40));
+        viewModeButton = MapUi.Button(mode, "3D view", MapUi.SurfaceRaised, MapUi.TextPrimary, 30, TogglePlannerMode, 52f);
     }
 
     void BuildRouteCard(RectTransform card)

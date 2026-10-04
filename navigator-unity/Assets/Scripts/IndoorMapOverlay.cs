@@ -80,6 +80,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     RectTransform canvasRoot;
     RectTransform compactCard;
     Text compactCaption;
+    Button compactModeButton;
     Transform activeRouteRoot;
     Transform previewRouteRoot;
     Transform userMarker;
@@ -108,7 +109,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
     string scanJsonPath;
 
     // Camera framing. The compact card uses an oblique overview; the planner uses a pannable top-down view.
-    bool topDown;
+    bool topDown = true;
+    bool compactTopDown = true;
     Vector3 cameraFocus;
     float zoom = 1f;
 
@@ -146,6 +148,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         surfaceColors = colors;
         sessionSpace = sessionTransform;
         arCamera = camera;
+        topDown = compactTopDown;
         // The map model lives at true scale in session space; only the map camera may draw it.
         if (arCamera != null) arCamera.cullingMask &= ~(1 << MapLayer);
         BuildMapRoot();
@@ -568,10 +571,10 @@ public partial class IndoorMapOverlay : MonoBehaviour
         }
         else
         {
-            mapCamera.orthographicSize = span * 0.62f;
+            mapCamera.orthographicSize = span * 0.62f / zoom;
             var offset = Quaternion.Euler(CompactPitch, 0f, 0f) * Vector3.back * (span + 20f);
             mapCamera.transform.SetPositionAndRotation(
-                sessionSpace.TransformPoint(center + offset),
+                sessionSpace.TransformPoint(cameraFocus + offset),
                 sessionSpace.rotation * Quaternion.Euler(CompactPitch, 0f, 0f));
         }
     }
@@ -596,6 +599,9 @@ public partial class IndoorMapOverlay : MonoBehaviour
         var image = MapUi.Stretch("MapImage", mapFrame).gameObject.AddComponent<RawImage>();
         image.texture = compactTexture;
         image.raycastTarget = false;
+        compactModeButton = MapUi.Button(MapUi.Rect("MapMode", mapFrame, new Vector2(0, 1), new Vector2(0, 1),
+                new Vector2(14, -78), new Vector2(114, -14)), "3D", MapUi.Surface,
+            MapUi.TextPrimary, 29, ToggleCompactMode, 25f);
         compactCaption = MapUi.Label(MapUi.Rect("Caption", compactCard, Vector2.zero, new Vector2(1, 0), new Vector2(18, 8), new Vector2(-18, 66)),
             "", 20, MapUi.Eyebrow, TextAnchor.MiddleCenter, FontStyle.Bold);
         SetCompactCaption(null);
@@ -613,6 +619,14 @@ public partial class IndoorMapOverlay : MonoBehaviour
             new GameObject("MapEventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
 #endif
         }
+    }
+
+    void ToggleCompactMode()
+    {
+        compactTopDown = !compactTopDown;
+        if (!IsPlannerOpen) topDown = compactTopDown;
+        var label = MapUi.ButtonLabel(compactModeButton);
+        if (label != null) label.text = compactTopDown ? "3D" : "2D";
     }
 
     /// <summary>Opens the RealityKit model with the planner's current selection. Returns an error, or null.</summary>
