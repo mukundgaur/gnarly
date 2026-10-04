@@ -512,6 +512,33 @@ public sealed class FirebaseNavigationPackageRepository
                 throw new ArgumentException($"{field} cannot contain '/', '\\', or control characters.");
     }
 
+    public async Task SignInAnonymouslyAsync()
+    {
+        EnsureConfigured();
+        var url = $"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={Uri.EscapeDataString(config.apiKey)}";
+        var response = JsonUtility.FromJson<SignInResponse>(
+            await PostJsonAsync(url, "{\"returnSecureToken\":true}", "Firebase anonymous access", config.bundleId));
+        if (response == null || string.IsNullOrEmpty(response.idToken) || string.IsNullOrEmpty(response.localId))
+            throw new FirebaseNavigationException("Firebase anonymous access returned an incomplete response.");
+        idToken = response.idToken;
+        refreshToken = response.refreshToken;
+        UserId = response.localId;
+        tokenExpiresAtUtc = DateTime.UtcNow.AddSeconds(ParseLifetime(response.expiresIn));
+        FirebaseSessionStore.SaveRefreshToken(refreshToken);
+    }
+
+    public List<DownloadedNavigationPackage> ListCachedPackages()
+    {
+        var result = new List<DownloadedNavigationPackage>();
+        var root = Path.Combine(Application.persistentDataPath, "navigation-cache");
+        if (!Directory.Exists(root)) return result;
+        foreach (var buildingPath in Directory.GetDirectories(root))
+            foreach (var zonePath in Directory.GetDirectories(buildingPath))
+                if (TryGetCachedPackage(Path.GetFileName(buildingPath), Path.GetFileName(zonePath), out var package))
+                    result.Add(package);
+        return result;
+    }
+
     /// <summary>Escapes each Firestore path segment while preserving collection/document separators.</summary>
     static string EscapeFirestorePath(string path)
     {
