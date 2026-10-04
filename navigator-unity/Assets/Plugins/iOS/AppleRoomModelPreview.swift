@@ -125,6 +125,23 @@ private struct NativeWaypoint: Decodable { let position: [Float] }
 private struct MapRouteRequest: Codable {
     let startId: String
     let destinationId: String
+    let previewMode: Bool?
+    let focusId: String?
+    let selectionSlot: String?
+
+    init(startId: String, destinationId: String, previewMode: Bool? = nil,
+         focusId: String? = nil, selectionSlot: String? = nil) {
+        self.startId = startId
+        self.destinationId = destinationId
+        self.previewMode = previewMode
+        self.focusId = focusId
+        self.selectionSlot = selectionSlot
+    }
+}
+
+private struct PreviewChoice: Encodable {
+    let id: String
+    let slot: String
 }
 
 private final class RoomModelViewController: UIViewController, UIGestureRecognizerDelegate {
@@ -165,6 +182,8 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
     private let myLocationButton = UIButton(type: .system)
     private let swapButton = UIButton(type: .system)
     private let clearButton = UIButton(type: .system)
+    private let placeSearch = UISearchBar()
+    private let searchResults = UIStackView()
 
     init(modelURL: URL, buildingURL: URL, scanURL: URL, callbackObjectName: String, initialSelection: MapRouteRequest?) {
         self.modelURL = modelURL
@@ -218,6 +237,8 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusLabel)
 
+        if initialSelection?.previewMode == true { buildSearch() }
+
         let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
         panel.layer.cornerRadius = 20
         panel.clipsToBounds = true
@@ -235,6 +256,16 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
         configureActionButton(myLocationButton, title: "My Location", color: .systemGray, action: #selector(useMyLocation))
         configureActionButton(swapButton, title: "Swap", color: .systemGray, action: #selector(swapSelection))
         configureActionButton(clearButton, title: "Clear", color: .systemGray, action: #selector(clearSelection))
+        if initialSelection?.previewMode == true {
+            let choosingStart = initialSelection?.selectionSlot == "start"
+            setStartButton.isHidden = !choosingStart
+            setDestinationButton.isHidden = choosingStart
+            showRouteButton.isHidden = true
+            myLocationButton.isHidden = true
+            swapButton.isHidden = true
+            clearButton.isHidden = true
+            selectedLabel.text = "Search or tap a point, then look around before selecting it"
+        }
         setStartButton.isEnabled = false
         setDestinationButton.isEnabled = false
         showRouteButton.isEnabled = false
@@ -279,6 +310,65 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             myLocationButton.heightAnchor.constraint(equalToConstant: 38),
             showRouteButton.heightAnchor.constraint(equalToConstant: 50)
         ])
+    }
+
+    private func buildSearch() {
+        placeSearch.placeholder = "Search places on this floor"
+        placeSearch.searchBarStyle = .minimal
+        placeSearch.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.9)
+        placeSearch.layer.cornerRadius = 14
+        placeSearch.clipsToBounds = true
+        placeSearch.translatesAutoresizingMaskIntoConstraints = false
+        placeSearch.searchTextField.addTarget(self, action: #selector(searchChanged), for: .editingChanged)
+        view.addSubview(placeSearch)
+
+        searchResults.axis = .vertical
+        searchResults.spacing = 3
+        searchResults.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.94)
+        searchResults.layer.cornerRadius = 12
+        searchResults.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(searchResults)
+        NSLayoutConstraint.activate([
+            placeSearch.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            placeSearch.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            placeSearch.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 108),
+            searchResults.leadingAnchor.constraint(equalTo: placeSearch.leadingAnchor),
+            searchResults.trailingAnchor.constraint(equalTo: placeSearch.trailingAnchor),
+            searchResults.topAnchor.constraint(equalTo: placeSearch.bottomAnchor, constant: 5)
+        ])
+        searchResults.isHidden = true
+    }
+
+    @objc private func searchChanged() {
+        searchResults.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let query = placeSearch.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !query.isEmpty else { searchResults.isHidden = true; return }
+        let matches = nodes.filter { node in
+            displayName(node).localizedCaseInsensitiveContains(query)
+        }.prefix(5)
+        for node in matches {
+            let button = UIButton(type: .system)
+            button.setTitle("  \(displayName(node))", for: .normal)
+            button.contentHorizontalAlignment = .left
+            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+            button.heightAnchor.constraint(equalToConstant: 42).isActive = true
+            button.addAction(UIAction { [weak self] _ in
+                self?.placeSearch.resignFirstResponder()
+                self?.placeSearch.text = self?.displayName(node)
+                self?.searchResults.isHidden = true
+                self?.selectNode(node.id)
+                self?.focusOnNode(node)
+            }, for: .touchUpInside)
+            searchResults.addArrangedSubview(button)
+        }
+        searchResults.isHidden = searchResults.arrangedSubviews.isEmpty
+    }
+
+    private func focusOnNode(_ node: NavigationNode) {
+        guard node.position.count == 3 else { return }
+        focus = vector(node.position) - modelCenter
+        distance = min(maximumDistance, max(minimumDistance, distance * 0.55))
+        updateCamera()
     }
 
     private func makeButton(_ title: String, action: Selector) -> UIButton {
@@ -331,7 +421,13 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             let decoder = JSONDecoder()
             let building = try decoder.decode(BuildingDocument.self, from: Data(contentsOf: buildingURL))
             let scan = try decoder.decode(ScanDocument.self, from: Data(contentsOf: scanURL))
-            nodes = mergedNodes(building: building, scan: scan)
+            nodes = initialSelection?.previewMode == true
+                ? building.nodes.filter { node in
+                    node.type != "door" && node.type != "opening" &&
+                    (node.type == "destination" || node.type == "entrance" || node.type == "stairs" ||
+                     node.id.hasPrefix("section-") || !(node.label ?? "").isEmpty)
+                }
+                : mergedNodes(building: building, scan: scan)
             if let initialSelection {
                 startNode = nodes.first { $0.id == initialSelection.startId }
                 destinationNode = nodes.first { $0.id == initialSelection.destinationId }
@@ -365,6 +461,11 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
             self.maximumDistance = max(8, largestDimension * 6)
             self.distance = max(2.5, largestDimension * 1.5)
             self.resetCamera()
+            if let focusId = self.initialSelection?.focusId,
+               let node = self.nodes.first(where: { $0.id == focusId }) {
+                self.selectNode(node.id)
+                self.focusOnNode(node)
+            }
             self.statusLabel.isHidden = true
         })
     }
@@ -495,6 +596,7 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
 
     @objc private func setSelectedAsStart() {
         guard let selectedNode else { return }
+        if initialSelection?.previewMode == true { sendPreviewChoice(selectedNode.id, slot: "start"); return }
         startNode = selectedNode
         if destinationNode?.id == selectedNode.id { destinationNode = nil }
         updateSummary()
@@ -503,10 +605,22 @@ private final class RoomModelViewController: UIViewController, UIGestureRecogniz
 
     @objc private func setSelectedAsDestination() {
         guard let selectedNode else { return }
+        if initialSelection?.previewMode == true { sendPreviewChoice(selectedNode.id, slot: "destination"); return }
         destinationNode = selectedNode
         if startNode?.id == selectedNode.id { startNode = nil }
         updateSummary()
         updateMarkerColors()
+    }
+
+    private func sendPreviewChoice(_ id: String, slot: String) {
+        guard let data = try? JSONEncoder().encode(PreviewChoice(id: id, slot: slot)),
+              let json = String(data: data, encoding: .utf8) else { return }
+        callbackObjectName.withCString { objectName in
+            "OnRoutePreviewSelection".withCString { methodName in
+                json.withCString { message in UnitySendMessage(objectName, methodName, message) }
+            }
+        }
+        dismiss(animated: true)
     }
 
     @objc private func useMyLocation() {

@@ -210,12 +210,14 @@ public sealed class FirebaseNavigationPackageRepository
         foreach (var building in await ListDocumentsAsync("buildings", "scan library buildings"))
         {
             var buildingId = LastPathComponent(building.name);
+            var buildingName = building.fields?.name?.stringValue;
             var versionId = building.fields?.activeVersion?.stringValue;
             if (string.IsNullOrEmpty(buildingId) || string.IsNullOrEmpty(versionId)) continue;
             foreach (var zone in await ListDocumentsAsync($"buildings/{buildingId}/versions/{versionId}/zones", "scan library zones"))
             {
                 var zoneId = LastPathComponent(zone.name);
-                if (!string.IsNullOrEmpty(zoneId)) result.Add(new FirebaseScanChoice(buildingId, versionId, zoneId));
+                if (!string.IsNullOrEmpty(zoneId)) result.Add(new FirebaseScanChoice(buildingId, versionId, zoneId,
+                    buildingName, zone.fields?.floorId?.stringValue, zone.fields?.name?.stringValue));
             }
         }
         return result;
@@ -618,6 +620,8 @@ public sealed class FirebaseNavigationPackageRepository
 
     [Serializable] sealed class FirestoreFields
     {
+        public FirestoreStringValue name;
+        public FirestoreStringValue floorId;
         public FirestoreStringValue activeVersion;
         public FirestoreStringValue buildingJsonPath;
         public FirestoreStringValue scanJsonPath;
@@ -700,8 +704,19 @@ public sealed class FirebaseScanChoice
     public string BuildingId { get; }
     public string VersionId { get; }
     public string ZoneId { get; }
-    public FirebaseScanChoice(string buildingId, string versionId, string zoneId)
-    { BuildingId = buildingId; VersionId = versionId; ZoneId = zoneId; }
+    public string BuildingName { get; }
+    public string FloorId { get; }
+    public string ZoneName { get; }
+    public FirebaseScanChoice(string buildingId, string versionId, string zoneId,
+        string buildingName = null, string floorId = null, string zoneName = null)
+    {
+        BuildingId = buildingId;
+        VersionId = versionId;
+        ZoneId = zoneId;
+        BuildingName = buildingName;
+        FloorId = floorId;
+        ZoneName = zoneName;
+    }
 }
 
 public sealed class FirebaseNavigationException : Exception

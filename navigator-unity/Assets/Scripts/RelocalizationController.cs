@@ -934,7 +934,7 @@ public class RelocalizationController : MonoBehaviour
         SetStatus(message);
     }
 
-    void OnPackageReady(DownloadedNavigationPackage package)
+    void OnPackageReady(DownloadedNavigationPackage package, string startKey, string destinationKey)
     {
         buildingId = package.BuildingId;
         zoneId = package.ZoneId;
@@ -942,8 +942,8 @@ public class RelocalizationController : MonoBehaviour
         packageDirectory = package.DirectoryPath;
         navigationLoaded = false;
         activeLegs = null;
-        selectedStartKey = null;
-        selectedDestinationKey = null;
+        selectedStartKey = startKey;
+        selectedDestinationKey = destinationKey;
         state = State.WaitingForSession;
         var source = package.IsOfflineCache ? "offline cache" : "Firebase";
         SetStatus($"Loaded version {package.VersionId} from {source}. Starting camera…");

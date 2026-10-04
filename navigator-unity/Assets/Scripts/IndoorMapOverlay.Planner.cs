@@ -72,7 +72,9 @@ public partial class IndoorMapOverlay
     Text placesHeading;
     Text placesEmpty;
     InputField placeSearch;
+    Text placeSearchPlaceholder;
     Text zoneFilterLabel;
+    Button zoneFilterButton;
     string zoneFilter;
     Text summaryText;
     Text detailsText;
@@ -154,6 +156,7 @@ public partial class IndoorMapOverlay
     {
         if (plannerRoot == null) return;
         activeSlot = focusDestination || destinationKey == null ? Slot.Destination : Slot.Start;
+        zoneFilter = null;
         plannerRoot.gameObject.SetActive(true);
         if (compactCard != null) compactCard.gameObject.SetActive(false);
         UpdateViewModeButton();
@@ -172,6 +175,7 @@ public partial class IndoorMapOverlay
         }
 
         hintUntil = 0f;
+        BuildPlaceRows();
         RefreshSelection();
         if (destinationKey != null) RouteSelectionChanged?.Invoke(startKey, destinationKey);
     }
@@ -217,6 +221,7 @@ public partial class IndoorMapOverlay
     void Assign(MapPlace place)
     {
         if (place == null) return;
+        var chosenStart = activeSlot == Slot.Start;
         if (activeSlot == Slot.Start)
         {
             if (!place.inCurrentZone)
@@ -227,6 +232,7 @@ public partial class IndoorMapOverlay
             startKey = place.key;
             if (destinationKey == place.key) destinationKey = null;
             activeSlot = Slot.Destination;
+            zoneFilter = null;
         }
         else
         {
@@ -235,6 +241,9 @@ public partial class IndoorMapOverlay
         }
         hintUntil = 0f;
         if (place.inCurrentZone) FocusOn(place);
+        if (chosenStart && placeSearch != null)
+            placeSearch.SetTextWithoutNotify("");
+        BuildPlaceRows();
         SelectionEdited();
     }
 
@@ -242,6 +251,9 @@ public partial class IndoorMapOverlay
     {
         startKey = null;
         activeSlot = Slot.Destination;
+        zoneFilter = null;
+        if (placeSearch != null) placeSearch.SetTextWithoutNotify("");
+        BuildPlaceRows();
         SelectionEdited();
     }
 
@@ -249,6 +261,7 @@ public partial class IndoorMapOverlay
     {
         destinationKey = null;
         activeSlot = Slot.Destination;
+        zoneFilter = null;
         SelectionEdited();
     }
 
@@ -257,7 +270,10 @@ public partial class IndoorMapOverlay
         startKey = null;
         destinationKey = null;
         activeSlot = Slot.Destination;
+        zoneFilter = null;
         hintUntil = 0f;
+        if (placeSearch != null) placeSearch.SetTextWithoutNotify("");
+        BuildPlaceRows();
         SelectionEdited();
     }
 
@@ -525,12 +541,12 @@ public partial class IndoorMapOverlay
         var searchBackground = MapUi.Panel(searchBox, MapUi.Surface, 34f, true);
         placeSearch = searchBox.gameObject.AddComponent<InputField>();
         placeSearch.targetGraphic = searchBackground;
-        var placeholder = MapUi.Label(MapUi.Stretch("Placeholder", searchBox, 28f), "Where to? Search rooms and places", 33,
+        placeSearchPlaceholder = MapUi.Label(MapUi.Stretch("Placeholder", searchBox, 28f), "Search destinations in all areas", 33,
             MapUi.TextSecondary, TextAnchor.MiddleLeft);
         var typed = MapUi.Label(MapUi.Stretch("Input", searchBox, 28f), "", 33,
             MapUi.TextPrimary, TextAnchor.MiddleLeft);
         typed.supportRichText = false;
-        placeSearch.placeholder = placeholder;
+        placeSearch.placeholder = placeSearchPlaceholder;
         placeSearch.textComponent = typed;
         placeSearch.onValueChanged.AddListener(_ => { BuildPlaceRows(); RefreshSelection(); });
 
@@ -578,7 +594,10 @@ public partial class IndoorMapOverlay
         button.onClick.AddListener(() =>
         {
             activeSlot = slot;
+            zoneFilter = null;
             hintUntil = 0f;
+            if (placeSearch != null) placeSearch.SetTextWithoutNotify("");
+            BuildPlaceRows();
             RefreshSelection();
         });
         MapUi.Dot(MapUi.Sized("Dot", row, new Vector2(0, 0.5f), new Vector2(34, 34), new Vector2(46, 0)), color);
@@ -639,8 +658,8 @@ public partial class IndoorMapOverlay
             "DESTINATIONS", 24, MapUi.Eyebrow, TextAnchor.MiddleLeft, FontStyle.Bold);
 
         var filter = MapUi.Rect("FloorFilter", section, new Vector2(1, 1), Vector2.one, new Vector2(-250, -52), new Vector2(0, 0));
-        var filterButton = MapUi.Button(filter, "All areas", MapUi.SurfaceRaised, MapUi.TextPrimary, 25, CycleZoneFilter, 26f);
-        zoneFilterLabel = MapUi.ButtonLabel(filterButton);
+        zoneFilterButton = MapUi.Button(filter, "All areas", MapUi.SurfaceRaised, MapUi.TextPrimary, 25, CycleZoneFilter, 26f);
+        zoneFilterLabel = MapUi.ButtonLabel(zoneFilterButton);
 
         var scrollRect = MapUi.Rect("List", section, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(0, -56));
         MapUi.Panel(scrollRect, MapUi.Surface, 36f);
@@ -663,6 +682,7 @@ public partial class IndoorMapOverlay
 
     void CycleZoneFilter()
     {
+        if (activeSlot == Slot.Start) return;
         var zones = new List<string>();
         foreach (var place in places)
             if (place.major && !zones.Contains(place.zone)) zones.Add(place.zone);
@@ -697,7 +717,7 @@ public partial class IndoorMapOverlay
 
         var query = placeSearch != null ? placeSearch.text.Trim() : "";
         var listed = places.FindAll(place => place.major &&
-            (zoneFilter == null || place.zone == zoneFilter) &&
+            (activeSlot == Slot.Start ? place.inCurrentZone : zoneFilter == null || place.zone == zoneFilter) &&
             (query.Length == 0 || place.name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
              place.zone.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0));
         listed.Sort((a, b) =>
@@ -738,8 +758,12 @@ public partial class IndoorMapOverlay
         placesContent.sizeDelta = new Vector2(0, listed.Count * (rowHeight + spacing));
         if (placesEmpty != null) placesEmpty.gameObject.SetActive(listed.Count == 0);
         if (placesHeading != null)
-            placesHeading.text = listed.Count == 0 ? "DESTINATIONS" : $"DESTINATIONS  ·  {listed.Count}";
-        if (zoneFilterLabel != null) zoneFilterLabel.text = zoneFilter ?? "All areas";
+        {
+            var heading = activeSlot == Slot.Start ? "STARTING POINTS" : "DESTINATIONS";
+            placesHeading.text = listed.Count == 0 ? heading : $"{heading}  ·  {listed.Count}";
+        }
+        if (zoneFilterLabel != null) zoneFilterLabel.text = activeSlot == Slot.Start ? "This area" : zoneFilter ?? "All areas";
+        if (zoneFilterButton != null) zoneFilterButton.interactable = activeSlot != Slot.Start;
     }
 
     static int KindOrder(string kind) => kind switch
@@ -783,6 +807,9 @@ public partial class IndoorMapOverlay
             ? activeSlot == Slot.Destination ? "Tap the map or a place" : "Choose a destination"
             : destination.inCurrentZone ? destination.name : $"{destination.name}  ·  {destination.zone}";
         destinationValue.color = destination == null ? MapUi.TextSecondary : MapUi.TextPrimary;
+        if (placeSearchPlaceholder != null)
+            placeSearchPlaceholder.text = activeSlot == Slot.Start
+                ? "Search starts in this area" : "Search destinations in all areas";
 
         startRowBackground.color = activeSlot == Slot.Start ? MapUi.SurfaceActive : MapUi.Surface;
         destinationRowBackground.color = activeSlot == Slot.Destination ? MapUi.SurfaceActive : MapUi.Surface;
@@ -820,7 +847,7 @@ public partial class IndoorMapOverlay
         if (activeSlot == Slot.Start)
         {
             hintDot.color = MapUi.Start;
-            hintText.text = "Tap a dot to set where the route starts";
+            hintText.text = "Search below or tap a dot to set your start";
         }
         else if (!string.IsNullOrEmpty(ActiveFloorWaypoint()) && placesByKey.TryGetValue(ActiveFloorWaypoint(), out var waypoint))
         {
@@ -831,8 +858,8 @@ public partial class IndoorMapOverlay
         {
             hintDot.color = MapUi.Destination;
             hintText.text = destinationKey == null
-                ? "Tap a dot to choose your destination"
-                : "Tap another dot to change the destination";
+                ? "Search below or tap a dot for your destination"
+                : "Search below or tap another dot to change it";
         }
     }
 
@@ -879,7 +906,9 @@ public partial class IndoorMapOverlay
         hintText = null;
         placesContent = null;
         placeSearch = null;
+        placeSearchPlaceholder = null;
         zoneFilterLabel = null;
+        zoneFilterButton = null;
         zoneFilter = null;
         summaryText = null;
         placeRows.Clear();

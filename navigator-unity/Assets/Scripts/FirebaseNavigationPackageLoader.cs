@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -11,7 +12,7 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     const string ZonePreference = "gnarly.navigator.zoneId";
 
     FirebaseNavigationPackageRepository repository;
-    Action<DownloadedNavigationPackage> packageReady;
+    Action<DownloadedNavigationPackage, string, string> packageReady;
     Action<string> statusChanged;
     FirebaseNavigatorConfig firebaseConfig;
     string buildingId = "";
@@ -27,7 +28,7 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     public void Begin(
         string defaultBuildingId,
         string defaultZoneId,
-        Action<DownloadedNavigationPackage> onPackageReady,
+        Action<DownloadedNavigationPackage, string, string> onPackageReady,
         Action<string> onStatusChanged)
     {
         packageReady = onPackageReady;
@@ -51,7 +52,25 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     {
         library = new System.Collections.Generic.List<FirebaseScanChoice>();
         foreach (var package in repository.ListCachedPackages())
-            library.Add(new FirebaseScanChoice(package.BuildingId, package.VersionId, package.ZoneId));
+        {
+            string floorId = null;
+            try
+            {
+                var buildingJson = Path.Combine(package.DirectoryPath, "building.json");
+                if (File.Exists(buildingJson))
+                {
+                    var building = Pathfinding.ParseBuilding(File.ReadAllText(buildingJson));
+                    if (building.floors != null && building.floors.Length == 1)
+                        floorId = building.floors[0].id;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[Gnarly] Could not read cached floor name for {package.ZoneId}: {exception.Message}");
+            }
+            library.Add(new FirebaseScanChoice(package.BuildingId, package.VersionId, package.ZoneId,
+                floorId: floorId));
+        }
     }
 
     async Task LoadMapsAsync()
@@ -66,10 +85,13 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
             publishedLibrary = published;
             onlineMapsAvailable = true;
             foreach (var scan in published)
-                if (!library.Exists(cached => cached.BuildingId == scan.BuildingId && cached.ZoneId == scan.ZoneId))
-                    library.Add(scan);
+            {
+                var cachedIndex = library.FindIndex(cached => cached.BuildingId == scan.BuildingId && cached.ZoneId == scan.ZoneId);
+                if (cachedIndex >= 0) library[cachedIndex] = scan;
+                else library.Add(scan);
+            }
             library = new System.Collections.Generic.List<FirebaseScanChoice>(library);
-            SetStatus(library.Count == 0 ? "No maps have been published yet." : "Choose a map to continue.");
+            SetStatus(library.Count == 0 ? "No maps have been published yet." : "Choose a floor to continue.");
         }
         catch (Exception exception)
         {
@@ -95,7 +117,8 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
             SetStatus($"Downloading {buildingId}/{zoneId}…");
             var package = await repository.DownloadActivePackageAsync(buildingId, zoneId);
             await DownloadOtherZonesAsync(scan);
-            Complete(package);
+            busy = false;
+            PrepareRouteChoice(package);
         }
         catch (Exception exception)
         {
@@ -111,8 +134,8 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     /// </summary>
     async Task DownloadOtherZonesAsync(FirebaseScanChoice selected)
     {
-        if (!onlineMapsAvailable) return;
-        foreach (var other in library)
+        if (!onlineMapsAvailable || publishedLibrary == null) return;
+        foreach (var other in publishedLibrary)
         {
             if (other.BuildingId != selected.BuildingId || other.ZoneId == selected.ZoneId) continue;
             try
@@ -140,18 +163,18 @@ public sealed partial class FirebaseNavigationPackageLoader : MonoBehaviour
     {
         RememberSelection();
         if (repository.TryGetCachedPackage(buildingId, zoneId, out var package))
-            Complete(package);
+            PrepareRouteChoice(package);
         else
             SetStatus("No complete cached package exists for this building and zone.");
     }
 
-    void Complete(DownloadedNavigationPackage package)
+    void Complete(DownloadedNavigationPackage package, string startKey, string destinationKey)
     {
         visible = false;
         DestroyUi();
         var source = package.IsOfflineCache ? "offline cache" : "Firebase";
         ReportStatus($"Loaded {package.BuildingId}/{package.VersionId}/{package.ZoneId} from {source}.");
-        packageReady?.Invoke(package);
+        packageReady?.Invoke(package, startKey, destinationKey);
     }
 
     void RefreshCacheState()
