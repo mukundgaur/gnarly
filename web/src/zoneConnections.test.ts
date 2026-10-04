@@ -17,6 +17,16 @@ test('normalizes, adds, deduplicates, and removes bidirectional zone connections
   assert.equal(removeZoneConnection(added, { from: connection.to, to: connection.from }).connections.length, 0);
 });
 
+test('preserves typed connections and requires matching endpoint types', () => {
+  const continuationZones:ZoneView[]=zones.map((zone,index)=>({...zone,graph:{...zone.graph,nodes:[{...zone.graph.nodes[0],id:index?'zone-start':'zone-end',type:'continuation'}]}}));
+  const continuation={from:{zoneId:'floor-1',nodeId:'zone-end'},to:{zoneId:'floor-2',nodeId:'zone-start'},kind:'continuation' as const};
+  const added=addZoneConnection(emptyZoneConnections(),continuation,continuationZones);
+  assert.equal(normalizeZoneConnections(added).connections[0].kind,'continuation');
+  const wrongTypes=continuationZones.map(zone=>({...zone,graph:{...zone.graph,nodes:zone.graph.nodes.map(node=>({...node,type:'elevator'}))}}));
+  assert.throws(()=>addZoneConnection(emptyZoneConnections(),continuation,wrongTypes),/Both endpoints/);
+  assert.throws(()=>normalizeZoneConnections({schemaVersion:1,connections:[{...connection,kind:'door'}]}),/kind/);
+});
+
 test('rejects missing endpoints and links inside one zone', () => {
   assert.throws(() => addZoneConnection(emptyZoneConnections(), { from: connection.from, to: { zoneId: 'floor-1', nodeId: 'elevator-east' } }, zones), /different zone/);
   assert.throws(() => addZoneConnection(emptyZoneConnections(), { from: connection.from, to: { zoneId: 'floor-2', nodeId: 'missing' } }, zones), /not saved/);

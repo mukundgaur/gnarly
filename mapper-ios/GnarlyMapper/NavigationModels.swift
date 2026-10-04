@@ -30,6 +30,7 @@ enum GraphNodeType: String, Codable, CaseIterable, Identifiable {
     case entrance
     case hallway
     case elevator
+    case continuation
     case stairs
     case destination
     case door
@@ -43,6 +44,7 @@ enum GraphNodeType: String, Codable, CaseIterable, Identifiable {
         case .entrance: return "Entrance"
         case .hallway: return "Hallway"
         case .elevator: return "Elevator"
+        case .continuation: return "Zone continuation"
         case .stairs: return "Stairs"
         case .destination: return "Destination"
         case .door: return "Door"

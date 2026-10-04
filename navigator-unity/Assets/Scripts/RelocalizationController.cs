@@ -680,11 +680,11 @@ public class RelocalizationController : MonoBehaviour
             var changes = legs.Count - 1;
             summary += rides == changes
                 ? $"  ·  {rides} elevator ride{(rides > 1 ? "s" : "")}"
-                : $"  ·  {changes} floor change{(changes > 1 ? "s" : "")}";
+                : $"  ·  {changes} zone change{(changes > 1 ? "s" : "")}";
             var lead = waypointKey == null
                 ? ""
                 : $"Walk to {NameOf(waypointKey)}. That elevator is the waypoint onto the next floor. ";
-            details = lead + "Take " + string.Join(", then ", steps) + ". You'll confirm each floor on arrival.";
+            details = lead + "Continue via " + string.Join(", then ", steps) + ". You'll confirm each zone on arrival.";
         }
         else
         {
@@ -721,7 +721,7 @@ public class RelocalizationController : MonoBehaviour
                 zone = node.zone,
                 name = name,
                 kind = kind,
-                major = kind is "destination" or "entrance" or "room" or "elevator" or "stairs" ||
+                major = kind is "destination" or "entrance" or "room" or "elevator" or "continuation" or "stairs" ||
                         (kind == "waypoint" && !string.IsNullOrEmpty(node.label)),
                 inCurrentZone = inCurrentZone,
                 sessionPosition = inCurrentZone && node.position != null && node.position.Length == 3
@@ -740,6 +740,7 @@ public class RelocalizationController : MonoBehaviour
             case "destination":
             case "entrance":
             case "elevator":
+            case "continuation":
             case "stairs":
             case "door":
             case "opening":

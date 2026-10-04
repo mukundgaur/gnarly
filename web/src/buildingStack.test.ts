@@ -19,3 +19,12 @@ test('uses floor names when independent scans all report story zero',()=>{
   const stack=stackBuilding(floors);
   assert.equal(stack[1].offset[1]-stack[0].offset[1],4);
 });
+
+test('keeps continuation-linked scan zones on the same level', () => {
+  const a=zone('zone-1',0,[4,0,1]),b=zone('zone-2',0,[-2,0,5]);
+  a.graph.nodes[0]={...a.graph.nodes[0],id:'zone-end',type:'continuation'};
+  b.graph.nodes[0]={...b.graph.nodes[0],id:'zone-start',type:'continuation'};
+  const stack=stackBuilding([a,b],{schemaVersion:1,connections:[{from:{zoneId:'zone-1',nodeId:'zone-end'},to:{zoneId:'zone-2',nodeId:'zone-start'},kind:'continuation'}]});
+  assert.equal(stack[0].offset[1],stack[1].offset[1]);
+  assert.deepEqual(stackPoint(stack[0],a.graph.nodes[0].position),stackPoint(stack[1],b.graph.nodes[0].position));
+});

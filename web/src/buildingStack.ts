@@ -18,6 +18,9 @@ function node(zone: ZoneView, id: string): Node | undefined {
 export function stackBuilding(zones: ZoneView[], links?: ZoneConnections, gap = 4): StackZone[] {
   let ordered = zones.map((zone, index) => ({ zone, story: zoneStory(zone, index) }));
   if(new Set(ordered.map(item=>item.story)).size<ordered.length){const named=ordered.map(item=>namedStory(item.zone));ordered=ordered.map((item,index)=>({...item,story:named[index]??index}))}
+  // A continuation joins two scan files on the same physical floor.
+  let joined=true;
+  while(joined){joined=false;for(const link of links?.connections||[]){if(link.kind!=='continuation')continue;const from=ordered.find(item=>item.zone.id===link.from.zoneId),to=ordered.find(item=>item.zone.id===link.to.zoneId);if(!from||!to||from.story===to.story)continue;const story=Math.min(from.story,to.story);from.story=story;to.story=story;joined=true}}
   ordered=ordered
     .sort((a, b) => a.story - b.story || a.zone.name.localeCompare(b.zone.name));
   const minimum = ordered.length?Math.min(...ordered.map(item => item.story)):0;

@@ -19,7 +19,7 @@ shared/local-packages/
     surface-colors.json   optional, with surface-colors.jpg
     manifest.json
   floor-2/              another floor zone, same file set
-  zone-connections.json building-level elevator links between floors
+  zone-connections.json building-level elevator and continuation links
 ```
 
 `shared/local-packages/` is ignored by Git. It may contain real building imagery/features encoded in ARKit data and should be transferred only to teammates who need it.
@@ -35,7 +35,7 @@ shared/local-packages/
 - `route.json`: ordered waypoints from recorded nodes, described in [route.schema.json](route.schema.json). See [examples/route.example.json](examples/route.example.json).
 - `structure.usdz` / `structure-metadata.json`: RoomPlan mesh plus identifier mapping for later minimap work.
 - `surface-colors.json` / `surface-colors.jpg` (optional): real-world colors. During the scan the mapper keeps up to 320 camera photos with their poses, then projects them onto every wall, door, window, floor and object face, rejecting occluded samples with LiDAR depth. The JPEG is a texture atlas and the JSON gives each face's atlas rect and average color, keyed by the RoomPlan identifiers in `scan-features.json`. Schema: [surface-colors.schema.json](surface-colors.schema.json). Storage path: `buildings/{buildingId}/{versionId}/zones/{zoneId}/`.
-- `zone-connections.json`: links matching elevator nodes in separate floor zones (for example `floor-1/elevator-east` to `floor-2/elevator-east`). Bidirectional. The navigator weights a ride by a boarding cost plus a per-story cost, and treats each elevator as the waypoint onto the next floor. Schema: [zone-connections.schema.json](zone-connections.schema.json). Example: [examples/zone-connections.example.json](examples/zone-connections.example.json). Legacy stair-zone links remain readable but are not used as floor connectors.
+- `zone-connections.json`: links matching nodes in separate zones. `elevator` links change floors and are weighted by a boarding cost plus a per-story cost; each elevator is the waypoint onto the next floor. `continuation` links join a zone end to the next zone's beginning on the same floor without representing a door and have A* weight 1. Links are bidirectional. Schema: [zone-connections.schema.json](zone-connections.schema.json). Example: [examples/zone-connections.example.json](examples/zone-connections.example.json). Legacy untyped and stair-zone links remain readable, but are not used as floor connectors.
 - Positions are in meters in the **restored ARKit world coordinate system** used during capture. Each zone has its own coordinate system, so positions from different zones are never compared.
 - `zoneId` identifies the specific world map. The Unity app must never use an anchor or route from a different zone.
 

@@ -3,12 +3,19 @@
   "connections": [
     {
       "from": { "zoneId": "floor-1", "nodeId": "elevator-east" },
-      "to": { "zoneId": "floor-2", "nodeId": "elevator-east" }
+      "to": { "zoneId": "floor-2", "nodeId": "elevator-east" },
+      "kind": "elevator"
     },
     {
       "from": { "zoneId": "floor-2", "nodeId": "elevator-east" },
-      "to": { "zoneId": "floor-3", "nodeId": "elevator-east" }
+      "to": { "zoneId": "floor-3", "nodeId": "elevator-east" },
+      "kind": "elevator"
+    },
+    {
+      "from": { "zoneId": "floor-1-west", "nodeId": "zone-end" },
+      "to": { "zoneId": "floor-1-east", "nodeId": "zone-start" },
+      "kind": "continuation"
     }
   ],
-  "notes": "Illustrative. Each floor is a separate scan and ARWorldMap. Matching elevator points represent the same physical elevator on adjacent floors."
+  "notes": "Illustrative. Elevators connect floors. Continuations join adjacent scan zones on the same floor without treating the boundary as a door."
 }

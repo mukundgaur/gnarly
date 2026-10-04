@@ -21,6 +21,9 @@ public static class Pathfinding
     public const float ElevatorStoryCost = 6f;
     public const string ElevatorKind = "elevator";
     public const string ElevatorType = "elevator";
+    public const float ContinuationCost = 1f;
+    public const string ContinuationKind = "zone-continuation";
+    public const string ContinuationType = "continuation";
 
     [Serializable]
     public class ScanFeatures
@@ -117,6 +120,8 @@ public static class Pathfinding
     {
         public NodeRef from;
         public NodeRef to;
+        /// <summary>elevator, continuation, stairs, or empty for legacy files.</summary>
+        public string kind;
     }
 
     [Serializable]
@@ -151,6 +156,8 @@ public static class Pathfinding
         public int? story;
         /// <summary>In a combined graph: story per zone, only when every zone has a distinct one.</summary>
         public readonly Dictionary<string, int> ZoneStories = new Dictionary<string, int>();
+        /// <summary>True when adjacent same-floor scan zones are joined by a continuation edge.</summary>
+        public bool HasContinuations;
         public readonly List<Node> Nodes = new List<Node>();
         public readonly List<Edge> Edges = new List<Edge>();
         /// <summary>RoomPlan walls (plus windows and short corner seals) that neighbor tests cannot cross.</summary>
@@ -309,11 +316,14 @@ public static class Pathfinding
 
     public static bool IsElevator(Node node) => node?.type == ElevatorType;
 
+    public static bool IsContinuation(Node node) => node?.type == ContinuationType;
+
     /// <summary>
     /// Merges per-zone graphs into one graph keyed by <see cref="ZoneKey"/>. Each zone keeps its own
-    /// ARKit coordinates. Floors connect only through elevator waypoints: a link between two elevator
-    /// nodes becomes a ride (see <see cref="AddElevatorRides"/>) whose A* weight is
+    /// ARKit coordinates. Floors connect through elevator waypoints: a link between two elevator nodes
+    /// becomes a ride (see <see cref="AddElevatorRides"/>) whose A* weight is
     /// <see cref="ElevatorBoardCost"/> plus <see cref="ElevatorStoryCost"/> for every story travelled.
+    /// Adjacent scans on the same floor connect through continuation nodes with a small handoff cost.
     /// </summary>
     public static Graph Combine(IReadOnlyDictionary<string, Graph> zoneGraphs, ZoneConnections connections)
     {
@@ -371,7 +381,21 @@ public static class Pathfinding
                 Link(elevatorLinks, to, from);
                 continue;
             }
-            Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: floors connect through elevator waypoints.");
+            if (connection.kind == "continuation" &&
+                IsContinuation(combined.Node(from)) && IsContinuation(combined.Node(to)))
+            {
+                combined.AddEdge(new Edge
+                {
+                    from = from,
+                    to = to,
+                    kind = ContinuationKind,
+                    meters = ContinuationCost,
+                    source = "manual"
+                });
+                combined.HasContinuations = true;
+                continue;
+            }
+            Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: use matching elevator or continuation waypoints.");
         }
         AddElevatorRides(combined, elevatorLinks);
         return combined;
@@ -950,14 +974,16 @@ public static class Pathfinding
     }
 
     /// <summary>
-    /// Same-floor cost is straight-line distance. A different floor costs at least one elevator boarding
-    /// plus <see cref="ElevatorStoryCost"/> per story, which matches the ride edges and never exceeds them.
+    /// Same-zone cost is straight-line distance. A different zone costs at least one elevator boarding
+    /// plus <see cref="ElevatorStoryCost"/> per story when only elevator links exist. Graphs with same-floor
+    /// continuations use zero across zones so the estimate never exceeds a continuation route's true cost.
     /// Positions from different world maps are not comparable, so they are not used across zones.
     /// </summary>
     static float Heuristic(Graph graph, Node a, Node b)
     {
         if (a == null || b == null) return 0f;
         if (a.zone == b.zone) return Vector3.Distance(Position(a), Position(b));
+        if (graph.HasContinuations) return 0f;
         var stories = 1;
         if (a.zone != null && b.zone != null &&
             graph.ZoneStories.TryGetValue(a.zone, out var from) &&

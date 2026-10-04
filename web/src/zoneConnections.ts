@@ -1,4 +1,4 @@
-import type { ZoneConnection, ZoneConnections, ZoneNodeRef, ZoneView } from './data.ts';
+import type { ZoneConnection, ZoneConnectionKind, ZoneConnections, ZoneNodeRef, ZoneView } from './data.ts';
 
 export const emptyZoneConnections = (): ZoneConnections => ({ schemaVersion: 1, connections: [] });
 
@@ -20,7 +20,9 @@ export function normalizeZoneConnections(raw: unknown): ZoneConnections {
     connections: value.connections.map(item => {
       if (!item || typeof item !== 'object') throw Error('Invalid zone connection.');
       const connection = item as Record<string, unknown>;
-      return { from: nodeRef(connection.from), to: nodeRef(connection.to) };
+      const kind=connection.kind;
+      if(kind!==undefined&&!['elevator','continuation','stairs'].includes(String(kind)))throw Error('Invalid zone connection kind.');
+      return { from: nodeRef(connection.from), to: nodeRef(connection.to), ...(kind?{kind:kind as ZoneConnectionKind}:{}) };
     }),
     ...(typeof value.notes === 'string' ? { notes: value.notes } : {}),
   };
@@ -35,6 +37,10 @@ export function addZoneConnection(document: ZoneConnections, connection: ZoneCon
     const zone = zones.find(item => item.id === endpoint.zoneId);
     if (!zone) throw Error('Zone ' + endpoint.zoneId + ' is unavailable.');
     if (!zone.graph.nodes.some(node => node.id === endpoint.nodeId)) throw Error('Waypoint ' + endpoint.nodeId + ' is not saved in zone ' + zone.name + '.');
+  }
+  if(connection.kind==='elevator'||connection.kind==='continuation'){
+    const endpointTypes=[connection.from,connection.to].map(endpoint=>zones.find(item=>item.id===endpoint.zoneId)!.graph.nodes.find(node=>node.id===endpoint.nodeId)!.type);
+    if(endpointTypes.some(type=>type!==connection.kind))throw Error('Both endpoints must be '+connection.kind+' waypoints.');
   }
   const key = zoneConnectionKey(connection);
   if (document.connections.some(item => zoneConnectionKey(item) === key)) throw Error('These waypoints are already connected.');

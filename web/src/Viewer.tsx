@@ -352,14 +352,15 @@ function StackScene({ zones, connections, activeZoneId, selected, onSelect, onFl
     {zones.map(zone=><group key={zone.id} position={zone.offset}>
       {zone.scan?<ScannedGeometry scan={zone.scan} graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>:<GraphFloor graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>}
       {zone.graph.edges.map((edge,index)=>{const from=zone.graph.nodes.find(node=>node.id===edge.from),to=zone.graph.nodes.find(node=>node.id===edge.to);if(!from||!to)return null;return <Line key={index} points={[from.position,to.position]} color="#8abdb2" lineWidth={1} transparent opacity={.28}/>})}
-      {zone.graph.nodes.filter(node=>node.label||['entrance','destination','elevator'].includes(node.type)).map(node=><group key={node.id} position={node.position} onClick={event=>{event.stopPropagation();if(zone.id===activeZoneId)onSelect(node.id)}}>
-        <mesh position={[0,.35,0]}><cylinderGeometry args={[node.type==='elevator'?.22:.15,node.type==='elevator'?.22:.15,.7,20]}/><meshStandardMaterial color={node.type==='elevator'?'#8b5cf6':node.id===selected&&zone.id===activeZoneId?'#0b8b81':'#277ad1'}/></mesh>
+      {zone.graph.nodes.filter(node=>node.label||['entrance','destination','elevator','continuation'].includes(node.type)).map(node=><group key={node.id} position={node.position} onClick={event=>{event.stopPropagation();if(zone.id===activeZoneId)onSelect(node.id)}}>
+        <mesh position={[0,.35,0]}><cylinderGeometry args={[node.type==='elevator'?.22:node.type==='continuation'?.2:.15,node.type==='elevator'?.22:node.type==='continuation'?.2:.15,.7,20]}/><meshStandardMaterial color={node.type==='elevator'?'#8b5cf6':node.type==='continuation'?'#0f9d91':node.id===selected&&zone.id===activeZoneId?'#0b8b81':'#277ad1'}/></mesh>
         {node.type==='elevator'&&<Html position={[0,.95,0]} center distanceFactor={15}><span className="elevator-label">Elevator · {zone.name}</span></Html>}
+        {node.type==='continuation'&&<Html position={[0,.95,0]} center distanceFactor={15}><span className="connector-label">{node.label||'Zone continuation'} · {zone.name}</span></Html>}
       </group>)}
       <Html position={[0,.15,0]} center distanceFactor={24}><span className="floor-stack-label">{zone.name}</span></Html>
       {walker&&walker.zoneId===zone.id&&<WalkerMarker location={walker}/>}
     </group>)}
-    {(connections?.connections||[]).map((connection,index)=>{const fromZone=byId.get(connection.from.zoneId),toZone=byId.get(connection.to.zoneId);const from=fromZone?.graph.nodes.find(node=>node.id===connection.from.nodeId),to=toZone?.graph.nodes.find(node=>node.id===connection.to.nodeId);if(!fromZone||!toZone||!from||!to)return null;return <Line key={'floor-link-'+index} points={[stackPoint(fromZone,from.position),stackPoint(toZone,to.position)]} color="#8b5cf6" lineWidth={3} dashed dashSize={.28} gapSize={.2} transparent opacity={.9}/>})}
+    {(connections?.connections||[]).map((connection,index)=>{const fromZone=byId.get(connection.from.zoneId),toZone=byId.get(connection.to.zoneId);const from=fromZone?.graph.nodes.find(node=>node.id===connection.from.nodeId),to=toZone?.graph.nodes.find(node=>node.id===connection.to.nodeId);if(!fromZone||!toZone||!from||!to)return null;return <Line key={'zone-link-'+index} points={[stackPoint(fromZone,from.position),stackPoint(toZone,to.position)]} color={connection.kind==='continuation'?'#0f9d91':'#8b5cf6'} lineWidth={3} dashed dashSize={.28} gapSize={.2} transparent opacity={.9}/>})}
   </>;
 }
 
@@ -549,11 +550,11 @@ function Scene(props: ViewerProps) {
       const status = checkEdge(edge, graph, scan).status;
       return <Line key={index} points={[from.position, to.position]} color={status === 'blocked' ? '#d88a82' : status === 'unverified' ? '#d4ac62' : '#8abdb2'} lineWidth={editing ? 2 : 1} transparent opacity={editing ? .8 : .35} />;
     })}
-    {visibleNodes.filter(node => editing || node.label || node.type === 'entrance' || node.type === 'destination' || node.type === 'stairs').map(node =>
+    {visibleNodes.filter(node => editing || node.label || node.type === 'entrance' || node.type === 'destination' || node.type === 'stairs' || node.type === 'elevator' || node.type === 'continuation').map(node =>
       <group key={node.id} position={node.position} onClick={event => { event.stopPropagation(); onSelect(node.id); }}>
         <mesh position={[0, .35, 0]}>
           <cylinderGeometry args={[.16, .16, .7, 20]} />
-          <meshStandardMaterial color={node.id === selected ? '#0b8b81' : node.type === 'stairs' ? '#e6a84d' : '#277ad1'} />
+          <meshStandardMaterial color={node.id === selected ? '#0b8b81' : node.type === 'stairs' ? '#e6a84d' : node.type==='elevator' ? '#8b5cf6' : node.type==='continuation' ? '#0f9d91' : '#277ad1'} />
         </mesh>
         {(node.label || node.id === selected || !editing) && <Html position={[0, .9, 0]} center distanceFactor={13}>
           <button className={'scene-label ' + (node.id === selected ? 'chosen' : '')} onClick={() => onSelect(node.id)}>

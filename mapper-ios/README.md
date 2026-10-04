@@ -56,6 +56,8 @@ A building owns one version, and each floor is uploaded as its own zone/file set
 
 The mapper’s manual waypoint type picker includes **Elevator**. Record or add the elevator point on each floor, upload every floor under the same building version, and connect the matching points in the web editor. Existing stair-zone packages remain compatible, but stairs are no longer the primary multi-floor workflow.
 
+If one floor needs multiple scans, add **Zone continuation** points at the beginning and end of each scan. In the web editor, link a zone end to the next zone's start with a `continuation` connection. This is a map handoff, not a RoomPlan door or opening, and both pieces stay on the same floor in the 3D view.
+
 Firebase stores the shared connection file at `buildings/{buildingId}/{versionId}/zone-connections.json` and each floor graph under `buildings/{buildingId}/{versionId}/zones/{floorZoneId}/building.json`.
 
 `building.json` nodes are primarily RoomPlan doors, openings, stairs, and sections. Visibility edges connect nodes whose floor-plane line of sight does not cross a wall except at a door or opening. Optional recorded taps add entrance and destination labels for A*.

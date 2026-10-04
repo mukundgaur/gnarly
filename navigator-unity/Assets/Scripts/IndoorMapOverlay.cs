@@ -17,7 +17,7 @@ public sealed class MapPlace
     public string localId;
     public string zone;
     public string name;
-    /// <summary>destination, entrance, room, elevator, stairs, door, opening, or waypoint.</summary>
+    /// <summary>destination, entrance, room, elevator, continuation, stairs, door, opening, or waypoint.</summary>
     public string kind;
     /// <summary>Named places are listed and labelled; minor ones (doors, openings) are only map dots.</summary>
     public bool major;
@@ -31,6 +31,7 @@ public sealed class MapPlace
         "entrance" => "Entrance",
         "room" => "Room",
         "elevator" => "Elevator",
+        "continuation" => "Zone connector",
         "stairs" => "Stairs",
         "door" => "Door",
         "opening" => "Opening",
@@ -43,6 +44,7 @@ public sealed class MapPlace
         "entrance" => MapUi.PlaceEntrance,
         "room" => MapUi.PlaceRoom,
         "elevator" => MapUi.PlaceElevator,
+        "continuation" => MapUi.PlaceEntrance,
         "stairs" => MapUi.PlaceStairs,
         _ => MapUi.PlaceMinor
     };
