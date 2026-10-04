@@ -78,6 +78,8 @@ The `Zone Id` field on `RelocalizationController` is the zone the user starts in
 
 With Firebase (`useFirebasePackages`, on by default), choosing a scan from the library downloads that zone and also tries every other zone of the same building into the offline cache. Other zones are then read from that cache. Connections are read from `buildings/{buildingId}/{versionId}/zone-connections.json` in Storage when present, otherwise from a bundled `StreamingAssets/zone-connections.json`. A zone that fails to download, for example because its version's `building.json` belongs to another zone, is logged and left out of routing. With Firebase off, every zone is read from `StreamingAssets/<zoneId>/`.
 
+The web editor may also save `buildings/{buildingId}/{versionId}/building-layout.json`. It is display-only placement metadata (floor, X/Z, rotation); Firebase downloads cache it alongside each zone. It must not be used to transform ARKit tracking or route coordinates.
+
 ## Behavior
 
 1. Firebase login and active-package download, or selection of a previously downloaded offline package.

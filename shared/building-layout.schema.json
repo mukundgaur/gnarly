@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gnarly authored building layout",
+  "type": "object",
+  "required": ["schemaVersion", "zones"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["zoneId", "floor", "x", "z", "rotationDegrees"],
+        "properties": {
+          "zoneId": { "type": "string", "minLength": 1 },
+          "floor": { "type": "number", "description": "Authored display floor; unrelated to a zone's ARKit origin." },
+          "x": { "type": "number", "description": "Display X metres." },
+          "z": { "type": "number", "description": "Display Z metres." },
+          "rotationDegrees": { "type": "number", "description": "Display yaw around the vertical axis." }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

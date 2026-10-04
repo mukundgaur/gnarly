@@ -116,6 +116,7 @@ type ViewerProps = {
   onWalkerMove?: (location: WalkLocation) => void;
   zones?: ZoneView[];
   zoneConnections?: ZoneConnections;
+  layout?: import('./data.ts').BuildingLayout;
   zoneId?: string;
 };
 
@@ -349,7 +350,7 @@ function StackScene({ zones, connections, activeZoneId, selected, onSelect, onFl
   return <>
     <ambientLight intensity={2}/><directionalLight position={[10,22,14]} intensity={2}/>
     <gridHelper args={[120,120,'#d7dee3','#e8edef']} position={[0,-.15,0]}/>
-    {zones.map(zone=><group key={zone.id} position={zone.offset}>
+    {zones.map(zone=><group key={zone.id} position={zone.offset} rotation={[0,zone.rotationDegrees*Math.PI/180,0]}>
       {zone.scan?<ScannedGeometry scan={zone.scan} graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>:<GraphFloor graph={zone.graph} floor="all" zoneId={zone.id} offset={zone.offset} onFloorPick={onFloorPick}/>}
       {zone.graph.edges.map((edge,index)=>{const from=zone.graph.nodes.find(node=>node.id===edge.from),to=zone.graph.nodes.find(node=>node.id===edge.to);if(!from||!to)return null;return <Line key={index} points={[from.position,to.position]} color="#8abdb2" lineWidth={1} transparent opacity={.28}/>})}
       {zone.graph.nodes.filter(node=>node.label||['entrance','destination','elevator','continuation'].includes(node.type)).map(node=><group key={node.id} position={node.position} onClick={event=>{event.stopPropagation();if(zone.id===activeZoneId)onSelect(node.id)}}>
@@ -572,7 +573,7 @@ function Scene(props: ViewerProps) {
 }
 
 export default function Viewer(props: ViewerProps) {
-  const stacked=useMemo(()=>props.zones&&props.zones.length>1?stackBuilding(props.zones,props.zoneConnections):[],[props.zones,props.zoneConnections]);
+  const stacked=useMemo(()=>props.zones&&props.zones.length>1?stackBuilding(props.zones,props.zoneConnections,props.layout):[],[props.zones,props.zoneConnections,props.layout]);
   const overview=stacked.length>1&&props.floor==='all'&&!props.editing&&!props.walking;
   return <Canvas camera={{ position: [24, 23, 27], fov: 42 }} gl={{ antialias: true }}>
     {overview?<StackScene zones={stacked} connections={props.zoneConnections} activeZoneId={props.zoneId} selected={props.selected} onSelect={props.onSelect} onFloorPick={props.onFloorPick} walker={props.walker}/>:<Scene {...props} />}

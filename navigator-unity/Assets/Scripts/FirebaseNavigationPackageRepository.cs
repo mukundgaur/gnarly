@@ -179,6 +179,9 @@ public sealed class FirebaseNavigationPackageRepository
             await TryDownloadZoneConnectionsAsync(
                 $"buildings/{buildingId}/{versionId}/zone-connections.json",
                 Path.Combine(staging, "zone-connections.json"));
+            await TryDownloadBuildingLayoutAsync(
+                $"buildings/{buildingId}/{versionId}/building-layout.json",
+                Path.Combine(staging, "building-layout.json"));
             await TryDownloadSurfaceColorsAsync($"buildings/{buildingId}/{versionId}/zones/{zoneId}", staging);
             File.WriteAllText(Path.Combine(staging, "package.json"), JsonUtility.ToJson(new CacheManifest
             {
@@ -510,6 +513,17 @@ public sealed class FirebaseNavigationPackageRepository
         foreach (var character in value)
             if (character == '/' || character == '\\' || char.IsControl(character))
                 throw new ArgumentException($"{field} cannot contain '/', '\\', or control characters.");
+    }
+
+    /// <summary>Optional authored display layout for the web and future global minimap. It never affects ARKit relocalization.</summary>
+    async Task TryDownloadBuildingLayoutAsync(string objectPath, string destination)
+    {
+        try { await DownloadStorageObjectAsync(objectPath, destination, "building-layout.json"); }
+        catch (Exception exception)
+        {
+            if (File.Exists(destination)) File.Delete(destination);
+            Debug.Log($"[Gnarly] No authored building layout at {objectPath}: {exception.Message}");
+        }
     }
 
     public async Task SignInAnonymouslyAsync()

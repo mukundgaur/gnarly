@@ -1,6 +1,6 @@
-import type { Node, ZoneConnections, ZoneView } from './data.ts';
+import type { BuildingLayout, Node, ZoneConnections, ZoneView } from './data.ts';
 
-export type StackZone = ZoneView & { story: number; offset: [number, number, number] };
+export type StackZone = ZoneView & { story: number; offset: [number, number, number]; rotationDegrees:number };
 
 function zoneStory(zone: ZoneView, index: number): number {
   const floor = zone.graph.floors.find(item => item.id === zone.floorId) || zone.graph.floors[0];
@@ -15,7 +15,7 @@ function node(zone: ZoneView, id: string): Node | undefined {
   return zone.graph.nodes.find(item => item.id === id);
 }
 
-export function stackBuilding(zones: ZoneView[], links?: ZoneConnections, gap = 4): StackZone[] {
+export function stackBuilding(zones: ZoneView[], links?: ZoneConnections, layout?: BuildingLayout, gap = 4): StackZone[] {
   let ordered = zones.map((zone, index) => ({ zone, story: zoneStory(zone, index) }));
   if(new Set(ordered.map(item=>item.story)).size<ordered.length){const named=ordered.map(item=>namedStory(item.zone));ordered=ordered.map((item,index)=>({...item,story:named[index]??index}))}
   // A continuation joins two scan files on the same physical floor.
@@ -45,13 +45,17 @@ export function stackBuilding(zones: ZoneView[], links?: ZoneConnections, gap = 
       }
     }
   }
+  const authored=new Map((layout?.zones||[]).map(item=>[item.zoneId,item]));
   return ordered.map(({ zone, story }) => {
     const floor = zone.graph.floors.find(item => item.id === zone.floorId) || zone.graph.floors[0];
-    const horizontal = offsets.get(zone.id) || [0, 0];
-    return { ...zone, story, offset: [horizontal[0], (story - minimum) * gap - (floor?.elevation || 0), horizontal[1]] };
+    const placed=authored.get(zone.id);
+    const horizontal = placed ? [placed.x,placed.z] : (offsets.get(zone.id) || [0, 0]);
+    const displayStory=placed?.floor ?? story;
+    return { ...zone, story:displayStory, rotationDegrees:placed?.rotationDegrees||0, offset: [horizontal[0], (displayStory - minimum) * gap - (floor?.elevation || 0), horizontal[1]] };
   });
 }
 
 export function stackPoint(zone: StackZone, position: [number, number, number]): [number, number, number] {
-  return [position[0] + zone.offset[0], position[1] + zone.offset[1], position[2] + zone.offset[2]];
+  const radians=zone.rotationDegrees*Math.PI/180, c=Math.cos(radians),s=Math.sin(radians);
+  return [position[0]*c-position[2]*s+zone.offset[0], position[1] + zone.offset[1], position[0]*s+position[2]*c+zone.offset[2]];
 }

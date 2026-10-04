@@ -8,7 +8,7 @@ import {
 } from 'firebase/auth';
 import { collection, deleteField, doc, GeoPoint, getDoc, getDocs, getFirestore, onSnapshot, runTransaction, Timestamp, type DocumentData } from 'firebase/firestore';
 import { getDownloadURL, getMetadata, getStorage, ref, uploadBytes } from 'firebase/storage';
-import type { Building, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneConnections, ZoneView } from './data';
+import type { Building, BuildingLayout, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneConnections, ZoneView } from './data';
 import { graphDigest } from './graphStore.ts';
 import { emptyZoneConnections, normalizeZoneConnections } from './zoneConnections.ts';
 
@@ -182,6 +182,15 @@ export async function loadBuilding(input: Building): Promise<Building> {
       const code = (error as { code?: string })?.code;
       if (code !== 'storage/object-not-found') errors.push('zone-connections.json: ' + (error instanceof Error ? error.message : String(error)));
     }
+    const layoutPath = version.buildingLayoutPath || storageBase + '/building-layout.json';
+    let layout: BuildingLayout | undefined;
+    try {
+      const raw = await fetchStorageJSON(layoutPath) as BuildingLayout;
+      if (raw?.schemaVersion === 1 && Array.isArray(raw.zones)) layout = raw;
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'storage/object-not-found') errors.push('building-layout.json: ' + (error instanceof Error ? error.message : String(error)));
+    }
     return {
       ...input,
       zoneId: first.id,
@@ -190,6 +199,8 @@ export async function loadBuilding(input: Building): Promise<Building> {
       scan: first.scan,
       zoneConnections,
       zoneConnectionsPath,
+      layout,
+      layoutPath,
       notice: first.scan
         ? 'Showing RoomPlan geometry from zone ' + first.name + '. ' + zones.length + ' zone(s) available.'
         : zones.length + ' zone(s) found, but none has readable scan-features.json. ' + zones.map(zone => zone.id + ': ' + zone.notice).join('; '),
@@ -250,6 +261,26 @@ export async function saveZoneConnections(input: Building, document: ZoneConnect
     const current = await transaction.get(versionRef);
     if (!current.exists()) throw Error('Version metadata is missing.');
     transaction.update(versionRef, { zoneConnectionsPath: path, webZoneConnectionsRevision: revision });
+  });
+  return normalized;
+}
+
+/** Saves display-only placement. ARKit scan coordinates and navigation graphs are never rewritten. */
+export async function saveBuildingLayout(input: Building, document: BuildingLayout): Promise<BuildingLayout> {
+  if (!db || !storage || !input.activeVersion || !canEditFirebase()) throw Error('The signed-in account cannot edit building layout.');
+  if (document.schemaVersion !== 1 || !Array.isArray(document.zones)) throw Error('Invalid building layout.');
+  for (const zone of document.zones) {
+    if (!zone.zoneId || ![zone.floor, zone.x, zone.z, zone.rotationDegrees].every(Number.isFinite)) throw Error('Each zone needs a finite floor, X, Z, and rotation.');
+  }
+  const path = input.layoutPath || 'buildings/' + input.id + '/' + input.activeVersion + '/building-layout.json';
+  const normalized: BuildingLayout = { schemaVersion: 1, zones: document.zones.map(zone => ({ ...zone })), notes: document.notes };
+  const revision = crypto.randomUUID();
+  await uploadBytes(ref(storage, path), new TextEncoder().encode(JSON.stringify(normalized)), { contentType: 'application/json', cacheControl: 'no-cache' });
+  await runTransaction(db, async transaction => {
+    const versionRef = doc(db!, 'buildings/' + input.id + '/versions/' + input.activeVersion);
+    const current = await transaction.get(versionRef);
+    if (!current.exists()) throw Error('Version metadata is missing.');
+    transaction.update(versionRef, { buildingLayoutPath: path, webBuildingLayoutRevision: revision });
   });
   return normalized;
 }
