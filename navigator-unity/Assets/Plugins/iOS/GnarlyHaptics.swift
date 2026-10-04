@@ -2,7 +2,7 @@ import CoreHaptics
 import Foundation
 
 /// Two navigation patterns on the Taptic Engine:
-/// a direction-scaled continuous cue while the user faces along the route, and a violent
+/// a direction-scaled compass confirmation while the user faces along the route, and a violent
 /// repeating pulse when LiDAR sees an obstacle. Pulse rate and hardness
 /// follow closeness (0 = just detected, 1 = about to hit).
 final class GnarlyHapticPlayer {
@@ -80,11 +80,23 @@ final class GnarlyHapticPlayer {
         closeness = 0
         do {
             try ensureEngine()
-            // This is deliberately a soft, continuous confirmation—not an alarm. Even at
-            // perfect alignment it stays far below the obstacle pattern's 0.78–1.0 sharp hits.
-            // The different texture makes it feel like a compass lock rather than a warning.
-            try ensureContinuousPlaying(intensity: 0.07 + 0.17 * alignment,
-                                       sharpness: 0.10 + 0.12 * alignment)
+            stopContinuous()
+            // A single soft tap is a compass confirmation, not an always-on rumble. Unity
+            // rate-limits these to a held, nearly-aligned heading; obstacle pulses remain much
+            // stronger, sharper, and faster.
+            let event = CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    // More noticeable than the first compass draft, but still deliberately
+                    // gentler than obstacle hits (which start at 0.78 intensity / 0.70 sharpness).
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.18 + 0.28 * alignment),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.12 + 0.14 * alignment)
+                ],
+                relativeTime: 0
+            )
+            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let player = try engine?.makePlayer(with: pattern)
+            try player?.start(atTime: CHHapticTimeImmediate)
             mode = .direction
         } catch {
             recover(from: error)

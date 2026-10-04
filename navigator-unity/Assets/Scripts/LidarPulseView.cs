@@ -107,6 +107,9 @@ public class LidarPulseView : MonoBehaviour
     float lastSentCloseness = -1f;
     float lastHapticSentAt = float.NegativeInfinity;
     const float HapticKeepAliveInterval = 0.12f;
+    const float DirectionCueInterval = 0.65f;
+    const float DirectionLockSeconds = 0.3f;
+    float directionAlignedSince = float.NegativeInfinity;
 
     enum HapticMode
     {
@@ -487,6 +490,9 @@ public class LidarPulseView : MonoBehaviour
     {
         if (obstacleDetected)
         {
+            // A warning interrupts the compass lock. Require a fresh stable heading once the
+            // route is clear instead of immediately resuming a direction cue.
+            directionAlignedSince = float.NegativeInfinity;
             if (hapticMode != HapticMode.Obstacle ||
                 Mathf.Abs(targetIntensity - lastSentCloseness) >= 0.02f ||
                 Time.unscaledTime - lastHapticSentAt >= HapticKeepAliveInterval)
@@ -501,9 +507,14 @@ public class LidarPulseView : MonoBehaviour
 
         if (navigator != null && navigator.TryGetDirectionAlignment(out var alignment))
         {
+            if (float.IsNegativeInfinity(directionAlignedSince))
+                directionAlignedSince = Time.unscaledTime;
+            // Ignore a heading that only briefly crosses the narrow lock window while turning.
+            if (Time.unscaledTime - directionAlignedSince < DirectionLockSeconds) return;
+
             if (hapticMode != HapticMode.Direction ||
-                Mathf.Abs(alignment - lastSentCloseness) >= 0.04f ||
-                Time.unscaledTime - lastHapticSentAt >= HapticKeepAliveInterval)
+                Mathf.Abs(alignment - lastSentCloseness) >= 0.12f ||
+                Time.unscaledTime - lastHapticSentAt >= DirectionCueInterval)
             {
                 hapticMode = HapticMode.Direction;
                 lastSentCloseness = alignment;
@@ -513,6 +524,7 @@ public class LidarPulseView : MonoBehaviour
             return;
         }
 
+        directionAlignedSince = float.NegativeInfinity;
         StopNavigationHaptics();
     }
 
@@ -520,6 +532,7 @@ public class LidarPulseView : MonoBehaviour
     {
         targetIntensity = 0f;
         obstacleDetected = false;
+        directionAlignedSince = float.NegativeInfinity;
         lastSentCloseness = -1f;
         lastHapticSentAt = float.NegativeInfinity;
         if (hapticMode == HapticMode.Silent) return;
