@@ -602,8 +602,19 @@ public static class Pathfinding
 
         if (building?.nodes != null)
         {
+            // building.json reuses the scan's node ids (door-…, section-…) and carries the website's
+            // edits, so it wins over the copy generated from scan-features.json.
             foreach (var node in building.nodes)
-                graph.AddNode(node);
+            {
+                var existing = graph.Node(node?.id);
+                if (existing == null) { graph.AddNode(node); continue; }
+                if (!string.IsNullOrEmpty(node.type)) existing.type = node.type;
+                if (!string.IsNullOrEmpty(node.floor)) existing.floor = node.floor;
+                if (node.position?.Length == 3) existing.position = node.position;
+                if (!string.IsNullOrEmpty(node.source)) existing.source = node.source;
+                if (!string.IsNullOrEmpty(node.roomPlanIdentifier)) existing.roomPlanIdentifier = node.roomPlanIdentifier;
+                existing.label = node.label;
+            }
         }
 
         AddFloorHeights(graph, scan, building);
@@ -1067,6 +1078,63 @@ public static class Pathfinding
             coordinateSystem = route.coordinateSystem,
             heightReference = route.heightReference,
             waypoints = kept.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Replaces each turn with a short curve that starts and ends up to <paramref name="cornerMeters"/>
+    /// from the corner. A corner is left sharp when the curve would cut through one of
+    /// <paramref name="walls"/>, so turns through doorways keep their shape.
+    /// </summary>
+    public static Route RoundCorners(Route route, IReadOnlyList<Wall> walls, float cornerMeters)
+    {
+        if (route?.waypoints == null || route.waypoints.Length < 3 || cornerMeters <= 0f) return route;
+        const int curveSamples = 4;
+        const float minimumTurnDegrees = 12f;
+        var wallList = walls as List<Wall> ?? (walls != null ? new List<Wall>(walls) : null);
+        var source = route.waypoints;
+        var rounded = new List<Route.Waypoint> { source[0] };
+        for (var i = 1; i < source.Length - 1; i++)
+        {
+            var previous = Position(source[i - 1]);
+            var corner = Position(source[i]);
+            var next = Position(source[i + 1]);
+            var inbound = new Vector2(corner.x - previous.x, corner.z - previous.z);
+            var outbound = new Vector2(next.x - corner.x, next.z - corner.z);
+            if (inbound.magnitude < 0.05f || outbound.magnitude < 0.05f ||
+                Vector2.Angle(inbound, outbound) < minimumTurnDegrees)
+            {
+                rounded.Add(source[i]);
+                continue;
+            }
+            // Never use more than ~half of a segment, so neighboring curves don't overlap.
+            var entry = Vector3.MoveTowards(corner, previous, Mathf.Min(cornerMeters, inbound.magnitude * 0.45f));
+            var exit = Vector3.MoveTowards(corner, next, Mathf.Min(cornerMeters, outbound.magnitude * 0.45f));
+            if (!IsClear(new Vector2(entry.x, entry.z), new Vector2(exit.x, exit.z), wallList, null))
+            {
+                rounded.Add(source[i]);
+                continue;
+            }
+            for (var s = 0; s <= curveSamples; s++)
+            {
+                var t = s / (float)curveSamples;
+                var point = (1 - t) * (1 - t) * entry + 2 * (1 - t) * t * corner + t * t * exit;
+                rounded.Add(new Route.Waypoint
+                {
+                    // The curve's middle sample keeps the graph node's id.
+                    id = s == curveSamples / 2 ? source[i].id : Route.GuidanceWaypointPrefix + "curve-" + i + "-" + s,
+                    position = new[] { point.x, point.y, point.z }
+                });
+            }
+        }
+        rounded.Add(source[source.Length - 1]);
+        return new Route
+        {
+            schemaVersion = route.schemaVersion,
+            zoneId = route.zoneId,
+            coordinateSystem = route.coordinateSystem,
+            heightReference = route.heightReference,
+            waypoints = rounded.ToArray()
         };
     }
 

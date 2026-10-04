@@ -89,7 +89,9 @@ public class RelocalizationController : MonoBehaviour
     [Tooltip("Maximum gap between runtime route targets. Graph and map selection nodes remain unchanged.")]
     [SerializeField, Range(0.1f, 1f)] float guidanceWaypointSpacingMeters = 0.2f;
     [Tooltip("How far (m) guidance may straighten the recorded walk. 0 follows every recorded step.")]
-    [SerializeField, Range(0f, 1f)] float routeSmoothingMeters = 0.3f;
+    [SerializeField, Range(0f, 1f)] float routeSmoothingMeters = 0.45f;
+    [Tooltip("How far (m) before and after a turn guidance starts curving. 0 keeps sharp corners.")]
+    [SerializeField, Range(0f, 1.5f)] float routeCornerMeters = 0.6f;
     Vector3? automaticRouteStartPosition;
     string currentZoneId;
     bool navigationLoaded;
@@ -937,7 +939,7 @@ public class RelocalizationController : MonoBehaviour
                 name = name,
                 kind = kind,
                 major = kind is "destination" or "entrance" or "room" or "elevator" or "continuation" or "stairs" ||
-                        (kind == "waypoint" && !string.IsNullOrEmpty(node.label)),
+                        HasCustomLabel(node),
                 inCurrentZone = inCurrentZone,
                 sessionPosition = inCurrentZone && node.position != null && node.position.Length == 3
                     ? new Vector3(node.position[0], node.position[1], -node.position[2])
@@ -1014,6 +1016,9 @@ public class RelocalizationController : MonoBehaviour
             return count == 1 ? baseName : $"{baseName} {count}";
         }
 
+        // A name typed on the website always wins over the generated one.
+        if (HasCustomLabel(node)) return node.label.Trim();
+
         switch (kind)
         {
             case "door": return Numbered("Door");
@@ -1026,6 +1031,26 @@ public class RelocalizationController : MonoBehaviour
             default:
                 return !string.IsNullOrEmpty(node.label) ? node.label : Numbered(Humanize(node.localId ?? node.id));
         }
+    }
+
+    /// <summary>
+    /// True when the label is a name someone chose, not the mapper's or editor's default
+    /// (RoomPlan categories such as "door-open", a section's own label, "Elevator", "Zone start").
+    /// </summary>
+    static bool HasCustomLabel(Pathfinding.Node node)
+    {
+        var label = node.label?.Trim();
+        if (string.IsNullOrEmpty(label)) return false;
+        var normalized = label.ToLowerInvariant();
+        switch (normalized)
+        {
+            case "door": case "door-open": case "door-closed": case "opening": case "window": case "wall":
+            case "stairs": case "elevator": case "unknown": case "floor below": case "floor above":
+            case "zone start": case "zone end": case "zone continuation":
+                return false;
+        }
+        var localId = node.localId ?? node.id ?? "";
+        return !(localId.StartsWith("section-", StringComparison.Ordinal) && localId.Substring("section-".Length) == label);
     }
 
     /// <summary>"livingRoom" → "Living room", "front_door" → "Front door".</summary>
@@ -1068,12 +1093,13 @@ public class RelocalizationController : MonoBehaviour
 
     Route GuidanceRoute(Route route) => Pathfinding.DensifyRoute(route, guidanceWaypointSpacingMeters);
 
-    /// <summary>One zone leg as a route, with small recorded-walk wobbles straightened.</summary>
+    /// <summary>One zone leg as a route, with recorded-walk wobbles straightened and turns rounded.</summary>
     Route LegRoute(Pathfinding.RouteLeg leg)
     {
         var route = Pathfinding.ToRoute(navigationGraph, leg.nodeIds, leg.zoneId);
         var walls = zonePackages.TryGetValue(leg.zoneId, out var package) ? package.graph?.Walls : null;
-        return Pathfinding.SimplifyRoute(route, navigationGraph, walls, routeSmoothingMeters);
+        route = Pathfinding.SimplifyRoute(route, navigationGraph, walls, routeSmoothingMeters);
+        return Pathfinding.RoundCorners(route, walls, routeCornerMeters);
     }
 
     static Route PrependAutomaticStart(Route route, Vector3 arkitPosition)

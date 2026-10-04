@@ -113,6 +113,8 @@ public partial class IndoorMapOverlay : MonoBehaviour
     Text compactCaption;
     Button compactModeButton;
     Transform activeRouteRoot;
+    /// <summary>Kept so the line can be redrawn when the map switches between zone and building coordinates.</summary>
+    Route activeRoute;
     Transform previewRouteRoot;
     Transform buildingDiagramRoot;
     Transform scanGeometryRoot;
@@ -229,6 +231,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     public void SetRoute(Route route)
     {
         if (activeRouteRoot == null) return;
+        activeRoute = route;
         DrawRoute(activeRouteRoot, route, routeMaterial, 1f, null);
 #if UNITY_IOS && !UNITY_EDITOR
         if (route != null) GnarlySetRoomModelRoute(JsonUtility.ToJson(route));
@@ -914,6 +917,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
         routeLines.Clear();
         mapRoot = null;
         markerRoot = null;
+        activeRoute = null;
         mapCamera = null;
         canvasRoot = null;
         compactCard = null;

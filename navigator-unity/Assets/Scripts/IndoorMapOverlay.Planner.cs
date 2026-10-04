@@ -504,6 +504,12 @@ public partial class IndoorMapOverlay
         markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
         lineWidth = Mathf.Clamp(span * 0.012f, 0.07f, 0.24f);
         BuildPlaceMarkers(places);
+        RedrawActiveRoute();
+    }
+
+    void RedrawActiveRoute()
+    {
+        if (activeRouteRoot != null) DrawRoute(activeRouteRoot, activeRoute, routeMaterial, 1f, null);
     }
 
     void ExitBuildingPlannerView()
@@ -517,6 +523,7 @@ public partial class IndoorMapOverlay
         markerSize = Mathf.Clamp(span * 0.024f, 0.16f, 0.5f);
         lineWidth = Mathf.Clamp(span * 0.012f, 0.07f, 0.24f);
         BuildPlaceMarkers(places);
+        RedrawActiveRoute();
     }
 
     Vector3 ClampFocus(Vector3 focus)
