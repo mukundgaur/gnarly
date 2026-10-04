@@ -58,8 +58,9 @@ public sealed class RoutePreview
     /// <summary>The part of the route inside the zone shown on the map, or null.</summary>
     public Route mapRoute;
     /// <summary>
-    /// Elevator on the floor shown on the map. Set when the destination is on another floor;
-    /// the route leads here, and this node is the waypoint onto the next floor.
+    /// Connector on the zone shown on the map. Set when the destination is in another zone:
+    /// an elevator onto the next floor, or a continuation into another scan of the same space.
+    /// The route leads here, and this node is the waypoint out of the zone being shown.
     /// </summary>
     public string waypointKey;
     public string summary;

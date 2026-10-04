@@ -491,19 +491,34 @@ public static class Pathfinding
     }
 
     /// <summary>
-    /// Elevator on <paramref name="legIndex"/> that the path uses to leave that floor.
-    /// It is the waypoint connecting this floor to the next. Null when the leg is the last,
-    /// or when the crossing is not an elevator ride.
+    /// Last node of <paramref name="legIndex"/> when the path leaves that zone.
+    /// It is the waypoint on this zone's map: an elevator onto another floor, or a continuation
+    /// into another scan of the same space. Null on the final leg, or when the crossing is
+    /// not one of those connectors.
     /// </summary>
-    public static string ElevatorWaypoint(Graph graph, List<RouteLeg> legs, int legIndex)
+    public static string ZoneExitWaypoint(Graph graph, List<RouteLeg> legs, int legIndex)
     {
         if (graph == null || legs == null || legIndex < 0 || legIndex >= legs.Count - 1) return null;
         var leg = legs[legIndex];
         if (leg.nodeIds.Count == 0 || legs[legIndex + 1].nodeIds.Count == 0) return null;
         var id = leg.nodeIds[leg.nodeIds.Count - 1];
-        var next = legs[legIndex + 1].nodeIds[0];
-        if (!IsElevator(graph.Node(id)) || !IsElevator(graph.Node(next))) return null;
-        return id;
+        var nextId = legs[legIndex + 1].nodeIds[0];
+        var from = graph.Node(id);
+        var to = graph.Node(nextId);
+        if (from == null || to == null || from.zone == to.zone) return null;
+        if ((IsElevator(from) && IsElevator(to)) || (IsContinuation(from) && IsContinuation(to)))
+            return id;
+        return null;
+    }
+
+    /// <summary>
+    /// Elevator on <paramref name="legIndex"/> that the path uses to leave that floor.
+    /// Null when the leg is the last, or when the crossing stays on this floor through a continuation.
+    /// </summary>
+    public static string ElevatorWaypoint(Graph graph, List<RouteLeg> legs, int legIndex)
+    {
+        var id = ZoneExitWaypoint(graph, legs, legIndex);
+        return IsElevator(graph?.Node(id)) ? id : null;
     }
 
     /// <summary>Splits an A* path wherever it crosses a zone connection.</summary>

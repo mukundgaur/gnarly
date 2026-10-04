@@ -124,8 +124,9 @@ public partial class IndoorMapOverlay
     }
 
     /// <summary>
-    /// Pins the minimap on the elevator that connects this floor to the next.
-    /// Pass null once the destination itself is on the floor being shown.
+    /// Pins the minimap on the connector that leaves this zone: the elevator to another floor,
+    /// or the continuation into another scan of the same space.
+    /// Pass null once the destination itself is in the zone being shown.
     /// </summary>
     public void SetFloorWaypoint(string placeKey)
     {
@@ -486,8 +487,8 @@ public partial class IndoorMapOverlay
     }
 
     /// <summary>
-    /// While the planner is open, the preview's elevator. While navigating, the elevator of the active leg.
-    /// Null when the destination is already on this floor.
+    /// While the planner is open, the preview's zone exit. While navigating, the exit of the active leg.
+    /// Null when the destination is already in the zone shown on the map.
     /// </summary>
     string ActiveFloorWaypoint()
     {
