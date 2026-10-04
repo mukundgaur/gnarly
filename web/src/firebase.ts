@@ -8,8 +8,9 @@ import {
 } from 'firebase/auth';
 import { collection, deleteField, doc, GeoPoint, getDoc, getDocs, getFirestore, onSnapshot, runTransaction, Timestamp, type DocumentData } from 'firebase/firestore';
 import { getDownloadURL, getMetadata, getStorage, ref, uploadBytes } from 'firebase/storage';
-import type { Building, Graph, Node, ScanFeatures, ZoneView } from './data';
+import type { Building, Graph, Node, ScanFeatures, ZoneConnections, ZoneView } from './data';
 import { graphDigest } from './graphStore.ts';
+import { emptyZoneConnections, normalizeZoneConnections } from './zoneConnections.ts';
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -140,12 +141,21 @@ export async function loadBuilding(input: Building): Promise<Building> {
 
   if (zones.length) {
     const first = zones.find(zone => zone.scan) || zones[0];
+    const zoneConnectionsPath = storageBase + '/zone-connections.json';
+    let zoneConnections = emptyZoneConnections();
+    try { zoneConnections = normalizeZoneConnections(await fetchStorageJSON(zoneConnectionsPath)); }
+    catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'storage/object-not-found') errors.push('zone-connections.json: ' + (error instanceof Error ? error.message : String(error)));
+    }
     return {
       ...input,
       zoneId: first.id,
       zones,
       graph: first.graph,
       scan: first.scan,
+      zoneConnections,
+      zoneConnectionsPath,
       notice: first.scan
         ? 'Showing RoomPlan geometry from zone ' + first.name + '. ' + zones.length + ' zone(s) available.'
         : zones.length + ' zone(s) found, but none has readable scan-features.json. ' + zones.map(zone => zone.id + ': ' + zone.notice).join('; '),
@@ -194,6 +204,21 @@ export async function loadPreviousBuildingVersion(input: Building): Promise<Buil
 
 export type DataRecord = { path: string; data: DocumentData };
 export const canEditFirebase = () => auth?.currentUser?.uid === 'WwvbXcl5hpQgdl8KO79JwcThYJd2';
+
+export async function saveZoneConnections(input: Building, document: ZoneConnections): Promise<ZoneConnections> {
+  if (!db || !storage || !input.activeVersion || !canEditFirebase()) throw Error('The signed-in account cannot edit zone connections.');
+  const normalized = normalizeZoneConnections(document);
+  const path = input.zoneConnectionsPath || 'buildings/' + input.id + '/' + input.activeVersion + '/zone-connections.json';
+  const revision = crypto.randomUUID();
+  await uploadBytes(ref(storage, path), new TextEncoder().encode(JSON.stringify(normalized)), { contentType: 'application/json', cacheControl: 'no-cache' });
+  await runTransaction(db, async transaction => {
+    const versionRef = doc(db!, 'buildings/' + input.id + '/versions/' + input.activeVersion);
+    const current = await transaction.get(versionRef);
+    if (!current.exists()) throw Error('Version metadata is missing.');
+    transaction.update(versionRef, { zoneConnectionsPath: path, webZoneConnectionsRevision: revision });
+  });
+  return normalized;
+}
 
 function displayValue(value: unknown): unknown {
   if (value instanceof Timestamp) return { __type: 'timestamp', value: value.toDate().toISOString() };
