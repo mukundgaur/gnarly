@@ -374,15 +374,7 @@ final class MapperViewModel: ObservableObject {
                 try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
                 statusText = "Uploading RoomPlan scan…"
-                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID) { [weak self] progress in
-                    guard let progress, progress.totalUnitCount > 0 else { return }
-                    let percent = Int(progress.fractionCompleted * 100)
-                    Task { @MainActor [weak self] in
-                        guard let self, self.uploadAttemptID == attemptID,
-                              self.statusText.hasPrefix("Uploading RoomPlan scan") else { return }
-                        self.statusText = "Uploading RoomPlan scan… \(percent)%"
-                    }
-                }
+                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
                 try Task.checkCancellation()
                 statusText = "Uploading scan features…"
                 try await repository.uploadZoneScanFeatures(from: scanFeatures, buildingId: buildingID, versionId: versionID, zoneId: zoneID)

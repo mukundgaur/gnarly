@@ -305,17 +305,15 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
 
     @discardableResult
     func uploadZoneScanJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String {
-        try await uploadZoneScanJSON(from: localURL, buildingId: buildingId, versionId: versionId, zoneId: zoneId, onProgress: { _ in })
-    }
-
-    @discardableResult
-    func uploadZoneScanJSON(from localURL: URL, buildingId: String, versionId: String, zoneId: String, onProgress: @escaping (Progress?) -> Void) async throws -> String {
         try validateNonemptyFile(localURL)
         let jsonData = try Data(contentsOf: localURL, options: [.mappedIfSafe])
         guard (try? JSONSerialization.jsonObject(with: jsonData)) != nil else { throw FirebaseDataError.invalidJSON }
         let storagePath = try FirebaseStoragePaths.zoneScanJSON(buildingId: buildingId, versionId: versionId, zoneId: zoneId)
-        uploadLogger.info("Uploading RoomPlan scan (\(jsonData.count) bytes) to Storage")
-        try await uploadFile(localURL, storagePath: storagePath, contentType: "application/json", onProgress: onProgress)
+        uploadLogger.info("Uploading RoomPlan scan (\(jsonData.count) bytes) to Storage as data")
+        // `putFileAsync` intermittently leaves this small JSON request at 0% on device, even
+        // after a preceding graph upload succeeds. The graph uses `putDataAsync` reliably, and
+        // the scan is already loaded above for JSON validation, so submit those same bytes.
+        try await uploadData(jsonData, storagePath: storagePath, contentType: "application/json")
         uploadLogger.info("RoomPlan scan Storage upload completed; saving path in Firestore")
         let zoneRef = childReference(collection: "zones", childId: zoneId, buildingId: buildingId, versionId: versionId)
         try await update(["scanJsonPath": storagePath], to: zoneRef, operation: "store zone scanJsonPath")
