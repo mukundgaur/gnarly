@@ -84,6 +84,10 @@ public class RelocalizationController : MonoBehaviour
     Text transitionHeading;
     Text transitionInstructions;
     Text transitionButtonLabel;
+    RectTransform retryButton;
+    RectTransform resetAction;
+    RectTransform arrivalPanel;
+    Text arrivalDestination;
     /// <summary>Planner selection as combined-graph keys; a null start means "from my location".</summary>
     string selectedStartKey;
     string selectedDestinationKey;
@@ -194,7 +198,7 @@ public class RelocalizationController : MonoBehaviour
                 {
                     state = State.TrackingLost;
                     if (navigator != null) navigator.SetVisible(false);
-                    SetStatus($"Tracking lost ({ARSession.notTrackingReason}). Look around the scanned area.");
+                    SetStatus("Position lost. Point at familiar walls and slowly look around.");
                 }
                 else if (navigator != null && navigator.IsActive)
                 {
@@ -207,6 +211,8 @@ public class RelocalizationController : MonoBehaviour
                     {
                         arrivalAnnounced = true;
                         indoorMap?.SetCompactCaption($"ARRIVED AT {NameOf(selectedDestinationKey).ToUpperInvariant()}  ·  TAP FOR NEW ROUTE");
+                        if (arrivalDestination != null) arrivalDestination.text = NameOf(selectedDestinationKey);
+                        if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(true);
                     }
                 }
                 break;
@@ -485,6 +491,7 @@ public class RelocalizationController : MonoBehaviour
         indoorMap?.SetNavigationActive(true);
         indoorMap?.SetCompactCaption($"TO {NameOf(destinationKey).ToUpperInvariant()}  ·  TAP TO CHANGE");
         arrivalAnnounced = false;
+        if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(false);
 
         activeLegs = Pathfinding.SplitByZone(navigationGraph, path);
         activeLegIndex = 0;
@@ -715,7 +722,7 @@ public class RelocalizationController : MonoBehaviour
         var leg = activeLegs[activeLegIndex];
         var connector = navigationGraph.Node(leg.nodeIds[leg.nodeIds.Count - 1]);
         var connectorName = string.IsNullOrEmpty(connector.label) ? connector.localId : connector.label;
-        return $"{navigator.StatusMessage} to {connectorName}, then into {activeLegs[activeLegIndex + 1].zoneId}";
+        return $"{navigator.StatusMessage} to {connectorName}, then continue to {Humanize(activeLegs[activeLegIndex + 1].zoneId)}";
     }
 
     void AwaitZoneTransition()
@@ -726,12 +733,12 @@ public class RelocalizationController : MonoBehaviour
         var connectorName = string.IsNullOrEmpty(connector.label) ? "the connection" : connector.label;
         state = State.AwaitingZoneTransition;
         navigator.SetVisible(false);
-        if (transitionHeading != null) transitionHeading.text = $"{currentZoneId}  →  {nextZone}";
+        if (transitionHeading != null) transitionHeading.text = $"Continue to {Humanize(nextZone)}";
         if (transitionInstructions != null)
-            transitionInstructions.text = $"Reached {connectorName}. Walk into {nextZone}, then tap below to load its map. Look around there until your position is confirmed.";
-        if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm in {nextZone}";
+            transitionInstructions.text = $"You've reached {connectorName}. Continue to {Humanize(nextZone)}. When you're there, load its map and look around to locate yourself.";
+        if (transitionButtonLabel != null) transitionButtonLabel.text = $"I'm at {Humanize(nextZone)}";
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(true);
-        SetStatus($"At {connectorName}. Continue into {nextZone}, then confirm below.");
+        SetStatus($"At {connectorName}. Continue to {Humanize(nextZone)}, then confirm below.");
         Debug.Log($"[Gnarly] Waiting at connector {currentZoneId} -> {nextZone} for the user to enter the next zone.");
     }
 
@@ -775,6 +782,7 @@ public class RelocalizationController : MonoBehaviour
         indoorMap?.Clear();
         lidarView?.ClearPoints();
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
+        if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(false);
         state = State.WaitingForSession;
         session.Reset();
         SetStatus(message);
@@ -800,6 +808,7 @@ public class RelocalizationController : MonoBehaviour
     {
         state = State.Failed;
         if (transitionPanel != null) transitionPanel.gameObject.SetActive(false);
+        if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(false);
         Debug.LogError($"[Gnarly] {message}");
         SetStatus($"Error: {message}");
     }
@@ -817,6 +826,31 @@ public class RelocalizationController : MonoBehaviour
             retryBackground.color = state == State.Failed
                 ? new Color(0.7f, 0.18f, 0.2f, 0.96f)
                 : new Color(0.05f, 0.12f, 0.18f, 0.92f);
+        if (retryButton != null)
+            retryButton.gameObject.SetActive(state == State.Locating || state == State.TrackingLost || state == State.Failed);
+        if (resetAction != null) resetAction.gameObject.SetActive(state == State.Located);
+    }
+
+    void FinishRoute()
+    {
+        if (arrivalPanel != null) arrivalPanel.gameObject.SetActive(false);
+        navigator?.Clear();
+        indoorMap?.SetRoute(null);
+        indoorMap?.SetNavigationActive(false);
+        indoorMap?.SetCompactCaption(null);
+        activeLegs = null;
+        activeLegIndex = 0;
+        selectedStartKey = null;
+        selectedDestinationKey = null;
+        arrivalAnnounced = false;
+        SetStatus("Choose where to go next.");
+    }
+
+    void ChooseAnotherDestination()
+    {
+        FinishRoute();
+        indoorMap?.SetSelection(null, null);
+        indoorMap?.OpenPlanner(true);
     }
 
     Color StatusColor()
@@ -861,26 +895,30 @@ public class RelocalizationController : MonoBehaviour
             return;
         }
 
-        SetStatus($"Locating in {currentZoneId}… ARKit: {snapshot}. Look around the scanned area.");
+        SetStatus($"Finding your position in {Humanize(currentZoneId)}. Slowly look around the scanned area.");
     }
 
     void BuildUi()
     {
         var canvasObject = new GameObject("StatusCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        canvasObject.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+        var statusCanvas = canvasObject.GetComponent<Canvas>();
+        statusCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        statusCanvas.sortingOrder = 17;
         var scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1170, 2532);
+        var safeRoot = CreateRect("SafeArea", canvasObject.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        safeRoot.gameObject.AddComponent<SafeAreaPanel>();
 
         var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
-        var panel = CreateRect("StatusPanel", canvasObject.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(22, -330), new Vector2(-22, -112));
-        panel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.88f);
+        var panel = CreateRect("StatusPanel", safeRoot, new Vector2(0, 1), new Vector2(1, 1), new Vector2(22, -218), new Vector2(-22, -12));
+        MapUi.Panel(panel, new Color(0.025f, 0.06f, 0.1f, 0.9f), 32f);
 
         statusIndicator = CreateRect("StatusIndicator", panel, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(26, -11), new Vector2(48, 11)).gameObject.AddComponent<Image>();
         statusIndicator.color = StatusColor();
 
-        statusEyebrow = CreateRect("Eyebrow", panel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(64, -57), new Vector2(-28, -16)).gameObject.AddComponent<Text>();
+        statusEyebrow = CreateRect("Eyebrow", panel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(64, -57), new Vector2(-172, -16)).gameObject.AddComponent<Text>();
         statusEyebrow.font = font;
         statusEyebrow.fontSize = 24;
         statusEyebrow.fontStyle = FontStyle.Bold;
@@ -888,16 +926,30 @@ public class RelocalizationController : MonoBehaviour
         statusEyebrow.color = new Color(0.44f, 0.78f, 0.92f);
         statusEyebrow.text = "GNARLY NAVIGATION";
 
-        statusText = CreateRect("StatusText", panel, Vector2.zero, Vector2.one, new Vector2(64, 8), new Vector2(-28, -54)).gameObject.AddComponent<Text>();
+        resetAction = CreateRect("ResetAction", panel, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-150, -68), new Vector2(-16, -16));
+        MapUi.Panel(resetAction, new Color(0.2f, 0.29f, 0.38f, 0.94f), 24f, true);
+        resetAction.gameObject.AddComponent<Button>().onClick.AddListener(Retry);
+        var resetLabel = CreateRect("Label", resetAction, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
+        resetLabel.font = font;
+        resetLabel.fontSize = 23;
+        resetLabel.fontStyle = FontStyle.Bold;
+        resetLabel.alignment = TextAnchor.MiddleCenter;
+        resetLabel.color = Color.white;
+        resetLabel.text = "Relocate";
+
+        statusText = CreateRect("StatusText", panel, Vector2.zero, Vector2.one, new Vector2(64, 8), new Vector2(-28, -76)).gameObject.AddComponent<Text>();
         statusText.font = font;
         statusText.fontSize = 38;
         statusText.alignment = TextAnchor.MiddleLeft;
         statusText.color = Color.white;
         statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        statusText.resizeTextForBestFit = true;
+        statusText.resizeTextMinSize = 25;
+        statusText.resizeTextMaxSize = 38;
 
-        var button = CreateRect("RetryButton", canvasObject.transform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(-190, 88), new Vector2(190, 190));
-        retryBackground = button.gameObject.AddComponent<Image>();
-        retryBackground.color = new Color(0.05f, 0.12f, 0.18f, 0.92f);
+        var button = CreateRect("RetryButton", safeRoot, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(-190, 16), new Vector2(190, 112));
+        retryButton = button;
+        retryBackground = MapUi.Panel(button, new Color(0.05f, 0.12f, 0.18f, 0.92f), 32f, true);
         button.gameObject.AddComponent<Button>().onClick.AddListener(Retry);
 
         var label = CreateRect("Label", button, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
@@ -906,10 +958,10 @@ public class RelocalizationController : MonoBehaviour
         label.fontStyle = FontStyle.Bold;
         label.alignment = TextAnchor.MiddleCenter;
         label.color = Color.white;
-        label.text = "Reset map";
+        label.text = "Try locating again";
 
-        transitionPanel = CreateRect("ZoneTransitionPanel", canvasObject.transform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(24, -245), new Vector2(-24, 245));
-        transitionPanel.gameObject.AddComponent<Image>().color = new Color(0.025f, 0.06f, 0.1f, 0.96f);
+        transitionPanel = CreateRect("ZoneTransitionPanel", safeRoot, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(24, -245), new Vector2(-24, 245));
+        MapUi.Panel(transitionPanel, new Color(0.025f, 0.06f, 0.1f, 0.96f), 40f, true);
         transitionHeading = CreateRect("ZoneTransitionHeading", transitionPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(32, -90), new Vector2(-32, -22)).gameObject.AddComponent<Text>();
         transitionHeading.font = font;
         transitionHeading.fontSize = 42;
@@ -921,8 +973,11 @@ public class RelocalizationController : MonoBehaviour
         transitionInstructions.fontSize = 34;
         transitionInstructions.alignment = TextAnchor.MiddleCenter;
         transitionInstructions.color = Color.white;
+        transitionInstructions.resizeTextForBestFit = true;
+        transitionInstructions.resizeTextMinSize = 25;
+        transitionInstructions.resizeTextMaxSize = 34;
         var transitionButton = CreateRect("ConfirmZoneTransition", transitionPanel, new Vector2(0, 0), new Vector2(1, 0), new Vector2(32, 24), new Vector2(-32, 116));
-        transitionButton.gameObject.AddComponent<Image>().color = new Color(0.08f, 0.49f, 0.5f, 1f);
+        MapUi.Panel(transitionButton, new Color(0.1f, 0.37f, 0.83f, 1f), 30f, true);
         transitionButton.gameObject.AddComponent<Button>().onClick.AddListener(ConfirmZoneTransition);
         transitionButtonLabel = CreateRect("Label", transitionButton, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
         transitionButtonLabel.font = font;
@@ -931,6 +986,45 @@ public class RelocalizationController : MonoBehaviour
         transitionButtonLabel.alignment = TextAnchor.MiddleCenter;
         transitionButtonLabel.color = Color.white;
         transitionPanel.gameObject.SetActive(false);
+
+        arrivalPanel = CreateRect("ArrivalPanel", safeRoot, new Vector2(0, 0), new Vector2(1, 0), new Vector2(24, 22), new Vector2(-24, 410));
+        MapUi.Panel(arrivalPanel, new Color(0.97f, 0.98f, 1f, 0.98f), 40f, true);
+        var arrivedTitle = CreateRect("ArrivedTitle", arrivalPanel, new Vector2(0, 1), Vector2.one, new Vector2(32, -96), new Vector2(-32, -24)).gameObject.AddComponent<Text>();
+        arrivedTitle.font = font;
+        arrivedTitle.fontSize = 30;
+        arrivedTitle.fontStyle = FontStyle.Bold;
+        arrivedTitle.color = new Color(0.1f, 0.44f, 0.82f);
+        arrivedTitle.text = "YOU'VE ARRIVED";
+        arrivalDestination = CreateRect("Destination", arrivalPanel, new Vector2(0, 1), Vector2.one, new Vector2(32, -180), new Vector2(-32, -96)).gameObject.AddComponent<Text>();
+        arrivalDestination.font = font;
+        arrivalDestination.fontSize = 44;
+        arrivalDestination.fontStyle = FontStyle.Bold;
+        arrivalDestination.color = new Color(0.1f, 0.16f, 0.24f);
+        arrivalDestination.horizontalOverflow = HorizontalWrapMode.Wrap;
+        arrivalDestination.resizeTextForBestFit = true;
+        arrivalDestination.resizeTextMinSize = 28;
+        arrivalDestination.resizeTextMaxSize = 44;
+        var done = CreateRect("Done", arrivalPanel, Vector2.zero, new Vector2(0.5f, 0), new Vector2(28, 24), new Vector2(-8, 116));
+        MapUi.Panel(done, new Color(0.87f, 0.91f, 0.96f), 28f, true);
+        done.gameObject.AddComponent<Button>().onClick.AddListener(FinishRoute);
+        var doneLabel = CreateRect("Label", done, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
+        doneLabel.font = font;
+        doneLabel.fontSize = 31;
+        doneLabel.fontStyle = FontStyle.Bold;
+        doneLabel.color = new Color(0.1f, 0.16f, 0.24f);
+        doneLabel.alignment = TextAnchor.MiddleCenter;
+        doneLabel.text = "Done";
+        var another = CreateRect("NewDestination", arrivalPanel, new Vector2(0.5f, 0), new Vector2(1, 0), new Vector2(8, 24), new Vector2(-28, 116));
+        MapUi.Panel(another, new Color(0.1f, 0.37f, 0.83f), 28f, true);
+        another.gameObject.AddComponent<Button>().onClick.AddListener(ChooseAnotherDestination);
+        var anotherLabel = CreateRect("Label", another, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject.AddComponent<Text>();
+        anotherLabel.font = font;
+        anotherLabel.fontSize = 31;
+        anotherLabel.fontStyle = FontStyle.Bold;
+        anotherLabel.color = Color.white;
+        anotherLabel.alignment = TextAnchor.MiddleCenter;
+        anotherLabel.text = "New destination";
+        arrivalPanel.gameObject.SetActive(false);
 
         if (FindAnyObjectByType<EventSystem>() == null)
         {

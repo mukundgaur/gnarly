@@ -91,7 +91,7 @@ public class RouteNavigator : MonoBehaviour
         foreach (var marker in markers) Destroy(marker);
         markers.Clear();
         if (line != null) Destroy(line.gameObject);
-        if (canvasRect != null) Destroy(canvasRect.gameObject);
+        if (canvasRect != null) Destroy(canvasRect.parent != null ? canvasRect.parent.gameObject : canvasRect.gameObject);
         if (material != null) Destroy(material);
         StatusMessage = "";
     }
@@ -274,7 +274,9 @@ public class RouteNavigator : MonoBehaviour
         var scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1170, 2532);
-        canvasRect = (RectTransform)canvasObject.transform;
+        canvasRect = new GameObject("SafeArea", typeof(RectTransform)).GetComponent<RectTransform>();
+        canvasRect.SetParent(canvasObject.transform, false);
+        canvasRect.gameObject.AddComponent<SafeAreaPanel>();
 
         arrowBackdrop = new GameObject("TurnArrowBackdrop", typeof(RectTransform)).GetComponent<RectTransform>();
         arrowBackdrop.SetParent(canvasRect, false);

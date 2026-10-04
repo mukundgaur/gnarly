@@ -150,10 +150,10 @@ public partial class IndoorMapOverlay : MonoBehaviour
     /// <summary>The route being followed in AR, drawn on both map views and the native model.</summary>
     public void SetRoute(Route route)
     {
-        if (activeRouteRoot == null || route == null) return;
+        if (activeRouteRoot == null) return;
         DrawRoute(activeRouteRoot, route, routeMaterial, 1f, null);
 #if UNITY_IOS && !UNITY_EDITOR
-        GnarlySetRoomModelRoute(JsonUtility.ToJson(route));
+        if (route != null) GnarlySetRoomModelRoute(JsonUtility.ToJson(route));
 #endif
     }
 
@@ -497,11 +497,12 @@ public partial class IndoorMapOverlay : MonoBehaviour
         var scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1170, 2532);
-        canvasRoot = (RectTransform)canvasObject.transform;
+        canvasRoot = MapUi.Stretch("SafeArea", canvasObject.transform);
+        canvasRoot.gameObject.AddComponent<SafeAreaPanel>();
 
-        // Sits below the status panel (top 112–330) so neither covers the other.
-        compactCard = MapUi.Rect("MiniMap", canvasRoot, Vector2.one, Vector2.one, new Vector2(-352, -764), new Vector2(-22, -352));
-        var compactBackground = MapUi.Panel(compactCard, new Color(0.025f, 0.06f, 0.1f, 0.94f), 30f, true);
+        // The map stays below the guidance card and inside the device safe area.
+        compactCard = MapUi.Rect("MiniMap", canvasRoot, Vector2.one, Vector2.one, new Vector2(-352, -632), new Vector2(-22, -220));
+        var compactBackground = MapUi.Panel(compactCard, new Color(1f, 1f, 1f, 0.96f), 30f, true);
         var mapFrame = MapUi.Rect("MapFrame", compactCard, Vector2.zero, Vector2.one, new Vector2(12, 70), new Vector2(-12, -12));
         mapFrame.gameObject.AddComponent<RectMask2D>();
         var image = MapUi.Stretch("MapImage", mapFrame).gameObject.AddComponent<RawImage>();
@@ -605,7 +606,7 @@ public partial class IndoorMapOverlay : MonoBehaviour
     {
         if (mapRoot != null) Destroy(mapRoot.gameObject);
         if (mapCamera != null) Destroy(mapCamera.gameObject);
-        if (canvasRoot != null) Destroy(canvasRoot.gameObject);
+        if (canvasRoot != null) Destroy(canvasRoot.parent != null ? canvasRoot.parent.gameObject : canvasRoot.gameObject);
         if (compactTexture != null) compactTexture.Release();
         ReleasePlannerTexture();
         foreach (var material in materials)
