@@ -375,7 +375,14 @@ public static class Pathfinding
                 Debug.LogWarning($"[Gnarly] Skipping zone connection {from} <-> {to}: a node or zone package is missing.");
                 continue;
             }
-            if (IsElevator(combined.Node(from)) && IsElevator(combined.Node(to)))
+            // `kind: elevator` is authored by the building editor and is the source of truth.
+            // Accept it even when an older cached building.json has not yet picked up the
+            // matching waypoint type. This keeps a newly linked floor selectable/routable
+            // immediately after the web edit. Type matching remains a useful compatibility
+            // path for the original, untyped connection files.
+            if (connection.kind == ElevatorKind ||
+                (string.IsNullOrEmpty(connection.kind) &&
+                 IsElevator(combined.Node(from)) && IsElevator(combined.Node(to))))
             {
                 Link(elevatorLinks, from, to);
                 Link(elevatorLinks, to, from);

@@ -361,34 +361,56 @@ public class RelocalizationController : MonoBehaviour
                 rotationDegrees = 0f
             };
 
-        if (connections?.connections == null) return;
-        for (var changed = true; changed;)
+        if (connections?.connections != null)
         {
-            changed = false;
-            foreach (var connection in connections.connections)
+            for (var changed = true; changed;)
             {
-                if (!TryContinuationPair(connection, out var from, out var to)) continue;
-                var fromPlaced = buildingLayout.TryGetValue(connection.from.zoneId, out var fromLayout);
-                var toPlaced = buildingLayout.TryGetValue(connection.to.zoneId, out var toLayout);
-                if (fromPlaced == toPlaced) continue;
-
-                var placedNode = fromPlaced ? from : to;
-                var missingNode = fromPlaced ? to : from;
-                var placedLayout = fromPlaced ? fromLayout : toLayout;
-                var missingZone = fromPlaced ? connection.to.zoneId : connection.from.zoneId;
-                var target = DisplayArkitPosition(placedNode.position, placedLayout);
-                // With one connector the web keeps the missing scan's rotation at zero and solves
-                // translation. A later authored edit may refine that rotation.
-                buildingLayout[missingZone] = new ZoneLayout
+                changed = false;
+                foreach (var connection in connections.connections)
                 {
-                    zoneId = missingZone,
-                    floor = placedLayout.floor,
-                    x = target.x - missingNode.position[0],
-                    z = target.z - missingNode.position[2],
-                    rotationDegrees = 0f
-                };
-                changed = true;
+                    if (!TryContinuationPair(connection, out var from, out var to)) continue;
+                    var fromPlaced = buildingLayout.TryGetValue(connection.from.zoneId, out var fromLayout);
+                    var toPlaced = buildingLayout.TryGetValue(connection.to.zoneId, out var toLayout);
+                    if (fromPlaced == toPlaced) continue;
+
+                    var placedNode = fromPlaced ? from : to;
+                    var missingNode = fromPlaced ? to : from;
+                    var placedLayout = fromPlaced ? fromLayout : toLayout;
+                    var missingZone = fromPlaced ? connection.to.zoneId : connection.from.zoneId;
+                    var target = DisplayArkitPosition(placedNode.position, placedLayout);
+                    // With one connector the web keeps the missing scan's rotation at zero and solves
+                    // translation. A later authored edit may refine that rotation.
+                    buildingLayout[missingZone] = new ZoneLayout
+                    {
+                        zoneId = missingZone,
+                        floor = placedLayout.floor,
+                        x = target.x - missingNode.position[0],
+                        z = target.z - missingNode.position[2],
+                        rotationDegrees = 0f
+                    };
+                    changed = true;
+                }
             }
+        }
+
+        // A layout is presentation data, not routing data. Do not make a valid downloaded
+        // elevator destination disappear simply because its placement has not been saved yet.
+        // Put unknown zones on distinct cards/floors until the website supplies their final
+        // placement. This never affects ARKit coordinates or route costs.
+        var fallbackIndex = 0;
+        foreach (var zone in zonePackages.Keys)
+        {
+            if (buildingLayout.ContainsKey(zone)) continue;
+            var floor = GuessDisplayFloor(zone);
+            buildingLayout[zone] = new ZoneLayout
+            {
+                zoneId = zone,
+                floor = floor,
+                x = (fallbackIndex % 3) * 28f,
+                z = (fallbackIndex / 3) * 28f,
+                rotationDegrees = 0f
+            };
+            fallbackIndex++;
         }
     }
 

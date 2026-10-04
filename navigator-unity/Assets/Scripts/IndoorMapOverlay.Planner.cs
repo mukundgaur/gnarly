@@ -66,6 +66,7 @@ public partial class IndoorMapOverlay
     Button swapButton;
     Button viewModeButton;
     Button fullscreenButton;
+    Button headerFullscreenButton;
     RectTransform plannerHeader;
     RectTransform plannerRouteCard;
     RectTransform plannerMap;
@@ -438,13 +439,23 @@ public partial class IndoorMapOverlay
         plannerMap.anchorMax = full ? Vector2.one : Vector2.one;
         plannerMap.offsetMin = full ? Vector2.zero : normalMapOffsetMin;
         plannerMap.offsetMax = full ? Vector2.zero : normalMapOffsetMax;
+        UpdateFullscreenButtonLabels();
+        Canvas.ForceUpdateCanvases();
+        EnsurePlannerTexture();
+    }
+
+    void UpdateFullscreenButtonLabels()
+    {
         if (fullscreenButton != null)
         {
             var label = MapUi.ButtonLabel(fullscreenButton);
-            if (label != null) label.text = full ? "×" : "⛶";
+            if (label != null) label.text = fullscreenMap ? "×" : "FULL\nMAP";
         }
-        Canvas.ForceUpdateCanvases();
-        EnsurePlannerTexture();
+        if (headerFullscreenButton != null)
+        {
+            var label = MapUi.ButtonLabel(headerFullscreenButton);
+            if (label != null) label.text = fullscreenMap ? "CLOSE MAP" : "FULL MAP";
+        }
     }
 
     void FocusOn(MapPlace place) => cameraFocus = ClampFocus(MapPosition(place));
@@ -650,6 +661,11 @@ public partial class IndoorMapOverlay
 
         var mode = MapUi.Sized("MapViewMode", header, new Vector2(1, 1), new Vector2(190, 80), new Vector2(-185, -40));
         viewModeButton = MapUi.Button(mode, "3D view", MapUi.SurfaceRaised, MapUi.TextPrimary, 30, TogglePlannerMode, 52f);
+
+        // This is deliberately a text action rather than an icon: the planner's map has a
+        // large instruction chip which made the previous expand glyph easy to overlook.
+        var fullMap = MapUi.Sized("FullMap", header, new Vector2(1, 1), new Vector2(170, 80), new Vector2(-370, -40));
+        headerFullscreenButton = MapUi.Button(fullMap, "FULL MAP", MapUi.Accent, Color.white, 24, ToggleFullscreenMap, 40f);
     }
 
     void BuildRouteCard(RectTransform card)
@@ -733,7 +749,7 @@ public partial class IndoorMapOverlay
             "ME", MapUi.Surface, MapUi.User, 28, Recenter, 30f);
 
         var full = MapUi.Sized("Fullscreen", mapViewport, new Vector2(0, 1), new Vector2(74, 74), new Vector2(48, -48));
-        fullscreenButton = MapUi.Button(full, "⛶", MapUi.Surface, MapUi.TextPrimary, 40, ToggleFullscreenMap, 30f);
+        fullscreenButton = MapUi.Button(full, "FULL\nMAP", MapUi.Accent, Color.white, 19, ToggleFullscreenMap, 30f);
 
         var legend = MapUi.Rect("Legend", mapViewport, Vector2.zero, Vector2.zero, new Vector2(20, 20), new Vector2(560, 76));
         MapUi.Panel(legend, new Color(1f, 1f, 1f, 0.94f), 28f);
