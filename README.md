@@ -1,5 +1,7 @@
 # Gnarly — LiDAR Indoor AR Navigation
 
+DEMO: https://youtu.be/XkmW11bmEXg?si=iq6QOmiekDFxMNwl
+
 Gnarly turns a LiDAR iPhone scan into an indoor AR navigation experience. Map a space, publish it, relocalize inside it, then follow a live route through one or many zones.
 
 ## What’s working
