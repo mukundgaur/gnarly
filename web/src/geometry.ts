@@ -53,7 +53,7 @@ function overlapsWall(a: P, b: P, c: P, d: P): boolean {
   const high = Math.min(1, Math.max(dot(sub(c, a), direction), dot(sub(d, a), direction)) / squared);
   return (high - low) * length(a, b) > .02;
 }
-function surfaceSegment(feature: ScanFeature): [P, P] {
+export function surfaceSegment(feature: ScanFeature): [P, P] {
   const half = feature.dimensions[0] / 2;
   return [xz(world(feature, [-half, 0, 0])), xz(world(feature, [half, 0, 0]))];
 }

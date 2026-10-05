@@ -1,22 +1,38 @@
-import { useState } from 'react';
 import type { Node } from './data.ts';
 import type { BuildingModel, BuildingNode } from './buildingGraph.ts';
+import type { SearchOption } from './ui.tsx';
+import type { Vec3 } from './zoneAlign.ts';
+import { nodeColor } from './Viewer.tsx';
 
-export type PickerOption = { value: string; label: string };
-export const waypointTypes = ['entrance','hallway','elevator','continuation','stairs','destination','door','opening','waypoint'];
-export const title = (node: Node) => (node.label ? node.label + ' · ' : '') + node.id;
-export const waypointForm = (node: Node) => ({name:node.label||'',type:node.type,floor:node.floor,x:String(node.position[0]),y:String(node.position[1]),z:String(node.position[2])});
-export type WaypointForm = ReturnType<typeof waypointForm>;
+export type Tool = 'select' | 'add' | 'connect' | 'arrange';
+export type LinkKind = 'elevator' | 'continuation';
+export type PendingLink = { from: { zoneId: string; nodeId: string }; kind: LinkKind; targetZoneId: string; toNodeId?: string };
+/**
+ * A neighbor on the same floor. `blocked` means an existing join runs through a wall; `walled` explains
+ * why touching zones cannot be joined; `seam` is where a join would go, in building coordinates.
+ */
+export type JoinOption = { zoneId: string; name: string; joined: boolean; touching: boolean; blocked?: string; walled?: string; wallAt?: Vec3; seam?: [Vec3, Vec3] };
+/** An unlinked elevator here and the closest unlinked-to-it elevator on another floor. */
+export type ElevatorSuggestion = { nodeId: string; otherKey: string; otherName: string; floor: string; meters: number };
 
-export function nodeOption(model: BuildingModel, node: BuildingNode): PickerOption {
-  const floor = model.floors.find(item => item.level === node.level)?.name || 'Floor ' + node.level;
-  const zone = model.zones.length > 1 ? ' · ' + (model.zones.find(item => item.id === node.zoneId)?.name || node.zoneId) : '';
-  return { value: node.key, label: floor + zone + ' · ' + title(node) };
+export const waypointTypes = ['waypoint', 'hallway', 'entrance', 'destination', 'door', 'opening', 'stairs', 'elevator', 'continuation'];
+export const typeLabel = (type: string) => ({ waypoint: 'Waypoint', hallway: 'Hallway', entrance: 'Entrance', destination: 'Place', door: 'Door', opening: 'Opening', stairs: 'Stairs', elevator: 'Elevator', continuation: 'Zone seam' } as Record<string, string>)[type] || type;
+export const title = (node: Node) => node.label || node.id;
+
+export function floorName(model: BuildingModel, level: number) {
+  return model.floors.find(item => item.level === level)?.name || 'Floor ' + level;
+}
+export function zoneName(model: BuildingModel, zoneId: string) {
+  return model.zones.find(item => item.id === zoneId)?.name || zoneId;
 }
 
-export function Picker({ caption, options, value, change }: { caption: string; options: PickerOption[]; value: string; change: (value: string) => void }) {
-  const [query,setQuery] = useState('');
-  const visible=options.filter(option=>option.label.toLowerCase().includes(query.toLowerCase()));
-  const current=options.find(option=>option.value===value);
-  return <label className="waypoint-picker">{caption}<input aria-label={'Search '+caption} placeholder="Search waypoints" value={query} onChange={e=>setQuery(e.target.value)}/><select aria-label={caption} value={value} onChange={e=>change(e.target.value)}><option value="">Choose waypoint</option>{visible.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}{current&&!visible.includes(current)&&<option value={current.value}>{current.label}</option>}</select></label>;
+/** Search options for building waypoints, labeled the way a visitor reads them. */
+export function nodeOptions(model: BuildingModel, nodes: BuildingNode[] = model.nodes): SearchOption[] {
+  return nodes.map(node => ({
+    value: node.key,
+    label: title(node),
+    detail: typeLabel(node.type) + (model.zones.length > 1 ? ' · ' + zoneName(model, node.zoneId) : ''),
+    group: floorName(model, node.level),
+    color: nodeColor(node.type),
+  })).sort((a, b) => Number(Boolean(model.byKey.get(b.value)?.label)) - Number(Boolean(model.byKey.get(a.value)?.label)) || a.label.localeCompare(b.label, undefined, { numeric: true }));
 }

@@ -75,11 +75,10 @@ function App() {
   return <div className="app">
     <header className="topbar">
       <button className="brand" onClick={home} aria-label="Gnarly home"><span className="brand-mark"><Navigation size={20}/></span><span>gnarly<span className="brand-dot">.</span></span></button>
-      <div className="top-label">INDOOR NAVIGATION EXPLORER</div>
+      <div className="top-label">Indoor navigation</div>
       <div className="top-actions">
-        <button className={'data-nav '+(dataOpen?'active':'')} onClick={openData} aria-label="Firebase data"><Database size={16}/> Firebase data</button>
-        <span className="demo-pill"><span/>DEMO MODE AVAILABLE</span>
-        <button className="account" aria-label={user?'Firebase account':'Connect Firebase'} onClick={() => setAuthOpen(true)}><ShieldCheck size={17}/>{user?'Connected':'Connect Firebase'}</button>
+        <button className={'data-nav '+(dataOpen?'active':'')} onClick={openData} aria-label="Firebase data"><Database size={15}/> Data</button>
+        <button className={'account '+(user?'connected':'')} aria-label={user?'Firebase account':'Connect Firebase'} onClick={() => setAuthOpen(true)}><ShieldCheck size={15}/>{user?'Connected':'Sign in'}</button>
       </div>
     </header>
     <Suspense fallback={<div className="page-loading" role="status"><span className="loading-ring"/>Opening explorer…</div>}>
@@ -87,15 +86,15 @@ function App() {
         : inside && selected?.graph ? <BuildingWorkspace key={selected.id+':'+selected.activeVersion} building={selected} onBack={back} onUpdate={setSelected} onDirtyChange={setWorkspaceDirty}/>
         : <main className={'map-area '+(selected?'has-selection':'')}>
           <ExteriorMap buildings={buildings} selected={selected} onSelect={select}/><div className="map-tint"/>
-          <div className="search-shell"><Search size={20}/><input aria-label="Search buildings and destinations" placeholder="Search buildings or destinations" value={search} onChange={e => setSearch(e.target.value)}/>{search&&<button onClick={() => setSearch('')} aria-label="Clear search"><X size={17}/></button>}</div>
-          <aside className="map-panel">
-            <div className="eyebrow"><span className="eyebrow-line"/>EXPLORE THE CAMPUS</div><h1>Find your way<br/><em>inside.</em></h1><p className="intro">Discover mapped spaces and preview your route before you arrive.</p><div className="panel-divider"/>
-            <div className="list-head"><span>BUILDINGS</span><span role="status">{loadingList?'LOADING…':filtered.length+' FOUND'}</span></div>
+          <aside className="map-panel glass">
+            <div className="search-shell"><Search size={17}/><input aria-label="Search buildings and destinations" placeholder="Search buildings or rooms" value={search} onChange={e => setSearch(e.target.value)}/>{search&&<button onClick={() => setSearch('')} aria-label="Clear search"><X size={15}/></button>}</div>
+            <div className="map-intro"><h1>Find your way inside</h1><p>Pick a building to explore its floors and preview a route.</p></div>
+            <div className="list-head"><span>Buildings</span><span role="status">{loadingList?'Loading…':filtered.length+' found'}</span></div>
             <div className="building-list">{filtered.map(b => <button className={'building-row '+(selected?.id===b.id?'active':'')} key={b.id} onClick={() => void select(b)}><span className="building-icon"><Building2 size={21}/></span><span className="building-copy"><strong>{b.name}</strong><small>{b.demo?'Sample building · 2 floors':b.graph?'Indoor map available':b.activeVersion?'Open to load indoor map':'Indoor map unavailable'}</small></span><ChevronRight size={18}/></button>)}{!filtered.length&&<div className="empty">No matches for “{search}”.<button className="secondary" onClick={() => setSearch('')}>Show all buildings</button></div>}</div>
             {!configured&&<div className="connect-hint">Viewing sample data. Connect your Firebase project to load live buildings.</div>}
             {loadError&&<div role="alert" className="error">{loadError}<button className="secondary" onClick={() => setRefresh(value => value+1)}>Retry loading buildings</button></div>}
           </aside>
-          {selected&&<aside className="detail-card" aria-busy={loadingMap}>
+          {selected&&<aside className="detail-card glass" aria-busy={loadingMap}>
             <button className="close" onClick={closeDetails} aria-label="Close details"><X size={18}/></button>
             <div className="detail-top"><div className="detail-icon"><Building2 size={22}/></div><span className={selected.graph?'status':'status muted'}>{loadingMap?'LOADING INDOOR MAP':selected.graph?'INDOOR MAP AVAILABLE':'MAP UNAVAILABLE'}</span></div>
             <h2>{selected.name}</h2><p>{selected.demo?'Illustrative campus demo building':(selected.viewingPreviousVersion?'Previous version':selected.status)+' · '+(selected.activeVersion||'No active version')}</p>
@@ -104,7 +103,7 @@ function App() {
             <button className="primary" disabled={!selected.graph||loadingMap} onClick={() => setInside(true)}>{loadingMap?'Loading map…':'Explore inside'}<ArrowRight size={17}/></button>
             {!selected.graph&&!selected.demo&&selected.activeVersion&&<button className="secondary" disabled={loadingMap} onClick={() => void select(selected,true)}>Try a previous version <ArrowRight size={16}/></button>}
           </aside>}
-          <div className="map-caption"><LocateFixed size={15}/> Cornell area, Ithaca NY <span>·</span> Select a building to explore</div>
+          <div className="map-caption glass"><LocateFixed size={14}/> Cornell area, Ithaca NY</div>
         </main>}
     </Suspense>
     {authOpen&&<AuthDialog connected={user} onClose={() => setAuthOpen(false)} onBeforeLogout={canLeave}/>}

@@ -86,6 +86,7 @@ export function combineBuilding(zones: ZoneView[], connections?: ZoneConnections
     }));
   }
   const byKey = new Map(nodes.map(node => [node.key, node]));
+  const zoneById = new Map(zones.map(zone => [zone.id, zone]));
   const shafts = new Map<string, Set<string>>();
   const join = (a: string, b: string) => { for (const [x, y] of [[a, b], [b, a]]) { if (!shafts.has(x)) shafts.set(x, new Set()); shafts.get(x)!.add(y); } };
   for (const link of connections?.connections || []) {
@@ -100,7 +101,9 @@ export function combineBuilding(zones: ZoneView[], connections?: ZoneConnections
     }
     if (a.type === 'continuation' && b.type === 'continuation' && link.kind !== 'elevator') {
       if (a.level !== b.level) { issues.push('Skipped continuation ' + label + ': the zones are on different floors.'); continue; }
-      const edge: BuildingEdge = { from: a.key, to: b.key, meters: Math.max(CONTINUATION_MIN_METERS, Math.hypot(a.world[0] - b.world[0], a.world[2] - b.world[2])), kind: 'continuation', check: { status: 'valid', reason: 'Zone continuation' } };
+      const walled = seamCheck(a, b, zoneById, transforms);
+      const check: EdgeCheck = walled.status === 'blocked' ? { status: 'blocked', reason: 'Joined through a wall: ' + walled.reason.charAt(0).toLowerCase() + walled.reason.slice(1) } : { status: 'valid', reason: 'Zone continuation' };
+      const edge: BuildingEdge = { from: a.key, to: b.key, meters: Math.max(CONTINUATION_MIN_METERS, Math.hypot(a.world[0] - b.world[0], a.world[2] - b.world[2])), kind: 'continuation', check };
       edges.push(edge); links.push(edge);
       continue;
     }
