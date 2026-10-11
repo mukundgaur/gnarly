@@ -27,6 +27,10 @@ final class FirebaseStoragePathsTests: XCTestCase {
             try FirebaseStoragePaths.worldMap(buildingId: "demo", versionId: "v1", zoneId: "upper"),
             "buildings/demo/v1/worldmaps/upper.bin"
         )
+        XCTAssertEqual(
+            try FirebaseStoragePaths.buildingLayout(buildingId: "demo", versionId: "v1"),
+            "buildings/demo/v1/building-layout.json"
+        )
     }
 
     func testRejectsPathSeparatorsInIDs() {

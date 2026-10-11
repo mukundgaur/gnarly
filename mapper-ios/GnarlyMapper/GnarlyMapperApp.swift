@@ -11,7 +11,7 @@ struct GnarlyMapperApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView()
                 .environmentObject(authSession)
         }
     }

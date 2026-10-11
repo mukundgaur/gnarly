@@ -3,6 +3,7 @@ import FirebaseAuth
 import Foundation
 import OSLog
 import RoomPlan
+import UIKit
 
 @MainActor
 final class MapperViewModel: ObservableObject {
@@ -18,6 +19,18 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var zoneConnectionsJSON = ""
     @Published private(set) var scanPlan = ScanPlan.empty
     @Published private(set) var diagnosticsText = "No RoomPlan scan has started yet."
+    @Published private(set) var phase: ScanPhase = .idle
+    @Published private(set) var previewSurfaces: [BakeSurface] = []
+    @Published private(set) var previewColors: SurfaceColorDocument?
+    @Published private(set) var previewAtlas: UIImage?
+    @Published private(set) var previewSummary = ""
+    @Published private(set) var colorFrameCount = 0
+    @Published var activeTarget: ZoneScanTarget?
+    @Published var activeBuilding: OwnedBuilding?
+
+    enum ScanPhase {
+        case idle, scanning, processing, preview, uploading
+    }
     private var uploadAttemptID: UUID?
 
     private enum ScanTarget {
@@ -69,7 +82,15 @@ final class MapperViewModel: ObservableObject {
 
     func configure(captureView: RoomCaptureView) {
         self.captureView = captureView
-        startScan()
+        if activeTarget != nil, !isScanning, phase != .preview, phase != .processing {
+            beginFloorScan()
+        }
+    }
+
+    func beginPlannedScan(building: OwnedBuilding, target: ZoneScanTarget) {
+        activeBuilding = building
+        activeTarget = target
+        if captureView != nil { beginFloorScan() }
     }
 
     func startScan() {
@@ -96,7 +117,8 @@ final class MapperViewModel: ObservableObject {
         colorRecorder.reset()
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
-        statusText = "Scanning. Walk the route; path nodes save automatically every 0.75 m."
+        phase = .scanning
+        statusText = "Sweep each wall from floor to ceiling. Path points save as you walk."
         updateDiagnostics()
         startPathSampling()
     }
@@ -105,6 +127,7 @@ final class MapperViewModel: ObservableObject {
         guard isScanning else { return }
         statusText = "Processing RoomPlan scan…"
         isScanning = false
+        phase = .processing
         stopPathSampling()
         updateDiagnostics()
         // Keep ARKit running so its coordinate system remains valid for map export.
@@ -129,12 +152,8 @@ final class MapperViewModel: ObservableObject {
                 scanPlan = ScanPlan(room: room)
                 if scanTarget == .floor {
                     detectedStairs = RoomPlanScanExtractor.detectedStairs(in: room)
-                    statusText = detectedStairs.isEmpty
-                        ? "Room ready. Mark the cube point, then export the package."
-                        : "RoomPlan found \(detectedStairs.count) stair object(s). Export this floor, then scan the stairwell."
-                } else {
-                    statusText = "Stairwell ready. Export this zone so its landings can connect to the floors."
                 }
+                await preparePreview()
             } catch {
                 showError("Unable to build the captured room: \(error.localizedDescription)")
             }
@@ -410,6 +429,16 @@ final class MapperViewModel: ObservableObject {
                             ? "No RoomPlan stair object was linked yet."
                             : "\(linkCount) RoomPlan stair link(s) written to zone-connections.json."
                         let colorStatus = colors?.summary ?? "No real colors: no usable scan photos were recorded."
+                        self.previewSurfaces = surfaces
+                        if let colors, let image = UIImage(data: colors.atlas) {
+                            self.previewAtlas = image
+                            self.previewColors = try? JSONDecoder().decode(SurfaceColorDocument.self, from: colors.json)
+                        } else {
+                            self.previewAtlas = nil
+                            self.previewColors = nil
+                        }
+                        self.previewSummary = colorStatus
+                        self.phase = .preview
                         self.statusText = "Package saved. \(colorStatus) \(stairStatus)"
                     } catch {
                         self.showError("Package export failed: \(error.localizedDescription)")
@@ -417,6 +446,14 @@ final class MapperViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func preparePreview() async {
+        let target = activeTarget
+        exportPackage(
+            zoneID: target?.zoneID ?? "1",
+            floorID: target?.floorID ?? "ground"
+        )
     }
 
     private func resetTracking() {
@@ -436,6 +473,7 @@ final class MapperViewModel: ObservableObject {
         guard !buildingID.isEmpty, !versionID.isEmpty, !zoneID.isEmpty, !floorID.isEmpty else { showError("Building, version, zone, and floor IDs are required."); return }
 
         isUploading = true
+        phase = .uploading
         let attemptID = UUID()
         uploadAttemptID = attemptID
         let uploadTask = Task { @MainActor [self] in
@@ -454,8 +492,21 @@ final class MapperViewModel: ObservableObject {
                     throw CocoaError(.fileNoSuchFile)
                 }
                 statusText = "Checking Firebase building…"
+                let owner = Auth.auth().currentUser?.uid
+                let existing = activeBuilding
                 do {
-                    try await repository.createBuilding(Building(id: buildingID, name: buildingID, activeVersion: nil, status: .draft, createdAt: nil, updatedAt: nil))
+                    try await repository.createBuilding(Building(
+                        id: buildingID,
+                        name: existing?.name ?? buildingID,
+                        activeVersion: nil,
+                        status: .draft,
+                        createdAt: nil,
+                        updatedAt: nil,
+                        ownerUid: owner,
+                        latitude: existing?.latitude,
+                        longitude: existing?.longitude,
+                        mapHeadingDegrees: existing?.mapHeadingDegrees
+                    ))
                 } catch FirebaseDataError.documentAlreadyExists { }
                 try Task.checkCancellation()
                 statusText = "Saving version \(versionID)…"
@@ -465,7 +516,7 @@ final class MapperViewModel: ObservableObject {
                 try await repository.saveFloor(Floor(id: floorID, name: floorID, story: 0, elevation: 0), buildingId: buildingID, versionId: versionID)
                 try Task.checkCancellation()
                 statusText = "Saving zone \(zoneID)…"
-                try await repository.saveZone(Zone(id: zoneID, name: zoneID, floorId: floorID, worldMapPath: nil, buildingJsonPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
+                try await repository.saveZone(Zone(id: zoneID, name: activeTarget?.zoneName ?? zoneID, floorId: floorID, worldMapPath: nil, buildingJsonPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
                 try Task.checkCancellation()
                 statusText = "Uploading zone graph…"
                 try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
@@ -498,10 +549,31 @@ final class MapperViewModel: ObservableObject {
                 statusText = "Publishing building version…"
                 try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
                 try Task.checkCancellation()
-                try await repository.updateBuilding(Building(id: buildingID, name: buildingID, activeVersion: versionID, status: .active, createdAt: nil, updatedAt: nil))
+                try await repository.updateBuilding(Building(
+                    id: buildingID,
+                    name: existing?.name ?? buildingID,
+                    activeVersion: versionID,
+                    status: .active,
+                    createdAt: nil,
+                    updatedAt: nil,
+                    ownerUid: owner,
+                    latitude: existing?.latitude,
+                    longitude: existing?.longitude,
+                    mapHeadingDegrees: existing?.mapHeadingDegrees
+                ))
+                if let target = activeTarget {
+                    statusText = "Updating building layout…"
+                    var layout = (try? await repository.downloadBuildingLayout(buildingId: buildingID, versionId: versionID)) ?? BuildingLayoutDocument()
+                    let placement = target.previousPlacement
+                        ?? .beside(levelBounds: target.levelBounds, zoneId: zoneID, level: target.level)
+                    layout.upsert(placement)
+                    layout.setFloorName(target.levelName, for: target.level)
+                    _ = try? await repository.uploadBuildingLayout(layout, buildingId: buildingID, versionId: versionID)
+                }
                 try Task.checkCancellation()
                 guard uploadAttemptID == attemptID else { return }
-                statusText = "Uploaded zone \(zoneID) to \(buildingID)/\(versionID). Add more zones with this same version."
+                statusText = "Uploaded \(activeTarget?.zoneName ?? zoneID) to \(existing?.name ?? buildingID)."
+                phase = .preview
                 if startNextZone {
                     let nextZone = String((Int(zoneID) ?? 0) + 1)
                     onNextZone(nextZone)
@@ -560,7 +632,10 @@ final class MapperViewModel: ObservableObject {
         pathSamplingTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self, self.isScanning else { return }
             self.sampleWalkedPathIfNeeded()
-            if let frame = self.arSession.currentFrame { self.colorRecorder.consider(frame) }
+            if let frame = self.arSession.currentFrame {
+                self.colorRecorder.consider(frame)
+                self.colorFrameCount = self.colorRecorder.count
+            }
         }
     }
 

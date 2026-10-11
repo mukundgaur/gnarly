@@ -22,7 +22,7 @@ enum FirebaseDataError: LocalizedError {
         case .notConfigured:
             return "Firebase is not configured. Add GoogleService-Info.plist to the GnarlyMapper target."
         case .notAuthenticated:
-            return "Sign in with the Firebase administrator account before using Firestore or Cloud Storage."
+            return "Sign in before using Firestore or Cloud Storage."
         case let .invalidIdentifier(field):
             return "\(field) must be non-empty and cannot contain '/'."
         case .invalidJSON:

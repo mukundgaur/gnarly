@@ -17,6 +17,13 @@ struct Building: Codable, Identifiable {
     var status: RecordStatus
     var createdAt: Date?
     var updatedAt: Date?
+    /// Firebase Auth UID of the account that may edit this building.
+    var ownerUid: String? = nil
+    /// Where the building layout's origin sits on Earth. The web explorer reads the same fields.
+    var latitude: Double? = nil
+    var longitude: Double? = nil
+    /// Clockwise rotation from north of the layout's -Z axis.
+    var mapHeadingDegrees: Double? = nil
 }
 
 struct BuildingVersion: Codable, Identifiable {
@@ -47,6 +54,8 @@ struct Zone: Codable, Identifiable {
     var structurePath: String? = nil
     var relocalizationHint: String
     var startNodeId: String
+    var surfaceColorsPath: String? = nil
+    var surfaceColorAtlasPath: String? = nil
 }
 
 struct Destination: Codable, Identifiable {

@@ -63,6 +63,15 @@ protocol FirebaseDataRepositoryProtocol {
     @discardableResult
     func uploadZoneStructure(from localURL: URL, buildingId: String, versionId: String, zoneId: String) async throws -> String
 
+    func listBuildings() async throws -> [OwnedBuilding]
+    func listOwnedBuildings(ownerUid: String) async throws -> [OwnedBuilding]
+    func updateBuildingPlacement(buildingId: String, latitude: Double?, longitude: Double?, heading: Double) async throws
+    func listZones(buildingId: String, versionId: String) async throws -> [Zone]
+    func downloadBuildingLayout(buildingId: String, versionId: String) async throws -> BuildingLayoutDocument?
+    @discardableResult
+    func uploadBuildingLayout(_ layout: BuildingLayoutDocument, buildingId: String, versionId: String) async throws -> String
+    func downloadOptional(storagePath: String) async throws -> URL?
+
     func fetchActiveVersion(buildingId: String) async throws -> ActiveBuildingVersion
     func downloadBuildingJSON(buildingId: String, versionId: String) async throws -> URL
     func downloadWorldMap(buildingId: String, versionId: String, zoneId: String) async throws -> URL
@@ -363,6 +372,82 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         try await cacheUploadedFile(jsonURL, storagePath: jsonPath)
         try await cacheUploadedFile(atlasURL, storagePath: atlasPath)
         return jsonPath
+    }
+
+    func listBuildings() async throws -> [OwnedBuilding] {
+        try requireAuthenticated()
+        do {
+            let snapshot = try await firestore.collection("buildings").getDocuments(source: .default)
+            return snapshot.documents.compactMap { document -> OwnedBuilding? in
+                guard document.documentID != "firebase-test" else { return nil }
+                guard let building = try? document.data(as: Building.self) else { return nil }
+                return OwnedBuilding(building, id: building.id ?? document.documentID)
+            }
+            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        } catch {
+            throw FirebaseDataError.firestore(operation: "list buildings", underlying: error)
+        }
+    }
+
+    func listOwnedBuildings(ownerUid: String) async throws -> [OwnedBuilding] {
+        try await listBuildings()
+    }
+
+    func updateBuildingPlacement(buildingId: String, latitude: Double?, longitude: Double?, heading: Double) async throws {
+        try FirebaseStoragePaths.validate(buildingId, field: "buildingId")
+        var data: [AnyHashable: Any] = [
+            "mapHeadingDegrees": heading,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        data["latitude"] = latitude ?? NSNull()
+        data["longitude"] = longitude ?? NSNull()
+        try await update(data, to: buildingReference(buildingId), operation: "update building map placement")
+    }
+
+    func listZones(buildingId: String, versionId: String) async throws -> [Zone] {
+        try FirebaseStoragePaths.validate(buildingId, field: "buildingId")
+        try FirebaseStoragePaths.validate(versionId, field: "versionId")
+        try requireAuthenticated()
+        do {
+            let snapshot = try await versionReference(buildingId: buildingId, versionId: versionId)
+                .collection("zones")
+                .getDocuments(source: .default)
+            return snapshot.documents.compactMap { try? $0.data(as: Zone.self) }
+                .sorted { ($0.name) < ($1.name) }
+        } catch {
+            throw FirebaseDataError.firestore(operation: "list zones", underlying: error)
+        }
+    }
+
+    func downloadBuildingLayout(buildingId: String, versionId: String) async throws -> BuildingLayoutDocument? {
+        let path = try FirebaseStoragePaths.buildingLayout(buildingId: buildingId, versionId: versionId)
+        guard let url = try await downloadOptional(storagePath: path) else { return nil }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(BuildingLayoutDocument.self, from: data)
+    }
+
+    @discardableResult
+    func uploadBuildingLayout(_ layout: BuildingLayoutDocument, buildingId: String, versionId: String) async throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(layout)
+        let storagePath = try FirebaseStoragePaths.buildingLayout(buildingId: buildingId, versionId: versionId)
+        try await uploadData(data, storagePath: storagePath, contentType: "application/json")
+        try await update(
+            ["buildingLayoutPath": storagePath],
+            to: versionReference(buildingId: buildingId, versionId: versionId),
+            operation: "store buildingLayoutPath"
+        )
+        return storagePath
+    }
+
+    func downloadOptional(storagePath: String) async throws -> URL? {
+        do {
+            return try await cachedOrDownload(storagePath: storagePath)
+        } catch let error as FirebaseDataError {
+            if case .storage = error, isMissingObject(error) { return nil }
+            throw error
+        }
     }
 
     func fetchActiveVersion(buildingId: String) async throws -> ActiveBuildingVersion {
@@ -704,6 +789,12 @@ final class FirebaseDataRepository: FirebaseDataRepositoryProtocol {
         guard values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
             throw FirebaseDataError.emptyFile(url)
         }
+    }
+
+    private func isMissingObject(_ error: FirebaseDataError) -> Bool {
+        guard case let .storage(_, _, underlying) = error else { return false }
+        let ns = underlying as NSError
+        return ns.domain == StorageErrorDomain && ns.code == StorageErrorCode.objectNotFound.rawValue
     }
 
     private func requireAuthenticated() throws {

@@ -13,15 +13,18 @@ service cloud.firestore {
 
     match /buildings/{buildingId} {
       allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
 
       match /versions/{versionId} {
         allow read: if signedIn();
-        allow create, update, delete: if isAdmin();
+        allow create, update: if signedIn();
+        allow delete: if isAdmin();
 
         match /{nestedDocument=**} {
           allow read: if signedIn();
-          allow create, update, delete: if isAdmin();
+          allow create, update: if signedIn();
+          allow delete: if isAdmin();
         }
       }
     }

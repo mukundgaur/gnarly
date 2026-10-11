@@ -13,7 +13,7 @@ service firebase.storage {
 
     match /buildings/{buildingId}/{versionId}/{assetPath=**} {
       allow read: if signedIn();
-      allow write: if isAdmin();
+      allow write: if signedIn();
     }
   }
 }

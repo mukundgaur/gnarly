@@ -84,8 +84,10 @@ final class SurfaceColorRecorder {
         guard index < Self.maxKeyframes else { return }
         if let last = lastKeyframePose {
             let moved = simd_distance(last.columns.3, pose.columns.3)
-            guard frame.timestamp - lastKeyframeTime >= 0.35,
-                  moved >= 0.25 || Self.angle(last, pose) >= 0.2 else { return }
+            let vertical = abs(pose.columns.3.y - last.columns.3.y)
+            // Prefer a floor-to-ceiling sweep: a small vertical move or tilt is enough to keep another photo.
+            guard frame.timestamp - lastKeyframeTime >= 0.28,
+                  moved >= 0.22 || vertical >= 0.10 || Self.angle(last, pose) >= 0.16 else { return }
         }
 
         lastKeyframePose = pose
@@ -227,6 +229,37 @@ struct BakeSurface: Sendable {
                 transform: object.transform,
                 dimensions: object.dimensions,
                 parentIdentifier: object.parentIdentifier?.uuidString,
+                isPassable: false
+            )
+        }
+        return result
+    }
+
+    static func from(_ features: ScanFeatures) -> [BakeSurface] {
+        func surface(_ item: ScanFeatureSurface, _ kind: Kind) -> BakeSurface? {
+            guard let transform = scanTransform(item.transformColumnMajor), item.dimensions.count == 3 else { return nil }
+            return BakeSurface(
+                identifier: item.identifier,
+                kind: kind,
+                transform: transform,
+                dimensions: SIMD3(item.dimensions[0], item.dimensions[1], item.dimensions[2]),
+                parentIdentifier: item.parentIdentifier,
+                isPassable: kind == .opening || item.category == "door-open"
+            )
+        }
+        var result = features.walls.compactMap { surface($0, .wall) }
+        result += features.doors.compactMap { surface($0, .door) }
+        result += features.windows.compactMap { surface($0, .window) }
+        result += features.openings.compactMap { surface($0, .opening) }
+        result += features.floors.compactMap { surface($0, .floor) }
+        result += features.objects.compactMap { item -> BakeSurface? in
+            guard let transform = scanTransform(item.transformColumnMajor), item.dimensions.count == 3 else { return nil }
+            return BakeSurface(
+                identifier: item.identifier,
+                kind: .object,
+                transform: transform,
+                dimensions: SIMD3(item.dimensions[0], item.dimensions[1], item.dimensions[2]),
+                parentIdentifier: item.parentIdentifier,
                 isPassable: false
             )
         }
