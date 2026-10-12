@@ -1,4 +1,5 @@
 import SceneKit
+import SwiftUI
 import UIKit
 import simd
 
@@ -142,9 +143,11 @@ final class BuildingSceneController: ObservableObject {
         sun.light?.intensity = 900
         sun.eulerAngles = SCNVector3(-0.7, 0.6, 0)
         scene.rootNode.addChildNode(sun)
-        scene.rootNode.addChildNode(SCNNode(light: {
-            let light = SCNLight(); light.type = .ambient; light.intensity = 280; return light
-        }()))
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.intensity = 280
+        scene.rootNode.addChildNode(ambient)
     }
 
     func show(map: BuildingMap, highlight zoneID: String?, satellite: UIImage?) {

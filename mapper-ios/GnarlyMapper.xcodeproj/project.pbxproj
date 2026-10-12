@@ -37,6 +37,22 @@
 		F3089579CC30875CC04D23B2 /* FirebaseStoragePaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD65EB9C58042936F0E3342 /* FirebaseStoragePaths.swift */; };
 		F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */; };
 		F522136BDE4675AA61905C9D /* FirebaseAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF87955CE6DF0975E926FC70 /* FirebaseAuthSession.swift */; };
+		A1B2C3D4E5F60718293A4B02 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* AppRootView.swift */; };
+		A1B2C3D4E5F60718293A4B12 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B11 /* AuthView.swift */; };
+		A1B2C3D4E5F60718293A4B22 /* AlignBuildingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B21 /* AlignBuildingView.swift */; };
+		A1B2C3D4E5F60718293A4B24 /* BuildingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B23 /* BuildingDetailView.swift */; };
+		A1B2C3D4E5F60718293A4B26 /* BuildingHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B25 /* BuildingHomeView.swift */; };
+		A1B2C3D4E5F60718293A4B28 /* BuildingLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B27 /* BuildingLibrary.swift */; };
+		A1B2C3D4E5F60718293A4B2A /* BuildingMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B29 /* BuildingMesh.swift */; };
+		A1B2C3D4E5F60718293A4B2C /* BuildingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B2B /* BuildingModels.swift */; };
+		A1B2C3D4E5F60718293A4B2E /* CreateBuildingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B2D /* CreateBuildingView.swift */; };
+		A1B2C3D4E5F60718293A4B30 /* ScanPlannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B2F /* ScanPlannerView.swift */; };
+		A1B2C3D4E5F60718293A4B42 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B41 /* OnboardingView.swift */; };
+		A1B2C3D4E5F60718293A4B52 /* ColorPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B51 /* ColorPreviewView.swift */; };
+		A1B2C3D4E5F60718293A4B54 /* ScanCoachingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B53 /* ScanCoachingView.swift */; };
+		A1B2C3D4E5F60718293A4B56 /* ScanSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B55 /* ScanSessionView.swift */; };
+		A1B2C3D4E5F60718293A4B62 /* MapperTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B61 /* MapperTheme.swift */; };
+		A1B2C3D4E5F60718293A4B72 /* BuildingModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B71 /* BuildingModelsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,7 +74,7 @@
 		1C3D4151438BA4F447447710 /* FirebaseConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseConnectionView.swift; sourceTree = "<group>"; };
 		2505E055555618BFB65FBE74 /* FirebaseModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseModelsTests.swift; sourceTree = "<group>"; };
 		37865E09DF2725742DB2E99E /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
-		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4055DB21B650F77F86CC0387 /* GnarlyMapper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GnarlyMapper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanScanExtractor.swift; sourceTree = "<group>"; };
 		63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnarlyMapperApp.swift; sourceTree = "<group>"; };
 		689A113367066A5B0CBDA816 /* NavigationFileCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationFileCacheTests.swift; sourceTree = "<group>"; };
@@ -79,6 +95,22 @@
 		EC5EFF27B6A0FC8D9A92A79D /* NavigationFileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationFileCache.swift; sourceTree = "<group>"; };
 		F451C51052FBE715F12ADAAB /* FirebaseStoragePathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseStoragePathsTests.swift; sourceTree = "<group>"; };
 		FF87955CE6DF0975E926FC70 /* FirebaseAuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthSession.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B01 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B11 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B21 /* AlignBuildingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlignBuildingView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B23 /* BuildingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingDetailView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B25 /* BuildingHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingHomeView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B27 /* BuildingLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingLibrary.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B29 /* BuildingMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingMesh.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B2B /* BuildingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingModels.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B2D /* CreateBuildingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateBuildingView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B2F /* ScanPlannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPlannerView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B41 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B51 /* ColorPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPreviewView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B53 /* ScanCoachingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCoachingView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B55 /* ScanSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSessionView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B61 /* MapperTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapperTheme.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B71 /* BuildingModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildingModelsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,7 +148,10 @@
 		4F1387E5B38DEC0928289847 /* GnarlyMapper */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F60718293A4B01 /* AppRootView.swift */,
+				A1B2C3D4E5F60718293A4B10 /* Auth */,
 				E29E88E5B04957510F7EA085 /* BuildingGraphBuilder.swift */,
+				A1B2C3D4E5F60718293A4B20 /* Buildings */,
 				E1D7DCCD6040C6F9E98B0D2A /* ContentView.swift */,
 				07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */,
 				63F7D01718D08E6FAB465472 /* GnarlyMapperApp.swift */,
@@ -124,13 +159,16 @@
 				0127B0AED13A0DCD415DE987 /* Info.plist */,
 				D8347DA1557345E040D2FA42 /* MapperViewModel.swift */,
 				6D440F1C28719F9733CB931B /* NavigationModels.swift */,
+				A1B2C3D4E5F60718293A4B40 /* Onboarding */,
 				1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */,
 				99D4B9AED6DDE3166241BB6B /* RoomCaptureContainer.swift */,
 				5C1810273BDA8AF33F72C508 /* RoomPlanScanExtractor.swift */,
 				C5847A14C25A4071F5D257E0 /* RoomPlanVisibilityGraph.swift */,
+				A1B2C3D4E5F60718293A4B50 /* Scan */,
 				B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */,
 				835CEE17A191B42BCF3DE668 /* StairZones.swift */,
 				01E828C023B0F4A206837135 /* SurfaceColorCapture.swift */,
+				A1B2C3D4E5F60718293A4B60 /* Theme */,
 				A62468E057F7EFF0F18E86F7 /* Firebase */,
 			);
 			path = GnarlyMapper;
@@ -148,6 +186,7 @@
 		97CF7385682922A2136DFA85 /* GnarlyMapperTests */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F60718293A4B71 /* BuildingModelsTests.swift */,
 				2505E055555618BFB65FBE74 /* FirebaseModelsTests.swift */,
 				F451C51052FBE715F12ADAAB /* FirebaseStoragePathsTests.swift */,
 				689A113367066A5B0CBDA816 /* NavigationFileCacheTests.swift */,
@@ -169,6 +208,55 @@
 				EC5EFF27B6A0FC8D9A92A79D /* NavigationFileCache.swift */,
 			);
 			path = Firebase;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B10 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B11 /* AuthView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B20 /* Buildings */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B21 /* AlignBuildingView.swift */,
+				A1B2C3D4E5F60718293A4B23 /* BuildingDetailView.swift */,
+				A1B2C3D4E5F60718293A4B25 /* BuildingHomeView.swift */,
+				A1B2C3D4E5F60718293A4B27 /* BuildingLibrary.swift */,
+				A1B2C3D4E5F60718293A4B29 /* BuildingMesh.swift */,
+				A1B2C3D4E5F60718293A4B2B /* BuildingModels.swift */,
+				A1B2C3D4E5F60718293A4B2D /* CreateBuildingView.swift */,
+				A1B2C3D4E5F60718293A4B2F /* ScanPlannerView.swift */,
+			);
+			path = Buildings;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B40 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B41 /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B50 /* Scan */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B51 /* ColorPreviewView.swift */,
+				A1B2C3D4E5F60718293A4B53 /* ScanCoachingView.swift */,
+				A1B2C3D4E5F60718293A4B55 /* ScanSessionView.swift */,
+			);
+			path = Scan;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B60 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B61 /* MapperTheme.swift */,
+			);
+			path = Theme;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -270,8 +358,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F60718293A4B22 /* AlignBuildingView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B02 /* AppRootView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B12 /* AuthView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B24 /* BuildingDetailView.swift in Sources */,
 				106CF645819C590D42DEE4A4 /* BuildingGraphBuilder.swift in Sources */,
+				A1B2C3D4E5F60718293A4B26 /* BuildingHomeView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B28 /* BuildingLibrary.swift in Sources */,
+				A1B2C3D4E5F60718293A4B2A /* BuildingMesh.swift in Sources */,
+				A1B2C3D4E5F60718293A4B2C /* BuildingModels.swift in Sources */,
+				A1B2C3D4E5F60718293A4B52 /* ColorPreviewView.swift in Sources */,
 				8C6F595ECF77D1D4E37826D6 /* ContentView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B2E /* CreateBuildingView.swift in Sources */,
 				F522136BDE4675AA61905C9D /* FirebaseAuthSession.swift in Sources */,
 				73D3CA2B931E59800C8B8061 /* FirebaseBootstrap.swift in Sources */,
 				6F47328752E6F8C59C253480 /* FirebaseConnectionView.swift in Sources */,
@@ -282,13 +380,18 @@
 				F3089579CC30875CC04D23B2 /* FirebaseStoragePaths.swift in Sources */,
 				F4869638EB5F3AB8662323B3 /* GnarlyMapperApp.swift in Sources */,
 				94921150B67B0E6EE3FB799C /* MapperViewModel.swift in Sources */,
+				A1B2C3D4E5F60718293A4B62 /* MapperTheme.swift in Sources */,
 				77269F2C0B9A8611D868F688 /* NavigationFileCache.swift in Sources */,
 				2D02A7996D451673FD6292BD /* NavigationModels.swift in Sources */,
+				A1B2C3D4E5F60718293A4B42 /* OnboardingView.swift in Sources */,
 				8102E37CD7E2FCC3E27760B6 /* POCPackageExporter.swift in Sources */,
 				0A06C44105152B555E445F6F /* RoomCaptureContainer.swift in Sources */,
 				541F20659AF051D63F8C34D8 /* RoomPlanScanExtractor.swift in Sources */,
 				E5B0EE8BFADA89D82419742D /* RoomPlanVisibilityGraph.swift in Sources */,
+				A1B2C3D4E5F60718293A4B54 /* ScanCoachingView.swift in Sources */,
 				B94D7AD17FE8F7769BC8FE4D /* ScanMinimap.swift in Sources */,
+				A1B2C3D4E5F60718293A4B30 /* ScanPlannerView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B56 /* ScanSessionView.swift in Sources */,
 				61770C565FA848405823A808 /* StairZones.swift in Sources */,
 				AC610F55C4510B55B4642580 /* SurfaceColorCapture.swift in Sources */,
 			);
@@ -298,6 +401,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F60718293A4B72 /* BuildingModelsTests.swift in Sources */,
 				6ED8806A7F5C62CA278780A6 /* FirebaseModelsTests.swift in Sources */,
 				9546AE9215D9D2C6B3512618 /* FirebaseStoragePathsTests.swift in Sources */,
 				3FECBE80805A7440F6A4C8B8 /* NavigationFileCacheTests.swift in Sources */,
@@ -410,6 +514,7 @@
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YVPR732M4U;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -492,6 +597,7 @@
 				CODE_SIGN_ENTITLEMENTS = GnarlyMapper/GnarlyMapper.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YVPR732M4U;
 				INFOPLIST_FILE = GnarlyMapper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
