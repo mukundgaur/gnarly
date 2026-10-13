@@ -15,22 +15,30 @@ struct MapperScreen<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.largeTitle.weight(.semibold))
-                    .foregroundStyle(.white)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(MapperTheme.muted)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.largeTitle.weight(.semibold))
+                        .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(MapperTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                content()
             }
-            content()
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(MapperTheme.background.ignoresSafeArea())
     }
 }
@@ -47,10 +55,14 @@ struct MapperPrimaryButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(MapperTheme.ink) }
-                else if let systemImage { Image(systemName: systemImage) }
-                Text(title).font(compact ? .subheadline.weight(.semibold) : .headline)
+                else if let systemImage { Image(systemName: systemImage).accessibilityHidden(true) }
+                Text(title)
+                    .font(compact ? .subheadline.weight(.semibold) : .headline)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: compact ? 44 : 52)
+            .padding(.vertical, compact ? 10 : 14)
+            .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.plain)
         .foregroundStyle(MapperTheme.ink)
