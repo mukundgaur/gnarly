@@ -44,6 +44,23 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertEqual(layout.entry(for: "up")?.rotationDegrees ?? 0, 0, accuracy: 0.001)
     }
 
+    func testWallPanelsCutADoorwayOutOfTheWall() {
+        let panels = WallLayout.panels(width: 4, height: 2.5, cutouts: [
+            .init(minX: -0.45, maxX: 0.45, minY: -1.25, maxY: 0.3),
+        ])
+        XCTAssertFalse(panels.contains { $0.centerX > -0.45 && $0.centerX < 0.45 && $0.centerY > -1.25 && $0.centerY < 0.3 })
+        XCTAssertTrue(panels.contains { $0.centerY > 0.3 })
+        XCTAssertTrue(panels.contains { $0.centerX < -0.45 })
+        XCTAssertTrue(panels.contains { $0.centerX > 0.45 })
+    }
+
+    func testWallWithoutCutoutsIsOneSolidPanel() {
+        let panels = WallLayout.panels(width: 3, height: 2, cutouts: [])
+        XCTAssertEqual(panels.count, 1)
+        XCTAssertEqual(panels[0].width, 3, accuracy: 0.001)
+        XCTAssertEqual(panels[0].height, 2, accuracy: 0.001)
+    }
+
     func testPlacementMatrixMatchesLayoutToWorld() {
         let entry = BuildingLayoutDocument.ZoneEntry(zoneId: "a", floor: 1, x: 3, z: -1, rotationDegrees: 0)
         let matrix = placementMatrix(entry, ground: 0)

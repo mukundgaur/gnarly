@@ -34,12 +34,18 @@ struct AlignBuildingView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                BuildingSceneView(controller: scene)
-                    .frame(minHeight: 220)
-                mapPicker
-                    .frame(height: 200)
-                controls
+            GeometryReader { proxy in
+                let height = proxy.size.height
+                let mapHeight = min(128, max(92, height * 0.2))
+                let controlsHeight = min(220, max(156, height * 0.32))
+                VStack(spacing: 0) {
+                    BuildingSceneView(controller: scene)
+                        .frame(height: max(150, height - mapHeight - controlsHeight))
+                    mapPicker
+                        .frame(height: mapHeight)
+                    controls
+                        .frame(height: controlsHeight)
+                }
             }
             .background(MapperTheme.background.ignoresSafeArea())
             .navigationTitle("Align on the map")
@@ -72,9 +78,10 @@ struct AlignBuildingView: View {
             })
         }
         .overlay(alignment: .topLeading) {
-            Text("Tap the satellite to move the building origin")
-                .font(.caption.weight(.semibold))
-                .padding(8)
+            Text("Tap to place the building")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(8)
         }
@@ -82,26 +89,23 @@ struct AlignBuildingView: View {
 
     private var controls: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            VStack(alignment: .leading, spacing: 10) {
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Building heading  \(Int(building.mapHeadingDegrees.rounded()))°")
-                        .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Heading  \(Int(building.mapHeadingDegrees.rounded()))°")
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(MapperTheme.muted)
                     Slider(value: $building.mapHeadingDegrees, in: 0...360, step: 1) { editing in
                         if !editing { Task { await refreshPreview(reloadSatellite: true) } }
                     }
                     .tint(MapperTheme.accent)
-                    Text("Rotate until the model’s walls sit on the real building.")
-                        .font(.caption)
-                        .foregroundStyle(MapperTheme.muted)
                 }
 
                 if !source.levels.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Floor")
-                            .font(.caption.weight(.semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(MapperTheme.muted)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
@@ -111,16 +115,14 @@ struct AlignBuildingView: View {
                                         previewFloors()
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
                                     .background(selectedLevel == level.level ? MapperTheme.accent : MapperTheme.raised, in: Capsule())
                                     .foregroundStyle(selectedLevel == level.level ? MapperTheme.ink : .white)
                                 }
                             }
                         }
-                        Text("Move this floor on the model. N/S/E/W follow the satellite, not the scan’s original axes.")
-                            .font(.caption)
-                            .foregroundStyle(MapperTheme.muted)
                     }
 
                     HStack {
@@ -143,23 +145,24 @@ struct AlignBuildingView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
     }
 
     private func stepChip(_ title: String, _ value: Double) -> some View {
         Button(title) { step = value }
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
             .background(step == value ? MapperTheme.accent.opacity(0.25) : MapperTheme.raised, in: Capsule())
     }
 
     private func turnChip(_ title: String, _ value: Double) -> some View {
         Button(title) { turn = value }
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
             .background(turn == value ? MapperTheme.accent.opacity(0.25) : MapperTheme.raised, in: Capsule())
     }
 
@@ -169,7 +172,7 @@ struct AlignBuildingView: View {
                 Image(systemName: systemImage)
                 Text(title).font(.caption2.weight(.semibold))
             }
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .frame(maxWidth: .infinity, minHeight: 36)
             .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)

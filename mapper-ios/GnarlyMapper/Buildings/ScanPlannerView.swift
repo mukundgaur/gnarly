@@ -11,60 +11,78 @@ struct ScanPlannerView: View {
     @State private var selectedLevel: Int = 0
     @State private var newLevel = false
     @State private var newLevelNumber = 1
+    @FocusState private var nameFocused: Bool
 
     private var zones: [BuildingZone] { map?.zones ?? [] }
     private var levels: [BuildingLevel] { map?.levels ?? [] }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("This scan", selection: $creatingNew) {
-                        Text("Update a zone").tag(false)
-                        Text("Create a zone").tag(true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if !zones.isEmpty {
+                        Picker("This scan", selection: $creatingNew) {
+                            Text("Update").tag(false)
+                            Text("New zone").tag(true)
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
-                }
 
-                if creatingNew || zones.isEmpty {
-                    Section("New zone") {
-                        TextField("Name", text: $zoneName)
+                    if creatingNew || zones.isEmpty {
+                        Text("Zone name")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(MapperTheme.muted)
+                        TextField("Kitchen", text: $zoneName)
+                            .focused($nameFocused)
+                            .font(.body)
+                            .submitLabel(.done)
+                            .padding(.horizontal, 12)
+                            .frame(height: 40)
+                            .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 12))
                         if newLevel || levels.isEmpty {
                             Stepper("New floor  \(newLevelNumber)", value: $newLevelNumber, in: -4...20)
+                                .font(.subheadline)
                         } else {
                             Picker("Floor", selection: $selectedLevel) {
                                 ForEach(levels) { level in
                                     Text(level.name).tag(level.level)
                                 }
                             }
+                            .pickerStyle(.segmented)
                             Toggle("Scan a new floor", isOn: $newLevel)
+                                .font(.subheadline)
+                                .tint(MapperTheme.accent)
                         }
-                    }
-                } else {
-                    Section("Zone to update") {
+                    } else {
                         ForEach(zones) { zone in
                             Button {
                                 selectedZone = zone.id
                             } label: {
                                 HStack {
-                                    VStack(alignment: .leading) {
+                                    VStack(alignment: .leading, spacing: 2) {
                                         Text(zone.name)
+                                            .font(.subheadline.weight(.semibold))
                                         Text(map?.levelName(zone.level) ?? defaultLevelName(zone.level))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(.caption2)
+                                            .foregroundStyle(MapperTheme.muted)
                                     }
                                     Spacer()
                                     if selectedZone == zone.id {
                                         Image(systemName: "checkmark.circle.fill").foregroundStyle(MapperTheme.accent)
                                     }
                                 }
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 44)
+                                .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 12))
                             }
-                            .foregroundStyle(.primary)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.white)
                         }
                     }
                 }
+                .padding(16)
             }
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .background(MapperTheme.background.ignoresSafeArea())
             .navigationTitle("What are you scanning?")
             .navigationBarTitleDisplayMode(.inline)
@@ -74,6 +92,10 @@ struct ScanPlannerView: View {
                     Button("OK") { confirm() }
                         .disabled(!canConfirm)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { nameFocused = false }
+                }
             }
             .onAppear {
                 creatingNew = zones.isEmpty
@@ -82,7 +104,8 @@ struct ScanPlannerView: View {
                 newLevelNumber = (levels.map(\.level).max() ?? -1) + 1
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(nameFocused ? [.large] : [.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private var canConfirm: Bool {

@@ -20,6 +20,8 @@ struct AppRootView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MapperTheme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(MapperTheme.accent)
     }
