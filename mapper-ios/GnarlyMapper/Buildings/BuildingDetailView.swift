@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct BuildingDetailView: View {
     @ObservedObject var library: BuildingLibrary
@@ -11,6 +12,7 @@ struct BuildingDetailView: View {
     @State private var aligning = false
     @State private var highlight: ZoneScanTarget?
     @State private var scanning: ZoneScanTarget?
+    @State private var satellite: UIImage?
 
     init(building: OwnedBuilding, library: BuildingLibrary) {
         self.library = library
@@ -18,56 +20,49 @@ struct BuildingDetailView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            MapperTheme.background.ignoresSafeArea()
-            BuildingSceneView(controller: scene)
-                .ignoresSafeArea()
-
-            if loading {
-                ProgressView("Loading this building…")
-                    .tint(.white)
-                    .foregroundStyle(.white)
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                MapperCard {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(building.name)
-                            .font(.title3.weight(.semibold))
-                        Text(locationLine)
-                            .font(.caption)
-                            .foregroundStyle(MapperTheme.muted)
-                        if let map, !map.zones.isEmpty {
-                            Text(map.levels.map(\.name).joined(separator: " · "))
-                                .font(.caption)
-                                .foregroundStyle(MapperTheme.muted)
-                        } else if !loading {
-                            Text("No zones yet. Scan the first room to start the model.")
-                                .font(.caption)
-                                .foregroundStyle(MapperTheme.muted)
-                        }
-                    }
+        VStack(spacing: 0) {
+            ZStack {
+                BuildingSceneView(controller: scene)
+                if loading {
+                    ProgressView("Loading this building…")
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 }
-                HStack(spacing: 10) {
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(building.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(MapperTheme.muted)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
                     Button {
                         aligning = map != nil
                     } label: {
                         Label("Align", systemImage: "map")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
-                    .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    MapperPrimaryButton(title: "Scan", systemImage: "lidar") {
+                    .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    MapperPrimaryButton(title: "Scan", systemImage: "lidar", compact: true) {
                         planning = true
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            .background(.ultraThinMaterial)
         }
+        .background(MapperTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .fullScreenCover(isPresented: $aligning) {
@@ -82,11 +77,13 @@ struct BuildingDetailView: View {
             ScanPlannerView(building: building, map: map) { target in
                 planning = false
                 highlight = target
-                if let map { scene.show(map: map, highlight: target.isNewZone ? nil : target.zoneID, satellite: nil) }
+                if let map { scene.show(map: map, highlight: target.isNewZone ? nil : target.zoneID, satellite: satellite) }
             }
         }
-        .sheet(item: $highlight) { target in
-            ZoneConfirmView(target: target, map: map, scene: scene) {
+        .sheet(item: $highlight, onDismiss: {
+            if let map { scene.show(map: map, highlight: nil, satellite: satellite) }
+        }) { target in
+            ZoneConfirmView(target: target, map: map) {
                 highlight = nil
                 scanning = target
             }
@@ -105,9 +102,18 @@ struct BuildingDetailView: View {
         }
     }
 
+    private var subtitle: String {
+        if let map, !map.zones.isEmpty {
+            let floors = map.levels.map(\.name).joined(separator: " · ")
+            return floors.isEmpty ? locationLine : "\(floors) · \(locationLine)"
+        }
+        if !loading { return "No zones yet. Scan the first room to start the model." }
+        return locationLine
+    }
+
     private var locationLine: String {
         if building.hasLocation {
-            return String(format: "%.5f, %.5f · heading %.0f°", building.latitude ?? 0, building.longitude ?? 0, building.mapHeadingDegrees)
+            return String(format: "%.5f, %.5f", building.latitude ?? 0, building.longitude ?? 0)
         }
         return "Not placed on the map yet"
     }
@@ -118,7 +124,7 @@ struct BuildingDetailView: View {
         do {
             let loaded = try await library.loadMap(for: building)
             map = loaded
-            let satellite = await library.satelliteImage(for: building, bounds: loaded.bounds)
+            satellite = await library.satelliteImage(for: building, bounds: loaded.bounds)
             scene.show(map: loaded, highlight: nil, satellite: satellite)
         } catch {
             self.error = error.localizedDescription
@@ -130,8 +136,8 @@ struct BuildingDetailView: View {
 private struct ZoneConfirmView: View {
     let target: ZoneScanTarget
     let map: BuildingMap?
-    @ObservedObject var scene: BuildingSceneController
     var onConfirm: () -> Void
+    @StateObject private var scene = BuildingSceneController()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -139,19 +145,20 @@ private struct ZoneConfirmView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let map {
                     BuildingSceneView(controller: scene)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .frame(minHeight: 280)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .frame(height: 200)
                         .onAppear {
                             scene.show(map: map, highlight: target.isNewZone ? nil : target.zoneID, satellite: nil)
                         }
                 }
                 Text(target.isNewZone ? "New zone on \(target.levelName)" : "Updating \(target.zoneName)")
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
                 Text(target.isNewZone
-                     ? "The scan will be added as “\(target.zoneName)” on \(target.levelName)."
-                     : "This zone is highlighted. The new scan replaces its geometry and colors, and stays where it is on the map.")
+                     ? "Adds “\(target.zoneName)” on \(target.levelName)."
+                     : "The new scan replaces this zone and keeps its place on the map.")
+                    .font(.subheadline)
                     .foregroundStyle(MapperTheme.muted)
-                MapperPrimaryButton(title: "Start scan", systemImage: "record.circle") {
+                MapperPrimaryButton(title: "Start scan", systemImage: "record.circle", compact: true) {
                     onConfirm()
                     dismiss()
                 }

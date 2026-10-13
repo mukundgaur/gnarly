@@ -11,6 +11,7 @@ struct CreateBuildingView: View {
     @State private var heading = 0.0
     @State private var busy = false
     @State private var error: String?
+    @FocusState private var nameFocused: Bool
     @State private var camera: MapCameraPosition = .region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 42.4534, longitude: -76.4738),
         span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
@@ -24,8 +25,11 @@ struct CreateBuildingView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(MapperTheme.muted)
                     TextField("North Hall", text: $name)
-                        .padding(.horizontal, 14)
-                        .frame(height: 48)
+                        .focused($nameFocused)
+                        .font(.body)
+                        .submitLabel(.done)
+                        .padding(.horizontal, 12)
+                        .frame(height: 40)
                         .background(MapperTheme.raised, in: RoundedRectangle(cornerRadius: 12))
                         .foregroundStyle(.white)
 
@@ -38,8 +42,9 @@ struct CreateBuildingView: View {
                                 Marker(name.isEmpty ? "Building" : name, coordinate: coordinate)
                             }
                             .mapStyle(.imagery(elevation: .realistic))
-                            .frame(height: 260)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .frame(height: nameFocused ? 96 : 168)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .animation(.easeOut(duration: 0.2), value: nameFocused)
                             .gesture(SpatialTapGesture().onEnded { event in
                                 if let tapped = proxy.convert(event.location, from: .local) {
                                     coordinate = tapped
@@ -52,8 +57,8 @@ struct CreateBuildingView: View {
                                 .foregroundStyle(MapperTheme.muted)
                             Slider(value: $heading, in: 0...360)
                                 .tint(MapperTheme.accent)
-                            Text("Rotate so the model’s front matches north on the satellite.")
-                                .font(.caption)
+                            Text("Match the front of the building to north.")
+                                .font(.caption2)
                                 .foregroundStyle(MapperTheme.muted)
                         }
                     }
@@ -62,18 +67,23 @@ struct CreateBuildingView: View {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
 
-                    MapperPrimaryButton(title: "Create building", systemImage: "checkmark", busy: busy, enabled: !name.trimmingCharacters(in: .whitespaces).isEmpty) {
+                    MapperPrimaryButton(title: "Create building", systemImage: "checkmark", busy: busy, enabled: !name.trimmingCharacters(in: .whitespaces).isEmpty, compact: true) {
                         Task { await create() }
                     }
                 }
-                .padding(20)
+                .padding(16)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(MapperTheme.background.ignoresSafeArea())
             .navigationTitle("New building")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { nameFocused = false }
                 }
             }
         }

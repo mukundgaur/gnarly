@@ -40,6 +40,7 @@ struct MapperPrimaryButton: View {
     var systemImage: String? = nil
     var busy = false
     var enabled = true
+    var compact = false
     let action: () -> Void
 
     var body: some View {
@@ -47,9 +48,9 @@ struct MapperPrimaryButton: View {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(MapperTheme.ink) }
                 else if let systemImage { Image(systemName: systemImage) }
-                Text(title).font(.headline)
+                Text(title).font(compact ? .subheadline.weight(.semibold) : .headline)
             }
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .frame(maxWidth: .infinity, minHeight: compact ? 44 : 52)
         }
         .buttonStyle(.plain)
         .foregroundStyle(MapperTheme.ink)
