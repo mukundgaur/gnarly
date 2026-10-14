@@ -24,7 +24,7 @@ Browser API keys are visible in the site bundle; HTTP referrer and API restricti
 ## Connect Firebase
 
 1. In the **same existing Firebase project**, go to **Project settings → General → Your apps → Add app → Web**. Name it `Gnarly web`. Hosting setup is optional. Copy the public Firebase config object into `web/.env` using `.env.example` as a template. Never put a service-account key in this file.
-2. Enable Email/Password sign-in for an existing authorized user. The repository rules require authentication for all reads. Use **Connect Firebase** in the website to sign in; credentials go directly to Firebase Auth.
+2. Enable Email/Password sign-in for an existing authorized user. The repository rules require authentication for all reads. Use **Connect Firebase** in the website to sign in; credentials go directly to Firebase Auth. Set `VITE_GNARLY_API_BASE` to the publish API. Building list and package download use that API, which checks access and returns short-lived signed URLs.
 3. A building document at `buildings/{id}` needs `name`, `status`, and `activeVersion`. To show it on the map, add a `location` GeoPoint or `latitude` and `longitude` fields. The current Swift `Building` model has no location fields, so existing records without them appear in search but cannot have a map marker.
 4. The mapper now uploads each zone beneath `buildings/{id}/{activeVersion}/zones/{zoneId}/`. The web app reads zone documents at `buildings/{id}/versions/{activeVersion}/zones/{zoneId}` and their `buildingJsonPath` and `scanFeaturesPath` fields. It also supports the earlier version-level paths for older packages.
 
@@ -32,7 +32,7 @@ The waypoint editor reads and writes graph packages in Firebase Storage, then ad
 
 ### Browser downloads and CORS
 
-The website routes Storage downloads through its same-origin server, so local development and `npm start` work without changing bucket CORS. The current `main-building` active version `v1` has readable graphs in zones `1`, `2`, and `zone-a`, but none of those zones has `scan-features.json` or `scan.json` at its declared/fallback path. The viewer therefore shows the navigation graph and a missing-scan notice. The mapper must upload the missing RoomPlan files before the site can draw actual walls for that version.
+The website asks the publish API for a signed Storage URL, then the same-origin server fetches that URL from `storage.googleapis.com`. Local development and `npm start` do not need a bucket CORS change for those downloads. The current `main-building` active version `v1` has readable graphs in zones `1`, `2`, and `zone-a`, but none of those zones has `scan-features.json` or `scan.json` at its declared/fallback path. The viewer therefore shows the navigation graph and a missing-scan notice. The mapper must upload the missing RoomPlan files before the site can draw actual walls for that version.
 
 If the site is deployed as static files without the Node server, the bucket owner should inspect existing CORS rules and add the deployed origin with `GET`. A local sample rule is in `firebase/cors.web.local.json`. For a bucket with no other CORS needs, they can apply it from the repository root with:
 

@@ -1,6 +1,7 @@
 import {createServer} from 'node:http';
 import {createReadStream,existsSync,statSync} from 'node:fs';
 import {resolve,extname,sep} from 'node:path';
+import {readSignedTarget} from './signedProxy.mjs';
 
 const port=Number(process.env.PORT||5173);
 const bucket=process.env.FIREBASE_STORAGE_BUCKET||'gnarly-e65c1.firebasestorage.app';
@@ -11,6 +12,16 @@ const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 createServer(async(req,res)=>{
   const url=new URL(req.url||'/',`http://localhost:${port}`);
   if(req.method!=='GET'){res.writeHead(405).end();return}
+  if(url.pathname==='/__signed'){
+    const target=readSignedTarget(url.searchParams.get('url'),bucket);
+    if(!target){res.writeHead(400).end('Invalid signed URL');return}
+    try{
+      const upstream=await fetch(target);
+      res.writeHead(upstream.status,{'Content-Type':upstream.headers.get('content-type')||'application/octet-stream','Cache-Control':'private, max-age=60'});
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    }catch{res.writeHead(502).end('Storage request failed')}
+    return;
+  }
   if(url.pathname.startsWith('/__firebase_storage/')){
     if(!url.pathname.startsWith(prefix)||url.searchParams.get('alt')!=='media'){res.writeHead(400).end('Invalid Storage path');return}
     try{

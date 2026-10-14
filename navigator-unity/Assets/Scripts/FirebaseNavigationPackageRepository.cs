@@ -9,8 +9,9 @@ using UnityEngine;
 using UnityEngine.Networking;
 
 /// <summary>
-/// Authenticated Firebase REST client for the navigator. It stages and validates downloads
-/// before moving the cache pointer, so the last complete package remains usable offline.
+/// Authenticated navigator client. List and package download go through the publish API,
+/// which checks the building ACL and returns short-lived signed URLs. Downloads are staged
+/// before the cache pointer moves, so the last complete package remains usable offline.
 /// </summary>
 public sealed class FirebaseNavigationPackageRepository
 {
@@ -128,36 +129,16 @@ public sealed class FirebaseNavigationPackageRepository
     {
         ValidateIdentifier(buildingId, nameof(buildingId));
         ValidateIdentifier(zoneId, nameof(zoneId));
-        await EnsureFreshTokenAsync();
-
-        var building = await GetDocumentAsync($"buildings/{buildingId}", "building metadata");
-        var versionId = RequiredString(building.fields?.activeVersion, "activeVersion", $"buildings/{buildingId}");
+        var payload = JsonUtility.FromJson<PackageResponse>(await ApiGetAsync(
+            $"/v1/buildings/{Uri.EscapeDataString(buildingId)}/package?zoneId={Uri.EscapeDataString(zoneId)}",
+            "package download"));
+        if (payload == null || string.IsNullOrEmpty(payload.versionId) || payload.zones == null || payload.zones.Length == 0)
+            throw new FirebaseNavigationException($"Building '{buildingId}' has no downloadable zone '{zoneId}'.");
+        var versionId = payload.versionId;
         ValidateIdentifier(versionId, "activeVersion");
-        var versionPath = $"buildings/{buildingId}/versions/{versionId}";
-        var version = await GetDocumentAsync(versionPath, "active building version");
-        var zonePath = $"{versionPath}/zones/{zoneId}";
-        var zone = await GetDocumentAsync(zonePath, "zone metadata");
-
-        var expectedBuildingPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/building.json";
-        var expectedScanPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/scan.json";
-        var expectedScanFeaturesPath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/scan-features.json";
-        var expectedStructurePath = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/structure.usdz";
-        var expectedWorldMapPath = $"buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin";
-        var buildingStoragePath = RequiredString(zone.fields?.buildingJsonPath, "buildingJsonPath", zonePath);
-        var editedGraphPrefix = $"buildings/{buildingId}/{versionId}/zones/{zoneId}/graph-edits/";
-        if (buildingStoragePath != expectedBuildingPath &&
-            (!buildingStoragePath.StartsWith(editedGraphPrefix, StringComparison.Ordinal) ||
-             !buildingStoragePath.EndsWith(".json", StringComparison.Ordinal) ||
-             buildingStoragePath.Substring(editedGraphPrefix.Length).Contains("/")))
-            throw new InvalidOperationException($"Unexpected buildingJsonPath for {zonePath}: {buildingStoragePath}");
-        RequireExpectedPath(expectedScanPath,
-            RequiredString(zone.fields?.scanJsonPath, "scanJsonPath", zonePath), "scanJsonPath");
-        RequireExpectedPath(expectedScanFeaturesPath,
-            RequiredString(zone.fields?.scanFeaturesPath, "scanFeaturesPath", zonePath), "scanFeaturesPath");
-        RequireExpectedPath(expectedStructurePath,
-            RequiredString(zone.fields?.structurePath, "structurePath", zonePath), "structurePath");
-        RequireExpectedPath(expectedWorldMapPath,
-            RequiredString(zone.fields?.worldMapPath, "worldMapPath", zonePath), "worldMapPath");
+        var zone = payload.zones[0];
+        if (zone == null || zone.zoneId != zoneId)
+            throw new FirebaseNavigationException($"Package response did not include zone '{zoneId}'.");
 
         var packageRoot = PackageRoot(buildingId, zoneId);
         Directory.CreateDirectory(packageRoot);
@@ -170,19 +151,33 @@ public sealed class FirebaseNavigationPackageRepository
             var scanFeaturesFile = Path.Combine(staging, "scan-features.json");
             var structureFile = Path.Combine(staging, "structure.usdz");
             var worldMapFile = Path.Combine(staging, $"worldmap-{zoneId}.bin");
-            await DownloadStorageObjectAsync(buildingStoragePath, buildingFile, "building.json");
-            await DownloadStorageObjectAsync(expectedScanPath, scanFile, "raw RoomPlan scan.json");
-            await DownloadStorageObjectAsync(expectedScanFeaturesPath, scanFeaturesFile, "normalized RoomPlan scan-features.json");
-            await DownloadStorageObjectAsync(expectedStructurePath, structureFile, "RoomPlan structure.usdz");
-            await DownloadStorageObjectAsync(expectedWorldMapPath, worldMapFile, "ARWorldMap");
+            await DownloadSignedAsync(RequiredPackageFile(zone.files, "building.json").url, buildingFile, "building.json");
+            await DownloadSignedAsync(RequiredPackageFile(zone.files, "scan.json").url, scanFile, "raw RoomPlan scan.json");
+            await DownloadSignedAsync(RequiredPackageFile(zone.files, "scan-features.json").url, scanFeaturesFile, "normalized RoomPlan scan-features.json");
+            await DownloadSignedAsync(RequiredPackageFile(zone.files, "structure.usdz").url, structureFile, "RoomPlan structure.usdz");
+            await DownloadSignedAsync(RequiredPackageFile(zone.files, "worldmap.bin").url, worldMapFile, "ARWorldMap");
             ValidatePackageFiles(buildingFile, scanFile, scanFeaturesFile, structureFile, worldMapFile, zoneId);
-            await TryDownloadZoneConnectionsAsync(
-                $"buildings/{buildingId}/{versionId}/zone-connections.json",
-                Path.Combine(staging, "zone-connections.json"));
-            await TryDownloadBuildingLayoutAsync(
-                $"buildings/{buildingId}/{versionId}/building-layout.json",
-                Path.Combine(staging, "building-layout.json"));
-            await TryDownloadSurfaceColorsAsync($"buildings/{buildingId}/{versionId}/zones/{zoneId}", staging);
+            var connectionsFile = Path.Combine(staging, "zone-connections.json");
+            await TryDownloadSignedAsync(FindPackageFile(payload.files, "zone-connections.json"), connectionsFile, "zone-connections.json");
+            if (File.Exists(connectionsFile))
+            {
+                try { Pathfinding.ParseConnections(File.ReadAllText(connectionsFile)); }
+                catch (Exception exception)
+                {
+                    File.Delete(connectionsFile);
+                    Debug.Log($"[Gnarly] Ignoring unreadable zone connections: {exception.Message}");
+                }
+            }
+            await TryDownloadSignedAsync(FindPackageFile(payload.files, "building-layout.json"), Path.Combine(staging, "building-layout.json"), "building-layout.json");
+            var colorJson = Path.Combine(staging, SurfaceColors.JsonFileName);
+            var colorAtlas = Path.Combine(staging, SurfaceColors.AtlasFileName);
+            await TryDownloadSignedAsync(FindPackageFile(zone.files, SurfaceColors.JsonFileName), colorJson, SurfaceColors.JsonFileName);
+            await TryDownloadSignedAsync(FindPackageFile(zone.files, SurfaceColors.AtlasFileName), colorAtlas, SurfaceColors.AtlasFileName);
+            if (File.Exists(colorJson) && (SurfaceColors.Parse(File.ReadAllText(colorJson)) == null || !File.Exists(colorAtlas)))
+            {
+                File.Delete(colorJson);
+                if (File.Exists(colorAtlas)) File.Delete(colorAtlas);
+            }
             File.WriteAllText(Path.Combine(staging, "package.json"), JsonUtility.ToJson(new CacheManifest
             {
                 buildingId = buildingId,
@@ -208,19 +203,17 @@ public sealed class FirebaseNavigationPackageRepository
 
     public async Task<List<FirebaseScanChoice>> ListAvailableScansAsync()
     {
-        await EnsureFreshTokenAsync();
+        var payload = JsonUtility.FromJson<LibraryResponse>(await ApiGetAsync("/v1/buildings", "scan library"));
         var result = new List<FirebaseScanChoice>();
-        foreach (var building in await ListDocumentsAsync("buildings", "scan library buildings"))
+        if (payload?.buildings == null) return result;
+        foreach (var building in payload.buildings)
         {
-            var buildingId = LastPathComponent(building.name);
-            var buildingName = building.fields?.name?.stringValue;
-            var versionId = building.fields?.activeVersion?.stringValue;
-            if (string.IsNullOrEmpty(buildingId) || string.IsNullOrEmpty(versionId)) continue;
-            foreach (var zone in await ListDocumentsAsync($"buildings/{buildingId}/versions/{versionId}/zones", "scan library zones"))
+            if (building == null || string.IsNullOrEmpty(building.id) || string.IsNullOrEmpty(building.activeVersion) || building.zones == null)
+                continue;
+            foreach (var zone in building.zones)
             {
-                var zoneId = LastPathComponent(zone.name);
-                if (!string.IsNullOrEmpty(zoneId)) result.Add(new FirebaseScanChoice(buildingId, versionId, zoneId,
-                    buildingName, zone.fields?.floorId?.stringValue, zone.fields?.name?.stringValue));
+                if (zone == null || string.IsNullOrEmpty(zone.id)) continue;
+                result.Add(new FirebaseScanChoice(building.id, building.activeVersion, zone.id, building.name, zone.floorId, zone.name));
             }
         }
         return result;
@@ -299,75 +292,70 @@ public sealed class FirebaseNavigationPackageRepository
         FirebaseSessionStore.SaveRefreshToken(refreshToken);
     }
 
-    async Task<FirestoreDocument> GetDocumentAsync(string documentPath, string operation)
+    async Task<string> ApiGetAsync(string path, string operation)
     {
         await EnsureFreshTokenAsync();
-        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{EscapeFirestorePath(documentPath)}";
-        using var request = UnityWebRequest.Get(url);
+        using var request = UnityWebRequest.Get(ApiBaseUrl() + path);
         request.SetRequestHeader("Authorization", "Bearer " + idToken);
-        var responseText = await SendForTextAsync(request, "Firestore " + operation);
-        var document = JsonUtility.FromJson<FirestoreDocument>(responseText);
-        if (document == null || document.fields == null)
-            throw new FirebaseNavigationException($"Firestore {operation} returned no fields.");
-        return document;
+        return await SendForTextAsync(request, operation);
     }
 
-    async Task<List<FirestoreDocument>> ListDocumentsAsync(string collectionPath, string operation)
+    string _apiBaseUrl;
+
+    string ApiBaseUrl()
     {
-        var url = $"https://firestore.googleapis.com/v1/projects/{Uri.EscapeDataString(config.projectId)}/databases/(default)/documents/{EscapeFirestorePath(collectionPath)}";
-        using var request = UnityWebRequest.Get(url);
-        request.SetRequestHeader("Authorization", "Bearer " + idToken);
-        var response = JsonUtility.FromJson<FirestoreListResponse>(await SendForTextAsync(request, "Firestore " + operation));
-        return response?.documents == null ? new List<FirestoreDocument>() : new List<FirestoreDocument>(response.documents);
+        if (!string.IsNullOrEmpty(_apiBaseUrl)) return _apiBaseUrl;
+        var asset = Resources.Load<TextAsset>("gnarly-api-base");
+        var text = asset == null ? "" : asset.text;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+            if (!line.StartsWith("https://", StringComparison.Ordinal) &&
+                !line.StartsWith("http://127.0.0.1", StringComparison.Ordinal) &&
+                !line.StartsWith("http://localhost", StringComparison.Ordinal))
+                break;
+            _apiBaseUrl = line.TrimEnd('/');
+            return _apiBaseUrl;
+        }
+        throw new FirebaseNavigationException(
+            "Set the publish API origin in Assets/Resources/gnarly-api-base.txt. " +
+            "Use the Cloud Run, Functions, or API Gateway URL, with no trailing slash.");
     }
 
-    /// <summary>zone-connections.json is optional; a missing or invalid file leaves the package single-zone.</summary>
-    async Task TryDownloadZoneConnectionsAsync(string objectPath, string destination)
+    static PackageFile FindPackageFile(PackageFile[] files, string name)
     {
-        try
-        {
-            await DownloadStorageObjectAsync(objectPath, destination, "zone-connections.json");
-            Pathfinding.ParseConnections(File.ReadAllText(destination));
-        }
-        catch (Exception exception)
-        {
-            if (File.Exists(destination)) File.Delete(destination);
-            Debug.Log($"[Gnarly] No zone connections at {objectPath}: {exception.Message}");
-        }
+        if (files == null) return null;
+        foreach (var file in files)
+            if (file != null && file.name == name && !string.IsNullOrEmpty(file.url)) return file;
+        return null;
     }
 
-    /// <summary>Photo-based surface colors are optional; without them the minimap keeps its default palette.</summary>
-    async Task TryDownloadSurfaceColorsAsync(string zoneBase, string staging)
+    static PackageFile RequiredPackageFile(PackageFile[] files, string name)
     {
-        var json = Path.Combine(staging, SurfaceColors.JsonFileName);
-        var atlas = Path.Combine(staging, SurfaceColors.AtlasFileName);
-        try
-        {
-            await DownloadStorageObjectAsync($"{zoneBase}/{SurfaceColors.JsonFileName}", json, SurfaceColors.JsonFileName);
-            if (SurfaceColors.Parse(File.ReadAllText(json)) == null) throw new FormatException("unreadable surface colors");
-            await DownloadStorageObjectAsync($"{zoneBase}/{SurfaceColors.AtlasFileName}", atlas, SurfaceColors.AtlasFileName);
-        }
-        catch (Exception exception)
-        {
-            if (File.Exists(json)) File.Delete(json);
-            if (File.Exists(atlas)) File.Delete(atlas);
-            Debug.Log($"[Gnarly] No real surface colors at {zoneBase}: {exception.Message}");
-        }
+        var file = FindPackageFile(files, name);
+        if (file == null) throw new FirebaseNavigationException($"The publish API did not return {name}.");
+        return file;
     }
 
-    static string LastPathComponent(string path) => string.IsNullOrEmpty(path) ? "" : path.Substring(path.LastIndexOf('/') + 1);
-
-    async Task DownloadStorageObjectAsync(string objectPath, string destination, string label)
+    async Task DownloadSignedAsync(string url, string destination, string label)
     {
-        await EnsureFreshTokenAsync();
-        var encodedObject = Uri.EscapeDataString(objectPath);
-        var url = $"https://firebasestorage.googleapis.com/v0/b/{Uri.EscapeDataString(config.storageBucket)}/o/{encodedObject}?alt=media";
         using var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET)
         {
             downloadHandler = new DownloadHandlerFile(destination, true)
         };
-        request.SetRequestHeader("Authorization", "Bearer " + idToken);
-        await SendAsync(request, "Storage download " + label);
+        await SendAsync(request, "Package download " + label);
+    }
+
+    async Task TryDownloadSignedAsync(PackageFile file, string destination, string label)
+    {
+        if (file == null) return;
+        try { await DownloadSignedAsync(file.url, destination, label); }
+        catch (Exception exception)
+        {
+            if (File.Exists(destination)) File.Delete(destination);
+            Debug.Log($"[Gnarly] Optional {label} was not downloaded: {exception.Message}");
+        }
     }
 
     static async Task<string> PostJsonAsync(string url, string body, string operation, string bundleId)
@@ -495,19 +483,6 @@ public sealed class FirebaseNavigationPackageRepository
                 $"scan-features.json zone '{scan.zoneId}' does not match requested zone '{expectedZoneId}'.");
     }
 
-    static string RequiredString(FirestoreStringValue value, string field, string documentPath)
-    {
-        if (value == null || string.IsNullOrWhiteSpace(value.stringValue))
-            throw new FirebaseNavigationException($"Firestore document {documentPath} is missing {field}.");
-        return value.stringValue;
-    }
-
-    static void RequireExpectedPath(string expected, string actual, string field)
-    {
-        if (!string.Equals(expected, actual, StringComparison.Ordinal))
-            throw new FirebaseNavigationException($"Unexpected {field}. Expected '{expected}', received '{actual}'.");
-    }
-
     static void ValidateIdentifier(string value, string field)
     {
         if (string.IsNullOrWhiteSpace(value) || value == "." || value == "..")
@@ -515,17 +490,6 @@ public sealed class FirebaseNavigationPackageRepository
         foreach (var character in value)
             if (character == '/' || character == '\\' || char.IsControl(character))
                 throw new ArgumentException($"{field} cannot contain '/', '\\', or control characters.");
-    }
-
-    /// <summary>Optional authored display layout for the web and future global minimap. It never affects ARKit relocalization.</summary>
-    async Task TryDownloadBuildingLayoutAsync(string objectPath, string destination)
-    {
-        try { await DownloadStorageObjectAsync(objectPath, destination, "building-layout.json"); }
-        catch (Exception exception)
-        {
-            if (File.Exists(destination)) File.Delete(destination);
-            Debug.Log($"[Gnarly] No authored building layout at {objectPath}: {exception.Message}");
-        }
     }
 
     public async Task SignInAnonymouslyAsync()
@@ -553,15 +517,6 @@ public sealed class FirebaseNavigationPackageRepository
                 if (TryGetCachedPackage(Path.GetFileName(buildingPath), Path.GetFileName(zonePath), out var package))
                     result.Add(package);
         return result;
-    }
-
-    /// <summary>Escapes each Firestore path segment while preserving collection/document separators.</summary>
-    static string EscapeFirestorePath(string path)
-    {
-        var segments = path.Split('/');
-        for (var index = 0; index < segments.Length; index++)
-            segments[index] = Uri.EscapeDataString(segments[index]);
-        return string.Join("/", segments);
     }
 
     void EnsureConfigured()
@@ -625,28 +580,39 @@ public sealed class FirebaseNavigationPackageRepository
         public string user_id;
     }
 
-    [Serializable] sealed class FirestoreDocument
+    [Serializable] sealed class LibraryResponse { public LibraryBuilding[] buildings; }
+    [Serializable] sealed class LibraryBuilding
+    {
+        public string id;
+        public string name;
+        public string activeVersion;
+        public LibraryZone[] zones;
+    }
+    [Serializable] sealed class LibraryZone
+    {
+        public string id;
+        public string name;
+        public string floorId;
+    }
+    [Serializable] sealed class PackageResponse
+    {
+        public string buildingId;
+        public string versionId;
+        public PackageFile[] files;
+        public PackageZone[] zones;
+    }
+    [Serializable] sealed class PackageZone
+    {
+        public string zoneId;
+        public string name;
+        public string floorId;
+        public PackageFile[] files;
+    }
+    [Serializable] sealed class PackageFile
     {
         public string name;
-        public FirestoreFields fields;
-    }
-    [Serializable] sealed class FirestoreListResponse { public FirestoreDocument[] documents; }
-
-    [Serializable] sealed class FirestoreFields
-    {
-        public FirestoreStringValue name;
-        public FirestoreStringValue floorId;
-        public FirestoreStringValue activeVersion;
-        public FirestoreStringValue buildingJsonPath;
-        public FirestoreStringValue scanJsonPath;
-        public FirestoreStringValue scanFeaturesPath;
-        public FirestoreStringValue structurePath;
-        public FirestoreStringValue worldMapPath;
-    }
-
-    [Serializable] sealed class FirestoreStringValue
-    {
-        public string stringValue;
+        public string url;
+        public bool required;
     }
 
     [Serializable] sealed class FirebaseErrorEnvelope

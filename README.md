@@ -21,6 +21,7 @@ web/                    React web companion and route preview
 shared/                 Versioned package schema and example data
 docs/                   Setup, handoff, and integration notes
 firebase/               Firestore and Cloud Storage security rules
+api/                    Publish and download API (Cloud Run or Cloud Functions)
 ```
 
 ## Getting started

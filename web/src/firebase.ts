@@ -7,7 +7,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { collection, deleteField, doc, GeoPoint, getDoc, getDocs, getFirestore, onSnapshot, runTransaction, Timestamp, type DocumentData } from 'firebase/firestore';
-import { getDownloadURL, getMetadata, getStorage, ref, uploadBytes } from 'firebase/storage';
+import { getStorage, ref, uploadBytes } from 'firebase/storage';
 import type { Building, BuildingLayout, Graph, Node, ScanFeatures, SurfaceColorFace, SurfaceColors, ZoneConnections, ZoneView } from './data';
 import { graphDigest } from './graphStore.ts';
 import { emptyZoneConnections, normalizeZoneConnections } from './zoneConnections.ts';
@@ -25,15 +25,29 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const storage = app ? getStorage(app) : null;
 
+function apiBase() {
+  const base = import.meta.env.VITE_GNARLY_API_BASE?.replace(/\/$/, '');
+  if (!base) throw Error('Set VITE_GNARLY_API_BASE to the publish API origin.');
+  return base;
+}
+
+async function apiRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+  if (!auth?.currentUser) throw Error('Sign in before downloading map data.');
+  const token = await auth.currentUser.getIdToken();
+  const response = await fetch(apiBase() + path, {
+    method,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: { message?: string } };
+  if (!response.ok) throw Error(payload.error?.message || 'Publish API returned HTTP ' + response.status);
+  return payload;
+}
+
 async function fetchStorage(path: string): Promise<Response> {
-  if (!storage) throw Error('Firebase Storage is not configured');
-  const downloadURL = await getDownloadURL(ref(storage, path));
-  const url = new URL(downloadURL);
-  const bucketPrefix = '/v0/b/' + encodeURIComponent(config.storageBucket) + '/o/';
-  if (url.hostname !== 'firebasestorage.googleapis.com' || !url.pathname.startsWith(bucketPrefix)) {
-    throw Error('Unexpected Storage download URL');
-  }
-  const response = await fetch('/__firebase_storage' + url.pathname + url.search);
+  const signed = await apiRequest('POST', '/v1/downloads', { path }) as { url?: string };
+  if (!signed.url) throw Error('The publish API did not return a download URL.');
+  const response = await fetch('/__signed?url=' + encodeURIComponent(signed.url));
   if (!response.ok) throw Error('Storage download returned HTTP ' + response.status);
   return response;
 }
@@ -110,19 +124,18 @@ export async function logout() {
   if (auth) await signOut(auth);
 }
 export async function listBuildings(): Promise<Building[]> {
-  if (!db) return [];
-  const snapshot = await getDocs(collection(db, 'buildings'));
-  return snapshot.docs.map(item => {
-    const value = item.data();
-    return {
-      id: item.id,
-      name: value.name || item.id,
-      status: value.status || 'draft',
-      activeVersion: value.activeVersion || null,
-      lat: Number(value.latitude ?? value.location?.latitude ?? value.location?.lat) || undefined,
-      lng: Number(value.longitude ?? value.location?.longitude ?? value.location?.lng) || undefined,
-    };
-  });
+  if (!configured) return [];
+  const payload = await apiRequest('GET', '/v1/buildings') as {
+    buildings?: { id: string; name?: string; status?: string; activeVersion?: string | null; latitude?: number | null; longitude?: number | null }[];
+  };
+  return (payload.buildings || []).map(item => ({
+    id: item.id,
+    name: item.name || item.id,
+    status: item.status || 'draft',
+    activeVersion: item.activeVersion || null,
+    lat: typeof item.latitude === 'number' ? item.latitude : undefined,
+    lng: typeof item.longitude === 'number' ? item.longitude : undefined,
+  }));
 }
 
 export async function loadBuilding(input: Building): Promise<Building> {
@@ -150,10 +163,10 @@ export async function loadBuilding(input: Building): Promise<Building> {
         : undefined;
       const scan = scanResult.scan && colors ? { ...scanResult.scan, colors } : scanResult.scan;
       let rawScanStatus = '';
-      if (!scan && storage) {
+      if (!scan) {
         const rawPath = zone.scanJsonPath || storageBase + '/zones/' + item.id + '/scan.json';
         try {
-          await getDownloadURL(ref(storage, rawPath));
+          await apiRequest('POST', '/v1/downloads', { path: rawPath });
           rawScanStatus = ' Raw scan.json exists.';
         } catch {
           rawScanStatus = ' Raw scan.json is also missing.';

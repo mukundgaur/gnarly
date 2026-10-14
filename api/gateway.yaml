@@ -1,0 +1,93 @@
+swagger: "2.0"
+info:
+  title: Gnarly publish API
+  description: Authenticates Firebase users, checks building ACL, rate-limits, and issues short-lived signed URLs. Publish commits only after the package validates.
+  version: "1.0.0"
+schemes:
+  - https
+produces:
+  - application/json
+securityDefinitions:
+  firebase:
+    authorizationUrl: ""
+    flow: implicit
+    type: oauth2
+    x-google-issuer: https://securetoken.google.com/PROJECT_ID
+    x-google-jwks_uri: https://www.googleapis.com/service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com
+    x-google-audiences: PROJECT_ID
+security:
+  - firebase: []
+paths:
+  /healthz:
+    get:
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: OK
+  /v1/buildings:
+    get:
+      operationId: listBuildings
+      responses:
+        "200":
+          description: Buildings the caller can see
+    post:
+      operationId: createBuilding
+      responses:
+        "200":
+          description: Building created or already owned
+  /v1/buildings/{buildingId}/package:
+    get:
+      operationId: downloadPackage
+      parameters:
+        - name: buildingId
+          in: path
+          required: true
+          type: string
+        - name: zoneId
+          in: query
+          required: false
+          type: string
+        - name: version
+          in: query
+          required: false
+          type: string
+      responses:
+        "200":
+          description: Short-lived signed download URLs
+  /v1/downloads:
+    post:
+      operationId: signDownload
+      responses:
+        "200":
+          description: One short-lived signed download URL
+  /v1/buildings/{buildingId}/publishes:
+    post:
+      operationId: startPublish
+      parameters:
+        - name: buildingId
+          in: path
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Short-lived signed upload URLs
+  /v1/buildings/{buildingId}/publishes/{publishId}/commit:
+    post:
+      operationId: commitPublish
+      parameters:
+        - name: buildingId
+          in: path
+          required: true
+          type: string
+        - name: publishId
+          in: path
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Package validated and activeVersion moved
+x-google-backend:
+  address: https://CLOUD_RUN_HOST
+  protocol: h2
+  path_translation: APPEND_PATH_TO_ADDRESS

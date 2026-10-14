@@ -29,6 +29,8 @@ google-services.json
 .env
 navigator-unity/FirebaseConfig/
 web/node_modules/
+api/node_modules/
+api/dist/
 web/dist/
 web/*.tsbuildinfo
 
