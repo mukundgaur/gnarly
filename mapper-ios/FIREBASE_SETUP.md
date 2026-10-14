@@ -1,6 +1,6 @@
 # Firebase data layer setup
 
-The mapper uses Cloud Firestore for building metadata and Cloud Storage for package files. It does not require a custom backend. Firebase initialization is optional at launch so RoomPlan scanning still works when the local configuration file is absent; creating `FirebaseDataRepository` reports a configuration error until Firebase is configured.
+The mapper uses Cloud Firestore for building metadata. Publishing a scan and downloading a package go through the API in `api/`, which checks the caller, the building ACL, and the package before it moves `activeVersion`. Firebase initialization is optional at launch so RoomPlan scanning still works when the local configuration file is absent; creating `FirebaseDataRepository` reports a configuration error until Firebase is configured. Set `GnarlyApiBaseURL` in `Info.plist` to that API (see `api/README.md`).
 
 ## One-time console setup
 
@@ -39,7 +39,7 @@ The four rows should turn green. The diagnostic writes and reads `buildings/fire
 
 ## Repository usage
 
-Create metadata first, upload assets, and publish the version last:
+The mapper app asks the publish API for signed upload URLs and commits only after every file is stored. The API writes the version and then sets `activeVersion`. Client code cannot move that field. The snippet below shows the records the API creates:
 
 ```swift
 let repository = try FirebaseDataRepository()

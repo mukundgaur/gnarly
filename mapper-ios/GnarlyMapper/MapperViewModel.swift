@@ -509,70 +509,54 @@ final class MapperViewModel: ObservableObject {
                     ))
                 } catch FirebaseDataError.documentAlreadyExists { }
                 try Task.checkCancellation()
-                statusText = "Saving version \(versionID)…"
-                try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .draft, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: nil), buildingId: buildingID)
-                try Task.checkCancellation()
-                statusText = "Saving floor \(floorID)…"
-                try await repository.saveFloor(Floor(id: floorID, name: floorID, story: 0, elevation: 0), buildingId: buildingID, versionId: versionID)
-                try Task.checkCancellation()
-                statusText = "Saving zone \(zoneID)…"
-                try await repository.saveZone(Zone(id: zoneID, name: activeTarget?.zoneName ?? zoneID, floorId: floorID, worldMapPath: nil, buildingJsonPath: nil, relocalizationHint: "Look around the scanned area.", startNodeId: ""), buildingId: buildingID, versionId: versionID)
-                try Task.checkCancellation()
-                statusText = "Uploading zone graph…"
-                try await repository.uploadZoneBuildingJSON(from: buildingJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                try Task.checkCancellation()
-                statusText = "Uploading RoomPlan scan…"
-                try await repository.uploadZoneScanJSON(from: scanJSON, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                try Task.checkCancellation()
-                statusText = "Uploading scan features…"
-                try await repository.uploadZoneScanFeatures(from: scanFeatures, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                try Task.checkCancellation()
-                statusText = "Uploading 3D room model…"
-                try await repository.uploadZoneStructure(from: structure, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                try Task.checkCancellation()
+                let api = try PackagePublishClient.live()
+                var files = [
+                    PackageUpload(name: "building.json", zoneId: zoneID, contentType: "application/json", fileURL: buildingJSON),
+                    PackageUpload(name: "scan.json", zoneId: zoneID, contentType: "application/json", fileURL: scanJSON),
+                    PackageUpload(name: "scan-features.json", zoneId: zoneID, contentType: "application/json", fileURL: scanFeatures),
+                    PackageUpload(name: "structure.usdz", zoneId: zoneID, contentType: "model/vnd.usdz+zip", fileURL: structure),
+                    PackageUpload(name: "worldmap.bin", zoneId: zoneID, contentType: "application/octet-stream", fileURL: worldMap),
+                ]
                 let colorsJSON = packageURL.appendingPathComponent(SurfaceColorBakeResult.jsonFileName)
                 let colorsAtlas = packageURL.appendingPathComponent(SurfaceColorBakeResult.atlasFileName)
                 if FileManager.default.fileExists(atPath: colorsJSON.path), FileManager.default.fileExists(atPath: colorsAtlas.path) {
-                    statusText = "Uploading real surface colors…"
-                    try await repository.uploadZoneSurfaceColors(json: colorsJSON, atlas: colorsAtlas, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                    try Task.checkCancellation()
+                    files.append(PackageUpload(name: SurfaceColorBakeResult.jsonFileName, zoneId: zoneID, contentType: "application/json", fileURL: colorsJSON))
+                    files.append(PackageUpload(name: SurfaceColorBakeResult.atlasFileName, zoneId: zoneID, contentType: "image/jpeg", fileURL: colorsAtlas))
                 }
-                statusText = "Uploading AR world map…"
-                try await repository.uploadWorldMap(from: worldMap, buildingId: buildingID, versionId: versionID, zoneId: zoneID)
-                try Task.checkCancellation()
                 let connectionsURL = packageURL.appendingPathComponent("zone-connections.json")
                 if FileManager.default.fileExists(atPath: connectionsURL.path) {
-                    statusText = "Uploading RoomPlan stair links…"
-                    _ = try await repository.uploadZoneConnections(from: connectionsURL, buildingId: buildingID, versionId: versionID)
+                    files.append(PackageUpload(name: "zone-connections.json", zoneId: "", contentType: "application/json", fileURL: connectionsURL))
+                }
+                let layoutFile = try await layoutUpload(api: api, buildingID: buildingID, zoneID: zoneID, previousVersion: existing?.activeVersion)
+                defer { if let layoutFile { try? FileManager.default.removeItem(at: layoutFile.fileURL) } }
+                if let layoutFile { files.append(layoutFile) }
+                try Task.checkCancellation()
+                statusText = "Requesting upload URLs…"
+                let session = try await api.startZonePublish(
+                    buildingId: buildingID,
+                    versionId: versionID,
+                    zone: [
+                        "zoneId": zoneID,
+                        "floorId": floorID,
+                        "name": activeTarget?.zoneName ?? zoneID,
+                        "story": activeTarget?.level ?? 0,
+                        "elevation": 0,
+                        "relocalizationHint": "Look around the scanned area.",
+                        "startNodeId": "",
+                    ],
+                    files: files
+                )
+                try Task.checkCancellation()
+                for upload in session.uploads {
+                    statusText = "Uploading \(upload.name)…"
+                    try await api.upload([upload], files: files)
                     try Task.checkCancellation()
                 }
-                statusText = "Publishing building version…"
-                try await repository.saveVersion(BuildingVersion(id: versionID, versionNumber: Int(Date().timeIntervalSince1970), status: .published, buildingJsonPath: nil, structurePath: nil, createdAt: nil, publishedAt: Date()), buildingId: buildingID)
-                try Task.checkCancellation()
-                try await repository.updateBuilding(Building(
-                    id: buildingID,
-                    name: existing?.name ?? buildingID,
-                    activeVersion: versionID,
-                    status: .active,
-                    createdAt: nil,
-                    updatedAt: nil,
-                    ownerUid: owner,
-                    latitude: existing?.latitude,
-                    longitude: existing?.longitude,
-                    mapHeadingDegrees: existing?.mapHeadingDegrees
-                ))
-                if let target = activeTarget {
-                    statusText = "Updating building layout…"
-                    var layout = (try? await repository.downloadBuildingLayout(buildingId: buildingID, versionId: versionID)) ?? BuildingLayoutDocument()
-                    let placement = target.previousPlacement
-                        ?? .beside(levelBounds: target.levelBounds, zoneId: zoneID, level: target.level)
-                    layout.upsert(placement)
-                    layout.setFloorName(target.levelName, for: target.level)
-                    _ = try? await repository.uploadBuildingLayout(layout, buildingId: buildingID, versionId: versionID)
-                }
+                statusText = "Checking the package…"
+                let committed = try await api.commit(buildingId: buildingID, publishId: session.publishId)
                 try Task.checkCancellation()
                 guard uploadAttemptID == attemptID else { return }
-                statusText = "Uploaded \(activeTarget?.zoneName ?? zoneID) to \(existing?.name ?? buildingID)."
+                statusText = "Uploaded \(activeTarget?.zoneName ?? zoneID) as \(committed.versionId)."
                 phase = .preview
                 if startNextZone {
                     let nextZone = String((Int(zoneID) ?? 0) + 1)
@@ -582,7 +566,7 @@ final class MapperViewModel: ObservableObject {
             } catch {
                 if uploadAttemptID == attemptID, !(error is CancellationError) {
                     uploadLogger.error("Package upload failed: \(error.localizedDescription, privacy: .public)")
-                    showError("Firebase upload failed: \(error.localizedDescription)")
+                    showError("Publish failed: \(error.localizedDescription)")
                 }
             }
             if uploadAttemptID == attemptID {
@@ -609,16 +593,40 @@ final class MapperViewModel: ObservableObject {
         guard let data = json.data(using: .utf8), (try? JSONSerialization.jsonObject(with: data)) != nil else { showError("Zone connections must be valid JSON."); return }
         isUploading = true
         Task {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("zone-connections-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: file) }
             do {
-                let file = FileManager.default.temporaryDirectory.appendingPathComponent("zone-connections-\(UUID().uuidString).json")
                 try data.write(to: file, options: .atomic)
-                defer { try? FileManager.default.removeItem(at: file) }
-                let repository = try FirebaseDataRepository()
-                _ = try await repository.uploadZoneConnections(from: file, buildingId: buildingID, versionId: versionID)
-                statusText = "Zone connections uploaded for \(buildingID)/\(versionID)."
+                let api = try PackagePublishClient.live()
+                let upload = PackageUpload(name: "zone-connections.json", zoneId: "", contentType: "application/json", fileURL: file)
+                let session = try await api.startFilePublish(buildingId: buildingID, versionId: versionID, files: [upload])
+                try await api.upload(session.uploads, files: [upload])
+                let committed = try await api.commit(buildingId: buildingID, publishId: session.publishId)
+                statusText = "Zone connections published as \(committed.versionId)."
             } catch { showError("Zone connection upload failed: \(error.localizedDescription)") }
             isUploading = false
         }
+    }
+
+    /// Merges this zone into the previous layout and returns a file for the new immutable version.
+    private func layoutUpload(api: PackagePublishClient, buildingID: String, zoneID: String, previousVersion: String?) async throws -> PackageUpload? {
+        guard let target = activeTarget else { return nil }
+        var layout = BuildingLayoutDocument()
+        if previousVersion?.isEmpty == false,
+           let data = try? await api.downloadActiveLayout(buildingId: buildingID),
+           let decoded = try? JSONDecoder().decode(BuildingLayoutDocument.self, from: data) {
+            layout = decoded
+        }
+        let placement = target.previousPlacement
+            ?? .beside(levelBounds: target.levelBounds, zoneId: zoneID, level: target.level)
+        layout.upsert(placement)
+        layout.setFloorName(target.levelName, for: target.level)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(LayoutWire(schemaVersion: layout.schemaVersion, zones: layout.zones, floors: layout.floors, notes: layout.notes))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("building-layout-\(UUID().uuidString).json")
+        try data.write(to: url, options: .atomic)
+        return PackageUpload(name: "building-layout.json", zoneId: "", contentType: "application/json", fileURL: url)
     }
 
     private func currentCameraPosition() -> [Float]? {

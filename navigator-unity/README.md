@@ -23,19 +23,14 @@ Then build:
 
 ## Firebase package source
 
-The navigator reads:
+List and download go through the publish API. Put its origin in `Assets/Resources/gnarly-api-base.txt` (see `api/README.md`). The API returns short-lived signed URLs after checking the Firebase token, the building ACL, and the download rate limit. The navigator still stages the files and keeps the previous cache if a download stops midway.
 
-- `buildings/{buildingId}.activeVersion`
-- `buildings/{buildingId}/versions/{versionId}.buildingJsonPath`
-- `buildings/{buildingId}/versions/{versionId}.structurePath`
-- `buildings/{buildingId}/versions/{versionId}/zones/{zoneId}.worldMapPath`
+The active package for a zone is:
 
-It requires the paths to match:
-
-- `buildings/{buildingId}/{versionId}/building.json`
-- `buildings/{buildingId}/{versionId}/scan.json`
-- `buildings/{buildingId}/{versionId}/scan-features.json`
-- `buildings/{buildingId}/{versionId}/structure.usdz`
+- `buildings/{buildingId}/{versionId}/zones/{zoneId}/building.json` (or a `graph-edits` object the zone document points at)
+- `buildings/{buildingId}/{versionId}/zones/{zoneId}/scan.json`
+- `buildings/{buildingId}/{versionId}/zones/{zoneId}/scan-features.json`
+- `buildings/{buildingId}/{versionId}/zones/{zoneId}/structure.usdz`
 - `buildings/{buildingId}/{versionId}/worldmaps/{zoneId}.bin`
 
 All five files are downloaded to `Application.persistentDataPath/navigation-cache`. A staging directory and cache manifest prevent incomplete downloads from replacing the last complete package. Firestore and Storage are never accessed before email/password authentication succeeds. Versions uploaded before the interactive-map change do not contain the scan-features/USDZ pair and must be uploaded again from the mapper.

@@ -1,5 +1,9 @@
 # Firebase operations
 
+Publish, list, and download go through the API in `api/`. Deploy `firestore.rules` and `storage.rules` with it. Clients can no longer change `activeVersion` or read package bytes with the Firebase client SDK. The admin web editor can still write graph edits, `building-layout.json`, and `zone-connections.json`.
+
+## Web viewer CORS
+
 ## Web viewer CORS
 
 `cors.web.local.json` allows the local Vite viewer at

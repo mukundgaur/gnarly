@@ -11,22 +11,34 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == "WwvbXcl5hpQgdl8KO79JwcThYJd2";
     }
 
+    function preservesActiveVersion() {
+      return request.resource.data.get('activeVersion', null) == resource.data.get('activeVersion', null);
+    }
+
     match /buildings/{buildingId} {
       allow read: if signedIn();
-      allow create, update: if signedIn();
+      allow create: if signedIn() && request.resource.data.get('activeVersion', null) == null;
+      // Clients cannot move activeVersion. The publish API uses the Admin SDK, which bypasses these rules.
+      allow update: if signedIn() && preservesActiveVersion() && (isAdmin() || resource.data.get('ownerUid', '') == request.auth.uid);
       allow delete: if isAdmin();
 
       match /versions/{versionId} {
         allow read: if signedIn();
-        allow create, update: if signedIn();
-        allow delete: if isAdmin();
+        allow create, update, delete: if isAdmin();
 
         match /{nestedDocument=**} {
           allow read: if signedIn();
-          allow create, update: if signedIn();
-          allow delete: if isAdmin();
+          allow create, update, delete: if isAdmin();
         }
       }
+
+      match /publishes/{publishId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
     }
   }
 }

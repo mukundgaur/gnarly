@@ -4,5 +4,14 @@
   },
   "storage": {
     "rules": "firebase/storage.rules"
-  }
+  },
+  "functions": [
+    {
+      "source": "api",
+      "codebase": "publish",
+      "runtime": "nodejs22",
+      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
+      "ignore": ["node_modules", "test", ".git"]
+    }
+  ]
 }

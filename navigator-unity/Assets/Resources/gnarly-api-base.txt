@@ -1,0 +1,3 @@
+# Origin of the Gnarly publish API (Cloud Run, Cloud Functions, or API Gateway).
+# No trailing slash. http is accepted only for localhost.
+# https://gnarly-api-xxxxx-uc.a.run.app

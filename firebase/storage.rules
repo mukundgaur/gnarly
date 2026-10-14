@@ -11,9 +11,19 @@ service firebase.storage {
       return signedIn() && request.auth.uid == "WwvbXcl5hpQgdl8KO79JwcThYJd2";
     }
 
+    // The connection test still uses the client SDK. Package bytes use signed URLs, which bypass these rules.
+    match /buildings/firebase-test/{path=**} {
+      allow read, write: if isAdmin();
+    }
+
     match /buildings/{buildingId}/{versionId}/{assetPath=**} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if false;
+      allow write: if isAdmin() && (
+        assetPath.matches('zones/[^/]+/graph-edits/[^/]+\\.json') ||
+        assetPath.matches('graph-edits/[^/]+\\.json') ||
+        assetPath.matches('building-layout\\.json') ||
+        assetPath.matches('zone-connections\\.json')
+      );
     }
   }
 }
