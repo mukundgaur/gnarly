@@ -217,7 +217,11 @@ struct BakeSurface: Sendable {
     /// Open doors and openings are holes you can see through.
     let isPassable: Bool
 
-    static func all(in room: CapturedRoom, recoveredStairs: [StairVolume] = []) -> [BakeSurface] {
+    static func all(
+        in room: CapturedRoom,
+        recoveredStairs: [StairVolume] = [],
+        recoveredFloors: [FloorSlab] = []
+    ) -> [BakeSurface] {
         func surface(_ item: CapturedRoom.Surface, _ kind: Kind) -> BakeSurface {
             var passable = kind == .opening
             if case .door(let isOpen) = item.category, isOpen { passable = true }
@@ -246,6 +250,7 @@ struct BakeSurface: Sendable {
             )
         }
         let present = Set(result.map(\.identifier))
+        result += recoveredFloors.filter { !present.contains($0.identifier) }.map(\.surface)
         result += recoveredStairs.filter { !present.contains($0.identifier) }.map { stair in
             BakeSurface(
                 identifier: stair.identifier,

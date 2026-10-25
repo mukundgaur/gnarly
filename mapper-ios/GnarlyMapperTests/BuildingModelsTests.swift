@@ -107,6 +107,68 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertTrue(StairVolume.recovered(roomKeptStairs: true, seen: [stair]).isEmpty)
     }
 
+    func testAFlightKeepsTheBottomFloorAndAddsTheLandingItClimbsTo() {
+        let stair = stairVolume(id: "up", center: .zero, dimensions: SIMD3(1.2, 2, 4))
+        let bottom = levelFloor(id: "bottom", center: SIMD3(0, -1, 0), width: 20, depth: 20)
+        let recovered = LandingFloors.recovered(kept: [bottom], seen: [], stairs: [stair])
+        XCTAssertEqual(recovered.count, 1)
+        XCTAssertEqual(recovered[0].center.y, 1, accuracy: 0.001)
+        XCTAssertEqual(recovered[0].center.z, -3, accuracy: 0.001)
+        XCTAssertLessThan(recovered[0].center.z, -2)
+    }
+
+    func testFloorsSeenOnOtherLevelsComeBackWhenOnlyTheBottomRemains() {
+        let bottom = levelFloor(id: "bottom", center: SIMD3(0, -3, 0), width: 12, depth: 12)
+        let middle = levelFloor(id: "middle", center: SIMD3(0, 0, 0), width: 6, depth: 6)
+        let top = levelFloor(id: "top", center: SIMD3(0, 3, 0), width: 6, depth: 6)
+        let duplicate = levelFloor(id: "bottom-again", center: SIMD3(0.2, -2.9, 0.2), width: 8, depth: 8)
+        let recovered = LandingFloors.recovered(kept: [bottom], seen: [bottom, middle, top, duplicate], stairs: [])
+        XCTAssertEqual(Set(recovered.map(\.identifier)), ["middle", "top"])
+    }
+
+    func testALevelWalkRestoresTheFloorBetweenFlightsAndAClimbDoesNot() {
+        let stair = stairVolume(id: "well", center: .zero, dimensions: SIMD3(1.2, 6, 4))
+        let bottom = levelFloor(id: "bottom", center: SIMD3(0, -3, 2), width: 10, depth: 10)
+        let onBottom = [SIMD3<Float>(0, -1.60, 2), SIMD3(0.4, -1.58, 2.3), SIMD3(-0.3, -1.62, 1.7)]
+        let onMiddle = [SIMD3<Float>(2.2, 1.40, 0), SIMD3(2.8, 1.42, 0.4), SIMD3(2.4, 1.38, 0.9)]
+        let recovered = LandingFloors.recovered(kept: [bottom], seen: [], stairs: [stair], walked: onBottom + onMiddle)
+        let heights = recovered.map(\.center.y).sorted()
+        XCTAssertEqual(heights.count, 2)
+        XCTAssertEqual(heights[0], 0, accuracy: 0.05)
+        XCTAssertEqual(heights[1], 3, accuracy: 0.05)
+
+        let climbing = [SIMD3<Float>(0, -1.6, 2), SIMD3(0, -0.9, 2.5), SIMD3(0, -0.1, 3.0), SIMD3(0, 0.8, 3.5)]
+        let stepsOnly = LandingFloors.recovered(kept: [bottom], seen: [], stairs: [], walked: climbing)
+        XCTAssertTrue(stepsOnly.isEmpty)
+    }
+
+    func testOpeningTheScanOnALandingKeepsThatFloorAfterTheClimb() {
+        let stair = stairVolume(id: "well", center: .zero, dimensions: SIMD3(1.2, 6, 4))
+        let bottom = levelFloor(id: "bottom", center: SIMD3(0, -3, 2), width: 8, depth: 8)
+        let walked = [SIMD3<Float>(1.8, 1.35, 0.2), SIMD3(1.1, 2.05, 0.2), SIMD3(0.4, 2.75, 0.2), SIMD3(0, 3.5, 0.2)]
+        let recovered = LandingFloors.recovered(kept: [bottom], seen: [], stairs: [stair], walked: walked)
+        let heights = recovered.map(\.center.y).sorted()
+        XCTAssertEqual(heights.count, 2)
+        XCTAssertEqual(heights[0], 0, accuracy: 0.05)
+        XCTAssertEqual(heights[1], 3, accuracy: 0.05)
+        XCTAssertTrue(recovered.contains { $0.identifier == "walked-landing-start" })
+    }
+
+    private func levelFloor(id: String, center: SIMD3<Float>, width: Float, depth: Float) -> FloorSlab {
+        var transform = matrix_identity_float4x4
+        transform.columns.0 = SIMD4(1, 0, 0, 0)
+        transform.columns.1 = SIMD4(0, 0, 1, 0)
+        transform.columns.2 = SIMD4(0, 1, 0, 0)
+        transform.columns.3 = SIMD4(center.x, center.y, center.z, 1)
+        return FloorSlab(identifier: id, transform: transform, dimensions: SIMD3(width, depth, 0.05), story: 0)
+    }
+
+    private func stairVolume(id: String, center: SIMD3<Float>, dimensions: SIMD3<Float>) -> StairVolume {
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = SIMD4(center.x, center.y, center.z, 1)
+        return StairVolume(identifier: id, transform: transform, dimensions: dimensions, story: 0)
+    }
+
     func testHeadOnPhotoMarksAWallCovered() {
         let wall = coveragePlane(id: "wall", kind: .wall, center: SIMD3(0, 1.5, 0), normal: SIMD3(0, 0, 1), width: 0.5, height: 0.5)
         let camera = coverageCamera(eye: SIMD3(0, 1.5, 2), target: SIMD3(0, 1.5, 0))

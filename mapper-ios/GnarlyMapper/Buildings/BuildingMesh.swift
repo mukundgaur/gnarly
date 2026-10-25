@@ -512,7 +512,26 @@ enum BuildingMesh {
     }
 }
 
+struct PreviewOrbit {
+    static let homeDirection = simd_normalize(SIMD3<Float>(0.7, 0.55, 1))
+
+    static func direction(yaw: Float, pitch: Float) -> SIMD3<Float> {
+        let cp = cos(pitch)
+        return SIMD3(sin(yaw) * cp, sin(pitch), cos(yaw) * cp)
+    }
+
+    static var homeYaw: Float { atan2(homeDirection.x, homeDirection.z) }
+    static var homePitch: Float { asin(max(-1, min(1, homeDirection.y))) }
+}
+
 final class BuildingSceneController: ObservableObject {
+    struct SceneFrame: Equatable {
+        var version: Int
+        var distance: Float
+        var minDistance: Float
+        var maxDistance: Float
+    }
+
     let scene = SCNScene()
     private let root = SCNNode()
     private let cameraNode = SCNNode()
@@ -522,6 +541,9 @@ final class BuildingSceneController: ObservableObject {
     private var boundsMin = SIMD3<Float>(repeating: 0)
     private var boundsMax = SIMD3<Float>(repeating: 0)
     private var hasBounds = false
+    private var massSum = SIMD3<Float>(repeating: 0)
+    private var massWeight: Float = 0
+    private(set) var frame = SceneFrame(version: 0, distance: 8, minDistance: 0.35, maxDistance: 180)
 
     init() {
         scene.background.contents = UIColor(red: 0.05, green: 0.07, blue: 0.10, alpha: 1)
@@ -529,7 +551,7 @@ final class BuildingSceneController: ObservableObject {
         let camera = SCNCamera()
         camera.fieldOfView = 36
         camera.zNear = 0.05
-        camera.zFar = 800
+        camera.zFar = 4000
         camera.automaticallyAdjustsZRange = true
         camera.wantsHDR = false
         cameraNode.camera = camera
@@ -537,6 +559,7 @@ final class BuildingSceneController: ObservableObject {
     }
 
     func show(map: BuildingMap, highlight zoneID: String?, satellite: UIImage?) {
+        root.simdPosition = .zero
         root.childNodes.forEach { $0.removeFromParentNode() }
         resetBounds()
         if let satellite, let bounds = map.bounds {
@@ -564,6 +587,7 @@ final class BuildingSceneController: ObservableObject {
     }
 
     func showPreview(surfaces: [BakeSurface], colors: SurfaceColorDocument?, atlas: UIImage?) {
+        root.simdPosition = .zero
         root.childNodes.forEach { $0.removeFromParentNode() }
         resetBounds()
         let node = BuildingMesh.node(surfaces: surfaces, colors: colors, atlas: atlas)
@@ -583,6 +607,8 @@ final class BuildingSceneController: ObservableObject {
 
     private func resetBounds() {
         hasBounds = false
+        massSum = .zero
+        massWeight = 0
     }
 
     private func include(_ surface: BakeSurface, _ placement: simd_float4x4) {
@@ -605,36 +631,54 @@ final class BuildingSceneController: ObservableObject {
                 }
             }
         }
+        let size = SIMD3(max(half.x * 2, 0.04), max(half.y * 2, 0.04), max(halfZ * 2, 0.04))
+        let volume = size.x * size.y * size.z
+        let worldCenter = placement * surface.transform * SIMD4<Float>(0, 0, 0, 1)
+        massSum += SIMD3(worldCenter.x, worldCenter.y, worldCenter.z) * volume
+        massWeight += volume
     }
 
     private func noteContent() {
         contentVersion += 1
         framedVersion = -1
-        if aspect > 0.25 { applyFrame() }
+        if aspect > 0.25 {
+            applyFrame()
+            objectWillChange.send()
+        }
     }
 
     private func applyFrame() {
         framedVersion = contentVersion
-        let center: SIMD3<Float>
         let extent: SIMD3<Float>
+        let center: SIMD3<Float>
         if hasBounds {
-            center = (boundsMin + boundsMax) * 0.5
+            let aabbCenter = (boundsMin + boundsMax) * 0.5
             extent = simd_max(boundsMax - boundsMin, SIMD3(repeating: 1))
+            center = massWeight > 0.0001 ? massSum / massWeight : aabbCenter
         } else {
-            center = SIMD3(0, 1.4, 0)
+            center = .zero
             extent = SIMD3(8, 3, 8)
         }
+        // Orbit around the model's center of mass, not the ARKit scan origin.
+        root.simdPosition = -center
+        let aabbCenter = hasBounds ? (boundsMin + boundsMax) * 0.5 : center
+        let offset = simd_length(aabbCenter - center)
         let fovY = Float(36) * .pi / 180
         let fovX = 2 * atan(tan(fovY / 2) * max(aspect, 0.45))
         let horizontal = hypot(extent.x, extent.z)
         let distance = max(
-            (extent.y * 0.62) / tan(fovY / 2),
-            (horizontal * 0.58) / tan(fovX / 2),
+            (extent.y * 0.62 + offset) / tan(fovY / 2),
+            (horizontal * 0.58 + offset) / tan(fovX / 2),
             4
-        ) * 1.22
-        let direction = simd_normalize(SIMD3<Float>(0.7, 0.55, 1))
-        cameraNode.simdPosition = center + direction * distance
-        cameraNode.look(at: SCNVector3(center.x, center.y, center.z))
+        ) * 1.35
+        cameraNode.simdPosition = PreviewOrbit.homeDirection * distance
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        frame = SceneFrame(
+            version: contentVersion,
+            distance: distance,
+            minDistance: 0.35,
+            maxDistance: max(distance * 24, 180)
+        )
     }
 
     private func satellitePlane(image: UIImage, bounds: FloorBounds, heading: Double) -> SCNNode {
@@ -655,14 +699,19 @@ final class BuildingSceneController: ObservableObject {
 struct BuildingSceneView: UIViewRepresentable {
     @ObservedObject var controller: BuildingSceneController
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = controller.scene
         view.pointOfView = controller.scene.rootNode.childNodes.first { $0.camera != nil }
-        view.allowsCameraControl = true
+        view.allowsCameraControl = false
         view.antialiasingMode = .multisampling4X
         view.backgroundColor = UIColor(red: 0.05, green: 0.07, blue: 0.10, alpha: 1)
         view.autoenablesDefaultLighting = false
+        context.coordinator.attach(to: view)
         return view
     }
 
@@ -671,8 +720,93 @@ struct BuildingSceneView: UIViewRepresentable {
         if uiView.pointOfView?.camera == nil {
             uiView.pointOfView = controller.scene.rootNode.childNodes.first { $0.camera != nil }
         }
+        context.coordinator.cameraNode = uiView.pointOfView
         let bounds = uiView.bounds
         guard bounds.width > 1, bounds.height > 1 else { return }
         controller.viewAspectChanged(Float(bounds.width / bounds.height))
+        context.coordinator.sync(frame: controller.frame)
+    }
+
+    /// One finger orbits the model center, two fingers pan, pinch zooms. Zoom-out reaches many times the fitted view.
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var yaw = PreviewOrbit.homeYaw
+        var pitch = PreviewOrbit.homePitch
+        var distance: Float = 8
+        var minDistance: Float = 0.35
+        var maxDistance: Float = 180
+        var target = SIMD3<Float>(repeating: 0)
+        var framedVersion = -1
+        weak var cameraNode: SCNNode?
+        private var attached = false
+
+        func attach(to view: SCNView) {
+            guard !attached else { return }
+            attached = true
+            let orbit = UIPanGestureRecognizer(target: self, action: #selector(orbit(_:)))
+            orbit.maximumNumberOfTouches = 1
+            orbit.delegate = self
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
+            pan.minimumNumberOfTouches = 2
+            pan.maximumNumberOfTouches = 2
+            pan.delegate = self
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:)))
+            pinch.delegate = self
+            view.addGestureRecognizer(orbit)
+            view.addGestureRecognizer(pan)
+            view.addGestureRecognizer(pinch)
+        }
+
+        func sync(frame: BuildingSceneController.SceneFrame) {
+            guard frame.version != framedVersion else { return }
+            framedVersion = frame.version
+            distance = frame.distance
+            minDistance = frame.minDistance
+            maxDistance = frame.maxDistance
+            target = .zero
+            yaw = PreviewOrbit.homeYaw
+            pitch = PreviewOrbit.homePitch
+            apply()
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        @objc func orbit(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            gesture.setTranslation(.zero, in: gesture.view)
+            yaw -= Float(translation.x) * 0.008
+            pitch = min(1.2, max(-1.2, pitch + Float(translation.y) * 0.008))
+            apply()
+        }
+
+        @objc func pan(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view, let cameraNode else { return }
+            let translation = gesture.translation(in: view)
+            gesture.setTranslation(.zero, in: view)
+            let fov = Float(cameraNode.camera?.fieldOfView ?? 36) * .pi / 180
+            let visibleHeight = 2 * distance * tan(fov / 2)
+            let scale = visibleHeight / Float(max(view.bounds.height, 1))
+            target -= cameraNode.simdWorldRight * Float(translation.x) * scale
+            target += cameraNode.simdWorldUp * Float(translation.y) * scale
+            apply()
+        }
+
+        @objc func pinch(_ gesture: UIPinchGestureRecognizer) {
+            guard gesture.scale > 0 else { return }
+            distance /= Float(gesture.scale)
+            distance = min(maxDistance, max(minDistance, distance))
+            gesture.scale = 1
+            apply()
+        }
+
+        private func apply() {
+            guard let cameraNode else { return }
+            cameraNode.simdPosition = target + PreviewOrbit.direction(yaw: yaw, pitch: pitch) * distance
+            cameraNode.look(at: SCNVector3(target.x, target.y, target.z))
+        }
     }
 }

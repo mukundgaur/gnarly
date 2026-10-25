@@ -54,6 +54,8 @@ final class MapperViewModel: ObservableObject {
     private var lastStairCount = 0
     /// Latest live stair volumes. The processed room often omits stairs that were visible while scanning.
     private var seenStairVolumes: [String: StairVolume] = [:]
+    /// Every floor slab RoomPlan showed during the scan, including landings it later drops from a tall stairwell.
+    private var seenFloors: [String: FloorSlab] = [:]
     private let automaticNodeSpacingMeters: Float = 0.75
     private var scanStartedAt: Date?
     private var roomUpdateCount = 0
@@ -116,6 +118,7 @@ final class MapperViewModel: ObservableObject {
             detectedStairs = []
             seenStairVolumes = [:]
         }
+        seenFloors = [:]
         scanPlan = .empty
         lastStairCount = 0
         scanStartedAt = Date()
@@ -217,6 +220,9 @@ final class MapperViewModel: ObservableObject {
         let liveStairs = room.objects.filter { $0.category == .stairs }.map(RoomPlanScanExtractor.stairVolume)
         if !liveStairs.isEmpty {
             seenStairVolumes = Dictionary(uniqueKeysWithValues: liveStairs.map { ($0.identifier, $0) })
+        }
+        for floor in room.floors {
+            seenFloors[floor.identifier.uuidString] = RoomPlanScanExtractor.floorSlab(floor)
         }
         let stairs = liveStairs.count
         let now = Date()
@@ -406,7 +412,23 @@ final class MapperViewModel: ObservableObject {
             roomKeptStairs: room.objects.contains { $0.category == .stairs },
             seen: seenStairVolumes.values
         )
-        let surfaces = BakeSurface.all(in: room, recoveredStairs: recoveredStairs)
+        let keptFlights = room.objects.filter { $0.category == .stairs }.map(RoomPlanScanExtractor.stairVolume)
+        let flights = keptFlights.isEmpty ? recoveredStairs : keptFlights
+        let walked = recorded.compactMap { node -> SIMD3<Float>? in
+            guard node.position.count >= 3 else { return nil }
+            return SIMD3(node.position[0], node.position[1], node.position[2])
+        }
+        let recoveredFloors = LandingFloors.recovered(
+            kept: room.floors.map(RoomPlanScanExtractor.floorSlab),
+            seen: seenFloors.values,
+            stairs: flights,
+            walked: walked
+        ).map { floor -> FloorSlab in
+            var copy = floor
+            copy.story = room.story
+            return copy
+        }
+        let surfaces = BakeSurface.all(in: room, recoveredStairs: recoveredStairs, recoveredFloors: recoveredFloors)
         let keyframes = colorRecorder.keyframes
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         statusText = keyframes.isEmpty ? savingStatus : "Coloring the model from \(keyframes.count) scan photos…"
@@ -444,6 +466,7 @@ final class MapperViewModel: ObservableObject {
                             map: map,
                             stairs: draft.stairs.isEmpty ? nil : draft,
                             recoveredStairs: recoveredStairs,
+                            recoveredFloors: recoveredFloors,
                             surfaceColors: colors
                         )
                         try StairCatalogStore.save(draft)

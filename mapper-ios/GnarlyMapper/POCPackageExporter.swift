@@ -12,6 +12,7 @@ enum POCPackageExporter {
         map: ExportedMap = .floor,
         stairs: StairCatalog? = nil,
         recoveredStairs: [StairVolume] = [],
+        recoveredFloors: [FloorSlab] = [],
         surfaceColors: SurfaceColorBakeResult? = nil
     ) throws -> URL {
         let documentsDirectory = try FileManager.default.url(
@@ -52,7 +53,8 @@ enum POCPackageExporter {
             from: room,
             zoneID: safeZoneID,
             capturedAt: capturedAt,
-            recoveredStairs: recoveredStairs
+            recoveredStairs: recoveredStairs,
+            recoveredFloors: recoveredFloors
         )
         try encoder.encode(features).write(to: packageURL.appendingPathComponent("scan-features.json"), options: .atomic)
 

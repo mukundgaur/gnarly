@@ -7,7 +7,8 @@ enum RoomPlanScanExtractor {
         from room: CapturedRoom,
         zoneID: String,
         capturedAt: String,
-        recoveredStairs: [StairVolume] = []
+        recoveredStairs: [StairVolume] = [],
+        recoveredFloors: [FloorSlab] = []
     ) -> ScanFeatures {
         ScanFeatures(
             schemaVersion: 1,
@@ -20,7 +21,7 @@ enum RoomPlanScanExtractor {
             doors: room.doors.map(surfaceFeature),
             openings: room.openings.map(surfaceFeature),
             windows: room.windows.map(surfaceFeature),
-            floors: room.floors.map(surfaceFeature),
+            floors: room.floors.map(surfaceFeature) + recoveredFloors.map(recoveredFloor),
             objects: room.objects.map(objectFeature) + recoveredStairs.map(recoveredStair),
             sections: room.sections.map { section in
                 ScanFeatureSection(
@@ -30,6 +31,15 @@ enum RoomPlanScanExtractor {
                 )
             },
             notes: "Normalized RoomPlan surfaces and objects in the shared ARKit world. Use this file for graph work; scan.json is the raw CapturedRoom dump."
+        )
+    }
+
+    static func floorSlab(_ surface: CapturedRoom.Surface) -> FloorSlab {
+        FloorSlab(
+            identifier: surface.identifier.uuidString,
+            transform: surface.transform,
+            dimensions: surface.dimensions,
+            story: surface.story
         )
     }
 
@@ -68,6 +78,21 @@ enum RoomPlanScanExtractor {
             transformColumnMajor: columnMajor(surface.transform),
             polygonCorners: surface.polygonCorners.map(vector3),
             parentIdentifier: surface.parentIdentifier?.uuidString
+        )
+    }
+
+    private static func recoveredFloor(_ floor: FloorSlab) -> ScanFeatureSurface {
+        let center = floor.center
+        return ScanFeatureSurface(
+            identifier: floor.identifier,
+            category: "floor",
+            confidence: "low",
+            story: floor.story,
+            dimensions: [floor.dimensions.x, floor.dimensions.y, floor.dimensions.z],
+            position: [center.x, center.y, center.z],
+            transformColumnMajor: columnMajor(floor.transform),
+            polygonCorners: [],
+            parentIdentifier: nil
         )
     }
 

@@ -658,6 +658,206 @@ enum StairLandings {
     }
 }
 
+/// A floor slab copied out of RoomPlan, or synthesized for a landing the processed room dropped.
+struct FloorSlab: Equatable {
+    var identifier: String
+    var transform: simd_float4x4
+    var dimensions: SIMD3<Float>
+    var story: Int
+
+    var center: SIMD3<Float> {
+        let column = transform.columns.3
+        return SIMD3(column.x, column.y, column.z)
+    }
+
+    /// True when `point` lies on this slab, with a little room past its edges.
+    func covers(_ point: SIMD3<Float>, padding: Float = 0.8, verticalSlop: Float = 0.85) -> Bool {
+        let local = simd_inverse(transform) * SIMD4(point.x, point.y, point.z, 1)
+        let half = simd_abs(dimensions) * 0.5
+        return abs(local.x) <= half.x + padding
+            && abs(local.y) <= half.y + padding
+            && abs(local.z) <= verticalSlop
+    }
+
+    var surface: BakeSurface {
+        BakeSurface(
+            identifier: identifier,
+            kind: .floor,
+            transform: transform,
+            dimensions: dimensions,
+            parentIdentifier: nil,
+            isPassable: false
+        )
+    }
+}
+
+/// Landings a multi-story stair scan actually walked, which RoomPlan then collapses into the bottom floor.
+enum LandingFloors {
+    /// Floors to add on top of `kept`. Seen floors win, then a pad at each stair end, then a level stretch of the walked path.
+    static func recovered(
+        kept: [FloorSlab],
+        seen: some Sequence<FloorSlab>,
+        stairs: [StairVolume],
+        walked: [SIMD3<Float>] = []
+    ) -> [FloorSlab] {
+        var occupied = kept
+        var added: [FloorSlab] = []
+        let keptIDs = Set(kept.map(\.identifier))
+
+        func claim(_ slab: FloorSlab) {
+            guard !keptIDs.contains(slab.identifier) else { return }
+            guard !occupied.contains(where: { $0.covers(slab.center, padding: 1.6) }) else { return }
+            occupied.append(slab)
+            added.append(slab)
+        }
+
+        for slab in seen.sorted(by: { $0.identifier < $1.identifier }) {
+            claim(slab)
+        }
+        for stair in stairs.sorted(by: { $0.identifier < $1.identifier }) {
+            claim(landing(for: stair, end: "below", ySign: -1, runSign: 1))
+            claim(landing(for: stair, end: "above", ySign: 1, runSign: -1))
+        }
+        let story = kept.map(\.story).min() ?? stairs.map(\.story).min() ?? 0
+        for slab in floors(walked: walked, eye: eyeHeight(kept: kept, walked: walked), story: story) {
+            claim(slab)
+        }
+        return added
+    }
+
+    /// Bottom end is local +Z at the low side. Top end is local -Z at the high side. The pad sits just past the flight.
+    private static func landing(for stair: StairVolume, end: String, ySign: Float, runSign: Float) -> FloorSlab {
+        let columns = stair.transform.columns
+        let center = SIMD3(columns.3.x, columns.3.y, columns.3.z)
+        let up = unit(SIMD3(columns.1.x, columns.1.y, columns.1.z), SIMD3(0, 1, 0))
+        var widthAxis = SIMD3(columns.0.x, columns.0.y, columns.0.z)
+        widthAxis -= up * simd_dot(widthAxis, up)
+        widthAxis = unit(widthAxis, SIMD3(1, 0, 0))
+        var forward = SIMD3(columns.2.x, columns.2.y, columns.2.z)
+        forward -= up * simd_dot(forward, up)
+        forward -= widthAxis * simd_dot(forward, widthAxis)
+        forward = unit(forward, simd_cross(up, widthAxis))
+
+        let stairWidth = max(abs(stair.dimensions.x), 0.9)
+        let height = abs(stair.dimensions.y)
+        let depth = abs(stair.dimensions.z)
+        let landingWidth = max(stairWidth, 1.6)
+        let landingDepth = max(stairWidth, 2.0)
+        let edge = center + up * (ySign * height / 2) + forward * (runSign * depth / 2)
+        let place = edge + forward * (runSign * landingDepth / 2)
+        return FloorSlab(
+            identifier: "landing-\(stair.identifier)-\(end)",
+            transform: basis(origin: place, x: widthAxis, y: forward, up: up),
+            dimensions: SIMD3(landingWidth, landingDepth, 0.05),
+            story: stair.story
+        )
+    }
+
+    /// Phone height above a floor we already kept, so a flat stretch of the path can be dropped onto a slab.
+    private static func eyeHeight(kept: [FloorSlab], walked: [SIMD3<Float>]) -> Float {
+        var deltas: [Float] = []
+        for floor in kept {
+            for point in walked where floor.covers(point, padding: 0.4, verticalSlop: 2.2) {
+                let rise = point.y - floor.center.y
+                if rise > 0.7 && rise < 2.1 { deltas.append(rise) }
+            }
+        }
+        guard deltas.count >= 2 else { return 1.35 }
+        deltas.sort()
+        return deltas[deltas.count / 2]
+    }
+
+    /// Level stretches of the walk. A flight changes height every sample, so only landings cluster.
+    private static func floors(walked: [SIMD3<Float>], eye: Float, story: Int) -> [FloorSlab] {
+        guard !walked.isEmpty else { return [] }
+        var slabs: [FloorSlab] = []
+        if let opening = openingLanding(walked: walked, eye: eye, story: story) {
+            slabs.append(opening)
+        }
+        guard walked.count >= 2 else { return slabs }
+        let sorted = walked.sorted { $0.y < $1.y }
+        var clusters: [[SIMD3<Float>]] = []
+        var current: [SIMD3<Float>] = [sorted[0]]
+        for point in sorted.dropFirst() {
+            let low = current.map(\.y).min() ?? point.y
+            if point.y - low <= 0.45 {
+                current.append(point)
+            } else {
+                clusters.append(current)
+                current = [point]
+            }
+        }
+        clusters.append(current)
+
+        for (index, cluster) in clusters.enumerated() {
+            let ys = cluster.map(\.y).sorted()
+            let yRange = (ys.last ?? 0) - (ys.first ?? 0)
+            let xs = cluster.map(\.x)
+            let zs = cluster.map(\.z)
+            let xSpan = (xs.max() ?? 0) - (xs.min() ?? 0)
+            let zSpan = (zs.max() ?? 0) - (zs.min() ?? 0)
+            let level = cluster.count >= 3 || (cluster.count >= 2 && yRange <= 0.28 && max(xSpan, zSpan) >= 0.7)
+            guard level else { continue }
+            let floorY = ys[ys.count / 2] - eye
+            let center = SIMD3(
+                ((xs.min() ?? 0) + (xs.max() ?? 0)) / 2,
+                floorY,
+                ((zs.min() ?? 0) + (zs.max() ?? 0)) / 2
+            )
+            let width = max(xSpan + 1.1, 1.8)
+            let depth = max(zSpan + 1.1, 1.8)
+            slabs.append(FloorSlab(
+                identifier: "walked-landing-\(index)",
+                transform: basis(origin: center, x: SIMD3(1, 0, 0), y: SIMD3(0, 0, 1), up: SIMD3(0, 1, 0)),
+                dimensions: SIMD3(width, depth, 0.05),
+                story: story
+            ))
+        }
+        return slabs
+    }
+
+    /// The pose where the scan opened is the door onto that floor, even if they turn in place and then climb.
+    private static func openingLanding(walked: [SIMD3<Float>], eye: Float, story: Int) -> FloorSlab? {
+        guard let first = walked.first else { return nil }
+        var group = [first]
+        for point in walked.dropFirst() {
+            if abs(point.y - first.y) > 0.45 { break }
+            group.append(point)
+        }
+        let ys = group.map(\.y).sorted()
+        let xs = group.map(\.x)
+        let zs = group.map(\.z)
+        let center = SIMD3(
+            ((xs.min() ?? 0) + (xs.max() ?? 0)) / 2,
+            ys[ys.count / 2] - eye,
+            ((zs.min() ?? 0) + (zs.max() ?? 0)) / 2
+        )
+        let width = max(((xs.max() ?? 0) - (xs.min() ?? 0)) + 1.4, 2.2)
+        let depth = max(((zs.max() ?? 0) - (zs.min() ?? 0)) + 1.4, 2.2)
+        return FloorSlab(
+            identifier: "walked-landing-start",
+            transform: basis(origin: center, x: SIMD3(1, 0, 0), y: SIMD3(0, 0, 1), up: SIMD3(0, 1, 0)),
+            dimensions: SIMD3(width, depth, 0.05),
+            story: story
+        )
+    }
+
+    private static func basis(origin: SIMD3<Float>, x: SIMD3<Float>, y: SIMD3<Float>, up: SIMD3<Float>) -> simd_float4x4 {
+        var transform = matrix_identity_float4x4
+        transform.columns.0 = SIMD4(x.x, x.y, x.z, 0)
+        transform.columns.1 = SIMD4(y.x, y.y, y.z, 0)
+        transform.columns.2 = SIMD4(up.x, up.y, up.z, 0)
+        transform.columns.3 = SIMD4(origin.x, origin.y, origin.z, 1)
+        return transform
+    }
+
+    private static func unit(_ value: SIMD3<Float>, _ fallback: SIMD3<Float>) -> SIMD3<Float> {
+        let length = simd_length(value)
+        guard length > 0.0001 else { return fallback }
+        return value / length
+    }
+}
+
 enum StairCatalogStore {
     static func load() -> StairCatalog {
         guard let url = try? fileURL(),
