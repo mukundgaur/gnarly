@@ -53,6 +53,19 @@ final class SurfaceColorRecorder {
 
     var count: Int { keyframes.count }
 
+    /// Pose and lens for each saved photo, without the JPEG. Used to estimate splat coverage while scanning.
+    var coverageCameras: [CoverageCamera] {
+        keyframes.map {
+            CoverageCamera(
+                transform: $0.cameraTransform,
+                focal: $0.focal,
+                principal: $0.principal,
+                width: Float($0.width),
+                height: Float($0.height)
+            )
+        }
+    }
+
     /// Drops all photos. ARKit coordinates change between scans, so old photos would project to the wrong place.
     func reset() {
         let old = directory

@@ -107,6 +107,49 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertTrue(StairVolume.recovered(roomKeptStairs: true, seen: [stair]).isEmpty)
     }
 
+    func testHeadOnPhotoMarksAWallCovered() {
+        let wall = coveragePlane(id: "wall", kind: .wall, center: SIMD3(0, 1.5, 0), normal: SIMD3(0, 0, 1), width: 0.5, height: 0.5)
+        let camera = coverageCamera(eye: SIMD3(0, 1.5, 2), target: SIMD3(0, 1.5, 0))
+        let snapshot = ColorCoverage.grade(surfaces: [wall], cameras: [camera])
+        XCTAssertEqual(snapshot.samples.count, 1)
+        XCTAssertEqual(snapshot.samples[0].grade, .good)
+        XCTAssertEqual(snapshot.weakSurfaceCount, 0)
+    }
+
+    func testGlancingAndDistantPhotosStayThin() {
+        let wall = coveragePlane(id: "wall", kind: .wall, center: SIMD3(0, 1.5, 0), normal: SIMD3(0, 0, 1), width: 0.5, height: 0.5)
+        let glancing = coverageCamera(eye: SIMD3(2.4, 1.5, 0.7), target: SIMD3(0, 1.5, 0))
+        let far = coverageCamera(eye: SIMD3(0, 1.5, 6), target: SIMD3(0, 1.5, 0))
+        XCTAssertEqual(ColorCoverage.grade(surfaces: [wall], cameras: [glancing]).samples[0].grade, .thin)
+        XCTAssertEqual(ColorCoverage.grade(surfaces: [wall], cameras: [far]).samples[0].grade, .thin)
+        let tooFar = coverageCamera(eye: SIMD3(0, 1.5, 8), target: SIMD3(0, 1.5, 0))
+        XCTAssertEqual(ColorCoverage.grade(surfaces: [wall], cameras: [tooFar]).samples[0].grade, .unseen)
+    }
+
+    func testAWallBetweenTheCameraAndTheSurfaceBlocksCoverage() {
+        let hidden = coveragePlane(id: "hidden", kind: .wall, center: SIMD3(0, 1.5, 0), normal: SIMD3(0, 0, 1), width: 0.5, height: 0.5)
+        let blocker = coveragePlane(id: "blocker", kind: .wall, center: SIMD3(0, 1.5, 1), normal: SIMD3(0, 0, 1), width: 2, height: 2)
+        let camera = coverageCamera(eye: SIMD3(0, 1.5, 2), target: SIMD3(0, 1.5, 0))
+        let snapshot = ColorCoverage.grade(surfaces: [hidden, blocker], cameras: [camera])
+        XCTAssertTrue(snapshot.samples.filter { $0.surfaceID == "hidden" }.allSatisfy { $0.grade == .unseen })
+        XCTAssertTrue(snapshot.samples.contains { $0.surfaceID == "blocker" && $0.grade == .good })
+    }
+
+    func testTheBackOfAnObjectDoesNotCountAsCovered() {
+        let object = BakeSurface(
+            identifier: "table",
+            kind: .object,
+            transform: matrix_identity_float4x4,
+            dimensions: SIMD3(1, 1, 1),
+            parentIdentifier: nil,
+            isPassable: false
+        )
+        let behind = coverageCamera(eye: SIMD3(0, 0, -2), target: .zero)
+        let snapshot = ColorCoverage.grade(surfaces: [object], cameras: [behind])
+        XCTAssertEqual(snapshot.samples.first { $0.id.contains("-nz-") }?.grade, .good)
+        XCTAssertEqual(snapshot.samples.first { $0.id.contains("-pz-") }?.grade, .unseen)
+    }
+
     func testPlacementMatrixMatchesLayoutToWorld() {
         let entry = BuildingLayoutDocument.ZoneEntry(zoneId: "a", floor: 1, x: 3, z: -1, rotationDegrees: 0)
         let matrix = placementMatrix(entry, ground: 0)
@@ -114,4 +157,48 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertEqual(matrix.columns.3.y, buildingFloorGap, accuracy: 0.001)
         XCTAssertEqual(matrix.columns.3.z, -1, accuracy: 0.001)
     }
+}
+
+private func coverageCamera(eye: SIMD3<Float>, target: SIMD3<Float>) -> CoverageCamera {
+    let forward = simd_normalize(target - eye)
+    let zAxis = -forward
+    let up = SIMD3<Float>(0, 1, 0)
+    var xAxis = simd_cross(up, zAxis)
+    if simd_length(xAxis) < 0.001 { xAxis = SIMD3(1, 0, 0) }
+    xAxis = simd_normalize(xAxis)
+    let yAxis = simd_normalize(simd_cross(zAxis, xAxis))
+    var transform = matrix_identity_float4x4
+    transform.columns.0 = SIMD4(xAxis.x, xAxis.y, xAxis.z, 0)
+    transform.columns.1 = SIMD4(yAxis.x, yAxis.y, yAxis.z, 0)
+    transform.columns.2 = SIMD4(zAxis.x, zAxis.y, zAxis.z, 0)
+    transform.columns.3 = SIMD4(eye.x, eye.y, eye.z, 1)
+    return CoverageCamera(transform: transform, focal: SIMD2(900, 900), principal: SIMD2(500, 500), width: 1000, height: 1000)
+}
+
+private func coveragePlane(
+    id: String,
+    kind: BakeSurface.Kind,
+    center: SIMD3<Float>,
+    normal: SIMD3<Float>,
+    width: Float,
+    height: Float
+) -> BakeSurface {
+    let z = simd_normalize(normal)
+    let up = abs(z.y) > 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
+    let x = simd_normalize(simd_cross(up, z))
+    let y = simd_normalize(simd_cross(z, x))
+    var transform = matrix_identity_float4x4
+    transform.columns.0 = SIMD4(x.x, x.y, x.z, 0)
+    transform.columns.1 = SIMD4(y.x, y.y, y.z, 0)
+    transform.columns.2 = SIMD4(z.x, z.y, z.z, 0)
+    transform.columns.3 = SIMD4(center.x, center.y, center.z, 1)
+    let depth: Float = kind == .object ? 1 : 0.1
+    return BakeSurface(
+        identifier: id,
+        kind: kind,
+        transform: transform,
+        dimensions: SIMD3(width, height, depth),
+        parentIdentifier: nil,
+        isPassable: false
+    )
 }

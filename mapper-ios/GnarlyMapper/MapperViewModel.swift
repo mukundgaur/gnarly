@@ -25,6 +25,7 @@ final class MapperViewModel: ObservableObject {
     @Published private(set) var previewAtlas: UIImage?
     @Published private(set) var previewSummary = ""
     @Published private(set) var colorFrameCount = 0
+    @Published private(set) var coverage = CoverageSnapshot.empty
     @Published var activeTarget: ZoneScanTarget?
     @Published var activeBuilding: OwnedBuilding?
 
@@ -59,6 +60,11 @@ final class MapperViewModel: ObservableObject {
     private var lastRoomStats = "No captured-room updates yet"
     private var lastInstruction = "none"
     private var lastCaptureFailure: String?
+    private var liveSurfaces: [BakeSurface] = []
+    private var coverageInFlight = false
+    private var coverageDirty = false
+    private var lastCoverageAt = Date.distantPast
+    private var coverageGeneration = 0
 
     var canMarkAnchor: Bool {
         arSession.currentFrame != nil
@@ -118,6 +124,11 @@ final class MapperViewModel: ObservableObject {
         lastInstruction = "none"
         lastCaptureFailure = nil
         colorRecorder.reset()
+        coverageGeneration += 1
+        coverage = .empty
+        liveSurfaces = []
+        coverageInFlight = false
+        coverageDirty = false
         captureView?.captureSession.run(configuration: .init())
         isScanning = true
         phase = .scanning
@@ -201,6 +212,7 @@ final class MapperViewModel: ObservableObject {
     }
 
     func noteRoomUpdate(_ room: CapturedRoom) {
+        liveSurfaces = BakeSurface.all(in: room)
         roomUpdateCount += 1
         let liveStairs = room.objects.filter { $0.category == .stairs }.map(RoomPlanScanExtractor.stairVolume)
         if !liveStairs.isEmpty {
@@ -656,6 +668,38 @@ final class MapperViewModel: ObservableObject {
             if let frame = self.arSession.currentFrame {
                 self.colorRecorder.consider(frame)
                 self.colorFrameCount = self.colorRecorder.count
+                self.refreshCoverageIfNeeded()
+            }
+        }
+    }
+
+    /// Re-scores splat coverage when a new photo arrives or the room geometry has drifted.
+    private func refreshCoverageIfNeeded() {
+        guard isScanning, !liveSurfaces.isEmpty else { return }
+        let frames = colorRecorder.count
+        let surfacesChanged = liveSurfaces.count != coverage.surfaceCount
+        let due = Date().timeIntervalSince(lastCoverageAt) > 1
+        guard frames != coverage.cameraCount || surfacesChanged || due else { return }
+        guard !coverageInFlight else {
+            coverageDirty = true
+            return
+        }
+        coverageInFlight = true
+        coverageDirty = false
+        lastCoverageAt = Date()
+        let generation = coverageGeneration
+        let surfaces = liveSurfaces
+        let cameras = colorRecorder.coverageCameras
+        Task.detached(priority: .utility) {
+            let snapshot = ColorCoverage.grade(surfaces: surfaces, cameras: cameras)
+            await MainActor.run { [weak self] in
+                guard let self, self.coverageGeneration == generation else { return }
+                self.coverage = snapshot
+                self.coverageInFlight = false
+                if self.coverageDirty {
+                    self.coverageDirty = false
+                    self.refreshCoverageIfNeeded()
+                }
             }
         }
     }

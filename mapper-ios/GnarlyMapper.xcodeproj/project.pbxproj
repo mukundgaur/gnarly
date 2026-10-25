@@ -29,6 +29,8 @@
 		9546AE9215D9D2C6B3512618 /* FirebaseStoragePathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F451C51052FBE715F12ADAAB /* FirebaseStoragePathsTests.swift */; };
 		9F404F6AE54F7FA4C5D1C488 /* FirebaseDiagnosticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6F2AC5B0FD1CB36020899F /* FirebaseDiagnosticsViewModel.swift */; };
 		AC610F55C4510B55B4642580 /* SurfaceColorCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01E828C023B0F4A206837135 /* SurfaceColorCapture.swift */; };
+		B7C0A11E5F60718293A4C002 /* ColorCoverage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C0A11E5F60718293A4C001 /* ColorCoverage.swift */; };
+		B7C0A11E5F60718293A4C004 /* CoverageOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C0A11E5F60718293A4C003 /* CoverageOverlay.swift */; };
 		B44AEA9378BF26AC2C9B2843 /* FirebaseDataError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A30FE85C0D530BDB17A0FB /* FirebaseDataError.swift */; };
 		B94D7AD17FE8F7769BC8FE4D /* ScanMinimap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */; };
 		CB6E7724F62CE73F33BDCB2B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D2E5B8845E0C57FB4607372 /* FirebaseFirestore */; };
@@ -70,6 +72,8 @@
 /* Begin PBXFileReference section */
 		0127B0AED13A0DCD415DE987 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		01E828C023B0F4A206837135 /* SurfaceColorCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceColorCapture.swift; sourceTree = "<group>"; };
+		B7C0A11E5F60718293A4C001 /* ColorCoverage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorCoverage.swift; sourceTree = "<group>"; };
+		B7C0A11E5F60718293A4C003 /* CoverageOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverageOverlay.swift; sourceTree = "<group>"; };
 		07514BC3DC3CE1EA0ADBED80 /* GnarlyMapper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GnarlyMapper.entitlements; sourceTree = "<group>"; };
 		08AE56EC505D125D2438FCB2 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		1AB42D1F440436D04AB80409 /* POCPackageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = POCPackageExporter.swift; sourceTree = "<group>"; };
@@ -171,6 +175,7 @@
 				A1B2C3D4E5F60718293A4B50 /* Scan */,
 				B5295C8E4FB754154E6BD91A /* ScanMinimap.swift */,
 				835CEE17A191B42BCF3DE668 /* StairZones.swift */,
+				B7C0A11E5F60718293A4C001 /* ColorCoverage.swift */,
 				01E828C023B0F4A206837135 /* SurfaceColorCapture.swift */,
 				A1B2C3D4E5F60718293A4B60 /* Theme */,
 				A62468E057F7EFF0F18E86F7 /* Firebase */,
@@ -251,6 +256,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F60718293A4B51 /* ColorPreviewView.swift */,
+				B7C0A11E5F60718293A4C003 /* CoverageOverlay.swift */,
 				A1B2C3D4E5F60718293A4B53 /* ScanCoachingView.swift */,
 				A1B2C3D4E5F60718293A4B55 /* ScanSessionView.swift */,
 			);
@@ -400,6 +406,8 @@
 				A1B2C3D4E5F60718293A4B30 /* ScanPlannerView.swift in Sources */,
 				A1B2C3D4E5F60718293A4B56 /* ScanSessionView.swift in Sources */,
 				61770C565FA848405823A808 /* StairZones.swift in Sources */,
+				B7C0A11E5F60718293A4C002 /* ColorCoverage.swift in Sources */,
+				B7C0A11E5F60718293A4C004 /* CoverageOverlay.swift in Sources */,
 				AC610F55C4510B55B4642580 /* SurfaceColorCapture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

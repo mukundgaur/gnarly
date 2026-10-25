@@ -8,6 +8,8 @@ struct ScanSessionView: View {
     @StateObject private var mapper = MapperViewModel()
     @State private var started = false
     @State private var showCoach = true
+    @State private var showCoverage = true
+    @State private var selectedCoverage: String?
 
     var body: some View {
         ZStack {
@@ -62,6 +64,25 @@ struct ScanSessionView: View {
                 .padding(12)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
+                if mapper.phase == .scanning {
+                    CoverageStatusChip(snapshot: mapper.coverage, visible: showCoverage) {
+                        withAnimation(.spring(duration: 0.35)) {
+                            showCoverage.toggle()
+                            if !showCoverage { selectedCoverage = nil }
+                        }
+                    }
+                    if showCoverage {
+                        CoverageLegend()
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    if showCoverage, let sample = mapper.coverage.samples.first(where: { $0.id == selectedCoverage }) {
+                        CoverageHintCard(sample: sample) {
+                            withAnimation(.spring(duration: 0.35)) { selectedCoverage = nil }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+
                 if showCoach && mapper.phase == .scanning {
                     ScanCoachingView(photos: mapper.colorFrameCount)
                         .onTapGesture { withAnimation { showCoach = false } }
@@ -74,8 +95,17 @@ struct ScanSessionView: View {
                     }
                 }
                 Spacer()
+                    .allowsHitTesting(false)
             }
             .padding(16)
+
+            if showCoverage && mapper.phase == .scanning {
+                CoverageOverlay(samples: mapper.coverage.samples, session: mapper.arSession, selectedID: selectedCoverage) { id in
+                    withAnimation(.spring(duration: 0.35)) { selectedCoverage = id }
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
         }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
