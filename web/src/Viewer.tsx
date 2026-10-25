@@ -7,7 +7,7 @@ import { elevatorStopNear, zoneEdgeChecks, type BuildingModel, type BuildingNode
 import { canWalkBetween, floorHeightAt, pointOnFloor, wallBetween } from './geometry';
 import { FLOOR_GAP, toLocal, toWorld, type Vec3, type ZoneTransform } from './zoneAlign.ts';
 import { InlineRename } from './ui.tsx';
-import { stairBoxes } from './stairMesh.ts';
+import { stairBoxes, type StairStep } from './stairMesh.ts';
 import { dominantAngle, normalizeDegrees, placeSegments, rotateAbout, snapRotation, snapTranslation, zoneCenter, zoneSegments, type P2, type Placement, type Segment } from './zoneArrange.ts';
 
 /** position is in the zone's own ARKit coordinates. */
@@ -197,11 +197,53 @@ function StairFlight({ feature, opacity = 1 }: { feature: ScanFeature; opacity?:
   const matrix = useMemo(() => featureMatrix(feature), [feature]);
   const steps = useMemo(() => stairBoxes(feature.dimensions), [feature.dimensions]);
   return <group matrix={matrix} matrixAutoUpdate={false}>
-    {steps.map((step, index) => <mesh key={index} position={step.center}>
-      <boxGeometry args={step.size} />
-      <meshStandardMaterial color={SCENE.stairs} roughness={.72} transparent={opacity < 1} opacity={opacity} />
-    </mesh>)}
+    {steps.map((step, index) => (
+      <StairTread key={index} identifier={feature.identifier} step={step} index={index} opacity={opacity} />
+    ))}
   </group>;
+}
+
+/** One riser-tall step. The top (py) is the tread and the +Z face (pz) is the riser. */
+function StairTread({ identifier, step, index, opacity }: {
+  identifier: string;
+  step: StairStep;
+  index: number;
+  opacity: number;
+}) {
+  const { colors, atlas } = useContext(SurfaceColorContext);
+  const faces = colors?.surfaces[identifier];
+  const tread = faces?.[`tread-${index}`];
+  const riser = faces?.[`riser-${index}`];
+  const geometry = useDisposable(useMemo(() => {
+    const geometry = new BoxGeometry(...step.size);
+    if (!colors || !atlas) return geometry;
+    const uv = geometry.getAttribute('uv');
+    ([
+      [2, tread],
+      [4, riser],
+    ] as const).forEach(([group, face]) => {
+      if (!face?.rect) return;
+      for (let vertex = group * 4; vertex < group * 4 + 4; vertex++) {
+        const [atlasU, atlasV] = atlasUV(colors, face.rect, uv.getX(vertex), uv.getY(vertex));
+        uv.setXY(vertex, atlasU, atlasV);
+      }
+    });
+    uv.needsUpdate = true;
+    return geometry;
+  }, [step.size.join(','), colors, atlas, tread, riser]));
+  const materials = useDisposable(useMemo(() => {
+    const transparent = opacity < 1;
+    return BOX_FACES.map((_, group) => {
+      const face = group === 2 ? tread : group === 4 ? riser : undefined;
+      if (face?.rect && atlas) return new MeshBasicMaterial({ map: atlas, transparent, opacity, toneMapped: false });
+      if (face) return new MeshBasicMaterial({
+        color: new Color().setRGB(face.color[0], face.color[1], face.color[2], SRGBColorSpace),
+        transparent, opacity, toneMapped: false,
+      });
+      return new MeshStandardMaterial({ color: group === 4 ? '#a8844e' : SCENE.stairs, transparent, opacity, roughness: .72 });
+    });
+  }, [tread, riser, atlas, opacity]));
+  return <mesh geometry={geometry} material={materials} position={step.center} />;
 }
 
 function ScannedFloor({ feature, floorId, zoneId, onPick }: { feature: ScanFeature; floorId: string; zoneId?: string; onPick?: (world: Vec3) => void }) {

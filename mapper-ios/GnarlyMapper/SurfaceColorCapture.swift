@@ -289,6 +289,7 @@ struct SurfaceColorDocument: Codable {
 
     /// Face names follow three.js BoxGeometry order in the feature's local frame: px, nx, py, pz, nz.
     /// Planar surfaces (walls, doors, windows, floors) only have pz and nz.
+    /// Stairs use `tread-<index>` (local +Y, U=+x V=-z) and `riser-<index>` (local +Z, U=+x V=+y). The flight rises toward local -Z.
     /// Inside `rect`, u runs along the face's U axis and the top row is v = 1:
     ///   pz: U=+x V=+y   nz: U=-x V=+y   px: U=-z V=+y   nx: U=+z V=+y   py: U=+x V=-z
     struct Face: Codable {
@@ -418,6 +419,8 @@ enum SurfaceColorBaker {
 
     fileprivate struct Face {
         let surfaceIndex: Int
+        /// Occluder this face belongs to. A step is not blocked by its own tread and riser.
+        let occluderID: Int
         let name: String
         let center: SIMD3<Float>
         let uAxis: SIMD3<Float>
@@ -447,19 +450,26 @@ enum SurfaceColorBaker {
             let z = simd_normalize(SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z))
             let c = SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             let d = simd_abs(surface.dimensions)
-            func add(_ name: String, _ offset: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, _ n: SIMD3<Float>, _ w: Float, _ h: Float) {
+            func add(_ name: String, _ offset: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, _ n: SIMD3<Float>, _ w: Float, _ h: Float, occluder: Int) {
                 guard w > 0.02, h > 0.02 else { return }
-                faces.append(Face(surfaceIndex: index, name: name, center: c + offset, uAxis: u, vAxis: v, normal: n, width: w, height: h))
+                faces.append(Face(surfaceIndex: index, occluderID: occluder, name: name, center: c + offset, uAxis: u, vAxis: v, normal: n, width: w, height: h))
             }
-            if surface.kind == .object || surface.kind == .stairs {
-                add("px", x * (d.x / 2), -z, y, x, d.z, d.y)
-                add("nx", -x * (d.x / 2), z, y, -x, d.z, d.y)
-                add("py", y * (d.y / 2), x, -z, y, d.x, d.z)
-                add("pz", z * (d.z / 2), x, y, z, d.x, d.y)
-                add("nz", -z * (d.z / 2), -x, y, -z, d.x, d.y)
+            if surface.kind == .stairs {
+                for face in StairSteps.faces(dimensions: d) {
+                    let offset = x * face.center.x + y * face.center.y + z * face.center.z
+                    let u = x * face.axisU.x + y * face.axisU.y + z * face.axisU.z
+                    let v = x * face.axisV.x + y * face.axisV.y + z * face.axisV.z
+                    add(face.name, offset, u, v, simd_normalize(simd_cross(u, v)), face.width, face.height, stairOccluderID(surface: index, step: face.stepIndex))
+                }
+            } else if surface.kind == .object {
+                add("px", x * (d.x / 2), -z, y, x, d.z, d.y, index)
+                add("nx", -x * (d.x / 2), z, y, -x, d.z, d.y, index)
+                add("py", y * (d.y / 2), x, -z, y, d.x, d.z, index)
+                add("pz", z * (d.z / 2), x, y, z, d.x, d.y, index)
+                add("nz", -z * (d.z / 2), -x, y, -z, d.x, d.y, index)
             } else {
-                add("pz", .zero, x, y, z, d.x, d.y)
-                add("nz", .zero, -x, y, -z, d.x, d.y)
+                add("pz", .zero, x, y, z, d.x, d.y, index)
+                add("nz", .zero, -x, y, -z, d.x, d.y, index)
             }
         }
 
@@ -475,10 +485,15 @@ enum SurfaceColorBaker {
         return (faces, texel)
     }
 
+    /// Step occluders must not share ids with surface indexes, which start at 0.
+    private static func stairOccluderID(surface: Int, step: Int) -> Int {
+        1_000_000 + surface * 64 + step
+    }
+
     // MARK: Occlusion without LiDAR depth
 
     fileprivate struct Occluder {
-        let surfaceIndex: Int
+        let occluderID: Int
         let center: SIMD3<Float>
         let x: SIMD3<Float>
         let y: SIMD3<Float>
@@ -533,21 +548,37 @@ enum SurfaceColorBaker {
             holes[parentID, default: []].append(SIMD4<Float>(center.x - half.x, center.y - half.y, center.x + half.x, center.y + half.y))
         }
 
-        return surfaces.enumerated().compactMap { index, surface in
-            guard !surface.isPassable, surface.kind != .window else { return nil }
+        return surfaces.enumerated().flatMap { index, surface -> [Occluder] in
+            guard !surface.isPassable, surface.kind != .window else { return [] }
             let t = surface.transform
+            let x = simd_normalize(SIMD3<Float>(t.columns.0.x, t.columns.0.y, t.columns.0.z))
+            let y = simd_normalize(SIMD3<Float>(t.columns.1.x, t.columns.1.y, t.columns.1.z))
+            let z = simd_normalize(SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z))
+            let c = SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            if surface.kind == .stairs {
+                return StairSteps.boxes(dimensions: simd_abs(surface.dimensions)).enumerated().map { stepIndex, step in
+                    let half = step.size / 2
+                    return Occluder(
+                        occluderID: stairOccluderID(surface: index, step: stepIndex),
+                        center: c + x * step.center.x + y * step.center.y + z * step.center.z,
+                        x: x, y: y, z: z,
+                        half: half,
+                        radius: simd_length(half),
+                        planar: false,
+                        holes: []
+                    )
+                }
+            }
             let half = simd_abs(surface.dimensions) / 2
-            return Occluder(
-                surfaceIndex: index,
-                center: SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z),
-                x: simd_normalize(SIMD3<Float>(t.columns.0.x, t.columns.0.y, t.columns.0.z)),
-                y: simd_normalize(SIMD3<Float>(t.columns.1.x, t.columns.1.y, t.columns.1.z)),
-                z: simd_normalize(SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z)),
+            return [Occluder(
+                occluderID: index,
+                center: c,
+                x: x, y: y, z: z,
                 half: half,
                 radius: simd_length(half),
-                planar: surface.kind != .object && surface.kind != .stairs,
+                planar: surface.kind != .object,
                 holes: holes[surface.identifier] ?? []
-            )
+            )]
         }
     }
 
@@ -620,7 +651,7 @@ enum SurfaceColorBaker {
 
         let blockers = frame.depth == nil
             ? occluders.filter { occluder in
-                occluder.surfaceIndex != face.surfaceIndex &&
+                occluder.occluderID != face.occluderID &&
                     distanceToSegment(occluder.center, camera, face.center) < occluder.radius + face.radius
             }
             : []

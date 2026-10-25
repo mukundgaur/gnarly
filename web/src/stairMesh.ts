@@ -1,6 +1,6 @@
 export type StairStep = { center: [number, number, number]; size: [number, number, number] };
 
-/** Matches StairSteps in the mapper. Steps rise on local +Y and run toward local +Z. */
+/** Matches StairSteps in the mapper. Each block is one riser tall and the flight climbs toward local -Z. */
 export const STAIR_RISER_METERS = 0.18;
 
 export function stairStepCount(height: number): number {
@@ -16,11 +16,11 @@ export function stairBoxes(dimensions: [number, number, number]): StairStep[] {
   const riser = height / count;
   const tread = depth / count;
   return Array.from({ length: count }, (_, index) => {
-    const stepHeight = riser * (index + 1);
-    const z0 = -depth / 2 + tread * index;
+    const y0 = -height / 2 + riser * index;
+    const zFront = depth / 2 - tread * index;
     return {
-      center: [0, -height / 2 + stepHeight / 2, z0 + tread / 2],
-      size: [width, stepHeight, tread],
+      center: [0, y0 + riser / 2, zFront - tread / 2],
+      size: [width, riser, tread],
     };
   });
 }

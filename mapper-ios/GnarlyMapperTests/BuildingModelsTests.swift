@@ -61,16 +61,39 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertEqual(panels[0].height, 2, accuracy: 0.001)
     }
 
-    func testStairStepsFillTheDetectedVolume() {
+    func testStairStepsAreSingleRisersClimbingTowardNegativeZ() {
         let steps = StairSteps.boxes(dimensions: SIMD3(1.2, 1.8, 3))
         XCTAssertEqual(steps.count, 10)
         let first = steps[0]
         let top = steps[steps.count - 1]
+        XCTAssertEqual(first.size.y, 0.18, accuracy: 0.0001)
+        XCTAssertEqual(top.size.y, first.size.y, accuracy: 0.0001)
+        XCTAssertLessThan(first.size.y, 1.8)
         XCTAssertEqual(first.center.y - first.size.y / 2, -0.9, accuracy: 0.0001)
-        XCTAssertEqual(first.center.z - first.size.z / 2, -1.5, accuracy: 0.0001)
+        XCTAssertEqual(first.center.z + first.size.z / 2, 1.5, accuracy: 0.0001)
         XCTAssertEqual(top.center.y + top.size.y / 2, 0.9, accuracy: 0.0001)
-        XCTAssertEqual(top.center.z + top.size.z / 2, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(top.center.z - top.size.z / 2, -1.5, accuracy: 0.0001)
         XCTAssertEqual(top.size.x, 1.2, accuracy: 0.0001)
+
+        let faces = StairSteps.faces(dimensions: SIMD3(1.2, 1.8, 3))
+        let tread = faces.first { $0.name == "tread-0" }
+        let riser = faces.first { $0.name == "riser-0" }
+        XCTAssertEqual(tread?.center.y ?? 0, first.center.y + first.size.y / 2, accuracy: 0.0001)
+        XCTAssertEqual(riser?.center.z ?? 0, first.center.z + first.size.z / 2, accuracy: 0.0001)
+        XCTAssertEqual(riser?.axisV ?? .zero, SIMD3(0, 1, 0))
+    }
+
+    func testUpperLandingMatchesTheTopOfTheFlight() {
+        let landings = StairLandings.positions(
+            center: [0, 1, 0],
+            dimensions: [1.2, 2, 4],
+            up: [0, 1, 0],
+            forward: [0, 0, 1]
+        )
+        XCTAssertEqual(landings.below[1], 0, accuracy: 0.0001)
+        XCTAssertEqual(landings.below[2], 2, accuracy: 0.0001)
+        XCTAssertEqual(landings.above[1], 2, accuracy: 0.0001)
+        XCTAssertEqual(landings.above[2], -2, accuracy: 0.0001)
     }
 
     func testRecoveredStairsAreKeptOnlyWhenProcessingDropsThem() {

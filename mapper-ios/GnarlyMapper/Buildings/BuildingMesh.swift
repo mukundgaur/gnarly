@@ -123,7 +123,7 @@ enum BuildingMesh {
             case .object:
                 root.addChildNode(objectNode(surface, colors: byID[surface.identifier], atlas: atlas))
             case .stairs:
-                root.addChildNode(stairNode(surface))
+                root.addChildNode(stairNode(surface, colors: byID[surface.identifier], atlas: atlas))
             }
         }
         root.opacity = dimmed ? 0.3 : 1
@@ -311,27 +311,57 @@ enum BuildingMesh {
         return node
     }
 
-    /// SceneKit box materials are front, right, back, left, top, bottom. The riser is the -Z face.
-    private static func stairNode(_ surface: BakeSurface) -> SCNNode {
+    /// Treads and risers take the photo splat. The other faces of each one-riser block stay a solid color.
+    private static func stairNode(_ surface: BakeSurface, colors: SurfaceColorDocument.Surface?, atlas: UIImage?) -> SCNNode {
         let node = SCNNode()
         node.name = surface.identifier
         node.simdTransform = surface.transform
-        let side = solidMaterial(SurfacePalette.color(for: .stairs))
-        let tread = solidMaterial(UIColor(red: 0.91, green: 0.78, blue: 0.55, alpha: 1))
-        let riser = solidMaterial(UIColor(red: 0.55, green: 0.42, blue: 0.26, alpha: 1))
+        let treadFallback = SurfacePalette.color(for: .stairs)
+        let riserFallback = shade(treadFallback, 0.72)
+        let side = solidMaterial(shade(treadFallback, 0.88))
+        for face in StairSteps.faces(dimensions: surface.dimensions) {
+            let baked = colors?.faces.first { $0.face == face.name }
+            let fallback = face.name.hasPrefix("riser") ? riserFallback : treadFallback
+            node.addChildNode(faceQuad(
+                center: face.center,
+                axisU: face.axisU,
+                axisV: face.axisV,
+                width: face.width,
+                height: face.height,
+                faceName: face.name,
+                faceSize: SIMD2(face.width, face.height),
+                face: baked,
+                atlas: atlas,
+                fallback: uiColor(baked, fallback: fallback),
+                fullFace: true
+            ))
+        }
         for step in StairSteps.boxes(dimensions: surface.dimensions) {
-            let box = SCNBox(
-                width: CGFloat(step.size.x),
-                height: CGFloat(step.size.y),
-                length: CGFloat(step.size.z),
-                chamferRadius: 0
-            )
-            box.materials = [side, side, riser, side, tread, side]
-            let stepNode = SCNNode(geometry: box)
-            stepNode.simdPosition = step.center
-            node.addChildNode(stepNode)
+            addStepShell(to: node, step: step, material: side)
         }
         return node
+    }
+
+    /// Sides, back, and underside of one step. The tread and riser are drawn separately so they can carry the splat.
+    private static func addStepShell(to node: SCNNode, step: StairStepBox, material: SCNMaterial) {
+        let c = step.center
+        let s = step.size
+        func panel(_ center: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, _ width: Float, _ height: Float) {
+            node.addChildNode(quad(
+                corners: [
+                    center - u * (width / 2) - v * (height / 2),
+                    center + u * (width / 2) - v * (height / 2),
+                    center + u * (width / 2) + v * (height / 2),
+                    center - u * (width / 2) + v * (height / 2),
+                ],
+                uvs: [.zero, .zero, .zero, .zero],
+                material: material
+            ))
+        }
+        panel(c + SIMD3(-s.x / 2, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 1, 0), s.z, s.y)
+        panel(c + SIMD3(s.x / 2, 0, 0), SIMD3(0, 0, -1), SIMD3(0, 1, 0), s.z, s.y)
+        panel(c + SIMD3(0, 0, -s.z / 2), SIMD3(-1, 0, 0), SIMD3(0, 1, 0), s.x, s.y)
+        panel(c + SIMD3(0, -s.y / 2, 0), SIMD3(1, 0, 0), SIMD3(0, 0, 1), s.x, s.z)
     }
 
     private static func objectNode(_ surface: BakeSurface, colors: SurfaceColorDocument.Surface?, atlas: UIImage?) -> SCNNode {

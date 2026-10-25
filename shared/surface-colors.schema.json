@@ -22,7 +22,7 @@
         "required": ["identifier", "kind", "faces"],
         "properties": {
           "identifier": { "type": "string", "description": "RoomPlan identifier, as in scan-features.json." },
-          "kind": { "enum": ["wall", "door", "window", "opening", "floor", "object"] },
+          "kind": { "enum": ["wall", "door", "window", "opening", "floor", "object", "stairs"] },
           "faces": { "type": "array", "items": { "$ref": "#/$defs/face" } }
         }
       }
@@ -33,9 +33,9 @@
     "face": {
       "type": "object",
       "required": ["face", "color", "coverage"],
-      "description": "Faces use three.js BoxGeometry names in the feature's local frame. Planar surfaces (walls, doors, windows, floors) have only pz and nz; objects also have px, nx and py. U/V axes: pz U=+x V=+y, nz U=-x V=+y, px U=-z V=+y, nx U=+z V=+y, py U=+x V=-z.",
+      "description": "Faces use three.js BoxGeometry names in the feature's local frame. Planar surfaces (walls, doors, windows, floors) have only pz and nz; objects also have px, nx and py. Stairs use tread-<index> (local +Y, U=+x V=-z) and riser-<index> (local +Z, U=+x V=+y); the flight rises toward local -Z. U/V axes: pz U=+x V=+y, nz U=-x V=+y, px U=-z V=+y, nx U=+z V=+y, py U=+x V=-z.",
       "properties": {
-        "face": { "enum": ["px", "nx", "py", "pz", "nz"] },
+        "face": { "type": "string", "pattern": "^(px|nx|py|pz|nz|tread-[0-9]+|riser-[0-9]+)$" },
         "color": {
           "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 3, "maxItems": 3,
           "description": "Average sRGB color of the face."

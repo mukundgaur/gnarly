@@ -74,7 +74,7 @@ enum StairEnd: String {
     case above
 }
 
-/// One staircase volume copied out of a RoomPlan update. Local +Y is up and local +Z runs toward the upper landing.
+/// One staircase volume copied out of a RoomPlan update. Local +Y is up. Local +Z points down the flight; the steps rise toward local -Z.
 struct StairVolume: Equatable {
     var identifier: String
     var transform: simd_float4x4
@@ -106,7 +106,18 @@ struct StairStepBox: Equatable {
     var size: SIMD3<Float>
 }
 
-/// Stepped boxes that fill a stair volume. The same layout is drawn by `web/src/stairMesh.ts`.
+/// A tread or riser in the stair volume's local frame. `tread-<n>` is the top (+Y); `riser-<n>` faces +Z.
+struct StairStepFace: Equatable {
+    var name: String
+    var stepIndex: Int
+    var center: SIMD3<Float>
+    var axisU: SIMD3<Float>
+    var axisV: SIMD3<Float>
+    var width: Float
+    var height: Float
+}
+
+/// One riser-tall block per step. The same layout is drawn by `web/src/stairMesh.ts`.
 enum StairSteps {
     static let targetRiser: Float = 0.18
     static let minimumCount = 2
@@ -117,6 +128,7 @@ enum StairSteps {
         return min(maximumCount, max(minimumCount, steps))
     }
 
+    /// Steps climb toward local -Z. Each box is one riser tall, not a column down to the floor.
     static func boxes(dimensions: SIMD3<Float>) -> [StairStepBox] {
         let width = max(abs(dimensions.x), 0.05)
         let height = max(abs(dimensions.y), 0.05)
@@ -125,12 +137,38 @@ enum StairSteps {
         let riser = height / Float(steps)
         let tread = depth / Float(steps)
         return (0 ..< steps).map { index in
-            let stepHeight = riser * Float(index + 1)
-            let z0 = -depth / 2 + tread * Float(index)
+            let y0 = -height / 2 + riser * Float(index)
+            let zFront = depth / 2 - tread * Float(index)
             return StairStepBox(
-                center: SIMD3(0, -height / 2 + stepHeight / 2, z0 + tread / 2),
-                size: SIMD3(width, stepHeight, tread)
+                center: SIMD3(0, y0 + riser / 2, zFront - tread / 2),
+                size: SIMD3(width, riser, tread)
             )
+        }
+    }
+
+    /// Photo-splat faces. Tread UVs match a box top (U=+x, V=-z); riser UVs match a box front (U=+x, V=+y).
+    static func faces(dimensions: SIMD3<Float>) -> [StairStepFace] {
+        boxes(dimensions: dimensions).enumerated().flatMap { index, step in
+            [
+                StairStepFace(
+                    name: "tread-\(index)",
+                    stepIndex: index,
+                    center: step.center + SIMD3(0, step.size.y / 2, 0),
+                    axisU: SIMD3(1, 0, 0),
+                    axisV: SIMD3(0, 0, -1),
+                    width: step.size.x,
+                    height: step.size.z
+                ),
+                StairStepFace(
+                    name: "riser-\(index)",
+                    stepIndex: index,
+                    center: step.center + SIMD3(0, 0, step.size.z / 2),
+                    axisU: SIMD3(1, 0, 0),
+                    axisV: SIMD3(0, 1, 0),
+                    width: step.size.x,
+                    height: step.size.y
+                ),
+            ]
         }
     }
 }
@@ -596,8 +634,9 @@ enum StairLandings {
         let halfDepth = max(depth, 1) / 2
         let upAxis = unit(up, fallback: [0, 1, 0])
         let forwardAxis = unit(forward, fallback: [0, 0, 1])
-        let below = add(add(center, scaled(upAxis, -halfHeight)), scaled(forwardAxis, -halfDepth))
-        let above = add(add(center, scaled(upAxis, halfHeight)), scaled(forwardAxis, halfDepth))
+        // +forward is local +Z, the bottom of the flight. The upper landing is toward -Z.
+        let below = add(add(center, scaled(upAxis, -halfHeight)), scaled(forwardAxis, halfDepth))
+        let above = add(add(center, scaled(upAxis, halfHeight)), scaled(forwardAxis, -halfDepth))
         return (below, above)
     }
 
