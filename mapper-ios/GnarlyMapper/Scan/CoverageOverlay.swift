@@ -85,7 +85,7 @@ final class CoverageCanvasView: UIView {
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        point(inside: point, with: event) ? self : nil
+        self.point(inside: point, with: event) ? self : nil
     }
 
     override func draw(_ rect: CGRect) {
