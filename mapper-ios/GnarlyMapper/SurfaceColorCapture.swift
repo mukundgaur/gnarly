@@ -463,7 +463,7 @@ enum SurfaceColorBaker {
             let z = simd_normalize(SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z))
             let c = SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             let d = simd_abs(surface.dimensions)
-            func add(_ name: String, _ offset: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, _ n: SIMD3<Float>, _ w: Float, _ h: Float, occluder: Int) {
+            func add(_ name: String, _ offset: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, _ n: SIMD3<Float>, _ w: Float, _ h: Float, _ occluder: Int) {
                 guard w > 0.02, h > 0.02 else { return }
                 faces.append(Face(surfaceIndex: index, occluderID: occluder, name: name, center: c + offset, uAxis: u, vAxis: v, normal: n, width: w, height: h))
             }
