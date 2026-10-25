@@ -193,7 +193,7 @@ final class SurfaceColorRecorder {
 /// A RoomPlan surface or object, copied out of `CapturedRoom` so baking can run off the main actor.
 struct BakeSurface: Sendable {
     enum Kind: String, Sendable {
-        case wall, door, window, opening, floor, object
+        case wall, door, window, opening, floor, object, stairs
     }
 
     let identifier: String
@@ -204,7 +204,7 @@ struct BakeSurface: Sendable {
     /// Open doors and openings are holes you can see through.
     let isPassable: Bool
 
-    static func all(in room: CapturedRoom) -> [BakeSurface] {
+    static func all(in room: CapturedRoom, recoveredStairs: [StairVolume] = []) -> [BakeSurface] {
         func surface(_ item: CapturedRoom.Surface, _ kind: Kind) -> BakeSurface {
             var passable = kind == .opening
             if case .door(let isOpen) = item.category, isOpen { passable = true }
@@ -225,10 +225,21 @@ struct BakeSurface: Sendable {
         result += room.objects.map { object in
             BakeSurface(
                 identifier: object.identifier.uuidString,
-                kind: .object,
+                kind: object.category == .stairs ? .stairs : .object,
                 transform: object.transform,
                 dimensions: object.dimensions,
                 parentIdentifier: object.parentIdentifier?.uuidString,
+                isPassable: false
+            )
+        }
+        let present = Set(result.map(\.identifier))
+        result += recoveredStairs.filter { !present.contains($0.identifier) }.map { stair in
+            BakeSurface(
+                identifier: stair.identifier,
+                kind: .stairs,
+                transform: stair.transform,
+                dimensions: stair.dimensions,
+                parentIdentifier: nil,
                 isPassable: false
             )
         }
@@ -256,7 +267,7 @@ struct BakeSurface: Sendable {
             guard let transform = scanTransform(item.transformColumnMajor), item.dimensions.count == 3 else { return nil }
             return BakeSurface(
                 identifier: item.identifier,
-                kind: .object,
+                kind: item.category == "stairs" ? .stairs : .object,
                 transform: transform,
                 dimensions: SIMD3(item.dimensions[0], item.dimensions[1], item.dimensions[2]),
                 parentIdentifier: item.parentIdentifier,
@@ -440,7 +451,7 @@ enum SurfaceColorBaker {
                 guard w > 0.02, h > 0.02 else { return }
                 faces.append(Face(surfaceIndex: index, name: name, center: c + offset, uAxis: u, vAxis: v, normal: n, width: w, height: h))
             }
-            if surface.kind == .object {
+            if surface.kind == .object || surface.kind == .stairs {
                 add("px", x * (d.x / 2), -z, y, x, d.z, d.y)
                 add("nx", -x * (d.x / 2), z, y, -x, d.z, d.y)
                 add("py", y * (d.y / 2), x, -z, y, d.x, d.z)
@@ -534,7 +545,7 @@ enum SurfaceColorBaker {
                 z: simd_normalize(SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z)),
                 half: half,
                 radius: simd_length(half),
-                planar: surface.kind != .object,
+                planar: surface.kind != .object && surface.kind != .stairs,
                 holes: holes[surface.identifier] ?? []
             )
         }

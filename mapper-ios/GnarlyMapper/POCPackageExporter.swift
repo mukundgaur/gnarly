@@ -11,6 +11,7 @@ enum POCPackageExporter {
         floorID: String,
         map: ExportedMap = .floor,
         stairs: StairCatalog? = nil,
+        recoveredStairs: [StairVolume] = [],
         surfaceColors: SurfaceColorBakeResult? = nil
     ) throws -> URL {
         let documentsDirectory = try FileManager.default.url(
@@ -47,7 +48,12 @@ enum POCPackageExporter {
         )
         try encoder.encode(scan).write(to: packageURL.appendingPathComponent("scan.json"), options: .atomic)
 
-        let features = RoomPlanScanExtractor.features(from: room, zoneID: safeZoneID, capturedAt: capturedAt)
+        let features = RoomPlanScanExtractor.features(
+            from: room,
+            zoneID: safeZoneID,
+            capturedAt: capturedAt,
+            recoveredStairs: recoveredStairs
+        )
         try encoder.encode(features).write(to: packageURL.appendingPathComponent("scan-features.json"), options: .atomic)
 
         let graph = graph(
@@ -57,7 +63,8 @@ enum POCPackageExporter {
             capturedAt: capturedAt,
             room: room,
             recordedNodes: recordedNodes,
-            stairs: stairs
+            stairs: stairs,
+            recoveredStairs: recoveredStairs
         )
         try encoder.encode(graph).write(to: packageURL.appendingPathComponent("building.json"), options: .atomic)
 
@@ -122,7 +129,8 @@ enum POCPackageExporter {
         capturedAt: String,
         room: CapturedRoom,
         recordedNodes: [RecordedGraphNode],
-        stairs: StairCatalog?
+        stairs: StairCatalog?,
+        recoveredStairs: [StairVolume]
     ) -> BuildingGraph {
         switch map {
         case .floor:
@@ -131,7 +139,8 @@ enum POCPackageExporter {
                 floorID: floorID,
                 capturedAt: capturedAt,
                 room: room,
-                recorded: recordedNodes
+                recorded: recordedNodes,
+                recoveredStairs: recoveredStairs
             )
             guard let stairs else { return floorGraph }
             return StairPortalAlignment.align(graph: floorGraph, catalog: stairs, floorID: floorID)

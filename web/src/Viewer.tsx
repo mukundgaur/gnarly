@@ -7,6 +7,7 @@ import { elevatorStopNear, zoneEdgeChecks, type BuildingModel, type BuildingNode
 import { canWalkBetween, floorHeightAt, pointOnFloor, wallBetween } from './geometry';
 import { FLOOR_GAP, toLocal, toWorld, type Vec3, type ZoneTransform } from './zoneAlign.ts';
 import { InlineRename } from './ui.tsx';
+import { stairBoxes } from './stairMesh.ts';
 import { dominantAngle, normalizeDegrees, placeSegments, rotateAbout, snapRotation, snapTranslation, zoneCenter, zoneSegments, type P2, type Placement, type Segment } from './zoneArrange.ts';
 
 /** position is in the zone's own ARKit coordinates. */
@@ -192,6 +193,17 @@ function FeatureBox({ feature, color, opacity = 1 }: {
   </group>;
 }
 
+function StairFlight({ feature, opacity = 1 }: { feature: ScanFeature; opacity?: number }) {
+  const matrix = useMemo(() => featureMatrix(feature), [feature]);
+  const steps = useMemo(() => stairBoxes(feature.dimensions), [feature.dimensions]);
+  return <group matrix={matrix} matrixAutoUpdate={false}>
+    {steps.map((step, index) => <mesh key={index} position={step.center}>
+      <boxGeometry args={step.size} />
+      <meshStandardMaterial color={SCENE.stairs} roughness={.72} transparent={opacity < 1} opacity={opacity} />
+    </mesh>)}
+  </group>;
+}
+
 function ScannedFloor({ feature, floorId, zoneId, onPick }: { feature: ScanFeature; floorId: string; zoneId?: string; onPick?: (world: Vec3) => void }) {
   const { colors, atlas } = useContext(SurfaceColorContext);
   const faces = colors?.surfaces[feature.identifier];
@@ -308,7 +320,9 @@ function ScannedGeometry({ scan, graph, floor, zoneId, onFloorPick }: { scan: Sc
     {scan.windows.filter(visible).map(item => <FeatureBox key={item.identifier} feature={item} color={SCENE.window} opacity={real ? .6 : .32} />)}
     {scan.doors.filter(visible).filter(item => item.category === 'door-closed').map(item =>
       <FeatureBox key={item.identifier} feature={item} color={SCENE.door} opacity={real ? .96 : .35} />)}
-    {scan.objects.filter(visible).map(item => <FeatureBox key={item.identifier} feature={item} color={item.category === 'stairs' ? SCENE.stairs : SCENE.object} opacity={real ? .96 : .8} />)}
+    {scan.objects.filter(visible).map(item => item.category === 'stairs'
+      ? <StairFlight key={item.identifier} feature={item} opacity={real ? .96 : .8} />
+      : <FeatureBox key={item.identifier} feature={item} color={SCENE.object} opacity={real ? .96 : .8} />)}
   </SurfaceColorContext.Provider>;
 }
 

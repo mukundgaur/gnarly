@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// A floor map that a stair zone connects to.
 struct FloorPointer: Codable, Equatable {
@@ -71,6 +72,67 @@ enum StairEnd: String {
     case below
     /// `next` on the stair zone: the floor above.
     case above
+}
+
+/// One staircase volume copied out of a RoomPlan update. Local +Y is up and local +Z runs toward the upper landing.
+struct StairVolume: Equatable {
+    var identifier: String
+    var transform: simd_float4x4
+    var dimensions: SIMD3<Float>
+    var story: Int
+
+    var detected: DetectedStair {
+        let columns = transform.columns
+        return DetectedStair(
+            id: StairZoneID.make(roomPlanIdentifier: identifier),
+            roomPlanIdentifier: identifier,
+            position: [columns.3.x, columns.3.y, columns.3.z],
+            dimensions: [dimensions.x, dimensions.y, dimensions.z],
+            up: [columns.1.x, columns.1.y, columns.1.z],
+            forward: [columns.2.x, columns.2.y, columns.2.z],
+            story: story
+        )
+    }
+
+    /// Processing often drops stairs the live scan already showed. Keep that last live set only then.
+    static func recovered(roomKeptStairs: Bool, seen: some Sequence<StairVolume>) -> [StairVolume] {
+        guard !roomKeptStairs else { return [] }
+        return seen.sorted { $0.identifier < $1.identifier }
+    }
+}
+
+struct StairStepBox: Equatable {
+    var center: SIMD3<Float>
+    var size: SIMD3<Float>
+}
+
+/// Stepped boxes that fill a stair volume. The same layout is drawn by `web/src/stairMesh.ts`.
+enum StairSteps {
+    static let targetRiser: Float = 0.18
+    static let minimumCount = 2
+    static let maximumCount = 30
+
+    static func count(height: Float) -> Int {
+        let steps = Int((abs(height) / targetRiser).rounded())
+        return min(maximumCount, max(minimumCount, steps))
+    }
+
+    static func boxes(dimensions: SIMD3<Float>) -> [StairStepBox] {
+        let width = max(abs(dimensions.x), 0.05)
+        let height = max(abs(dimensions.y), 0.05)
+        let depth = max(abs(dimensions.z), 0.05)
+        let steps = count(height: height)
+        let riser = height / Float(steps)
+        let tread = depth / Float(steps)
+        return (0 ..< steps).map { index in
+            let stepHeight = riser * Float(index + 1)
+            let z0 = -depth / 2 + tread * Float(index)
+            return StairStepBox(
+                center: SIMD3(0, -height / 2 + stepHeight / 2, z0 + tread / 2),
+                size: SIMD3(width, stepHeight, tread)
+            )
+        }
+    }
 }
 
 /// Stairs detected in a floor scan. The id is also the stair zone's world-map id.

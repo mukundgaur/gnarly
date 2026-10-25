@@ -61,6 +61,29 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertEqual(panels[0].height, 2, accuracy: 0.001)
     }
 
+    func testStairStepsFillTheDetectedVolume() {
+        let steps = StairSteps.boxes(dimensions: SIMD3(1.2, 1.8, 3))
+        XCTAssertEqual(steps.count, 10)
+        let first = steps[0]
+        let top = steps[steps.count - 1]
+        XCTAssertEqual(first.center.y - first.size.y / 2, -0.9, accuracy: 0.0001)
+        XCTAssertEqual(first.center.z - first.size.z / 2, -1.5, accuracy: 0.0001)
+        XCTAssertEqual(top.center.y + top.size.y / 2, 0.9, accuracy: 0.0001)
+        XCTAssertEqual(top.center.z + top.size.z / 2, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(top.size.x, 1.2, accuracy: 0.0001)
+    }
+
+    func testRecoveredStairsAreKeptOnlyWhenProcessingDropsThem() {
+        let stair = StairVolume(
+            identifier: "abc",
+            transform: matrix_identity_float4x4,
+            dimensions: SIMD3(1, 2, 3),
+            story: 0
+        )
+        XCTAssertEqual(StairVolume.recovered(roomKeptStairs: false, seen: [stair]).map(\.identifier), ["abc"])
+        XCTAssertTrue(StairVolume.recovered(roomKeptStairs: true, seen: [stair]).isEmpty)
+    }
+
     func testPlacementMatrixMatchesLayoutToWorld() {
         let entry = BuildingLayoutDocument.ZoneEntry(zoneId: "a", floor: 1, x: 3, z: -1, rotationDegrees: 0)
         let matrix = placementMatrix(entry, ground: 0)

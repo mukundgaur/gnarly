@@ -51,6 +51,8 @@ final class MapperViewModel: ObservableObject {
     private var lastSampledPosition: [Float]?
     private var lastPlanUpdate = Date.distantPast
     private var lastStairCount = 0
+    /// Latest live stair volumes. The processed room often omits stairs that were visible while scanning.
+    private var seenStairVolumes: [String: StairVolume] = [:]
     private let automaticNodeSpacingMeters: Float = 0.75
     private var scanStartedAt: Date?
     private var roomUpdateCount = 0
@@ -106,6 +108,7 @@ final class MapperViewModel: ObservableObject {
         exportURL = nil
         if scanTarget == .floor {
             detectedStairs = []
+            seenStairVolumes = [:]
         }
         scanPlan = .empty
         lastStairCount = 0
@@ -151,7 +154,10 @@ final class MapperViewModel: ObservableObject {
                 capturedRoom = room
                 scanPlan = ScanPlan(room: room)
                 if scanTarget == .floor {
-                    detectedStairs = RoomPlanScanExtractor.detectedStairs(in: room)
+                    let processed = RoomPlanScanExtractor.detectedStairs(in: room)
+                    detectedStairs = processed.isEmpty
+                        ? StairVolume.recovered(roomKeptStairs: false, seen: seenStairVolumes.values).map(\.detected)
+                        : processed
                 }
                 await preparePreview()
             } catch {
@@ -196,9 +202,11 @@ final class MapperViewModel: ObservableObject {
 
     func noteRoomUpdate(_ room: CapturedRoom) {
         roomUpdateCount += 1
-        let stairs = room.objects.reduce(into: 0) { count, object in
-            if object.category == .stairs { count += 1 }
+        let liveStairs = room.objects.filter { $0.category == .stairs }.map(RoomPlanScanExtractor.stairVolume)
+        if !liveStairs.isEmpty {
+            seenStairVolumes = Dictionary(uniqueKeysWithValues: liveStairs.map { ($0.identifier, $0) })
         }
+        let stairs = liveStairs.count
         let now = Date()
         guard stairs != lastStairCount || now.timeIntervalSince(lastPlanUpdate) > 0.3 else { return }
         lastPlanUpdate = now
@@ -382,7 +390,11 @@ final class MapperViewModel: ObservableObject {
         let savingStatus = asStairs
             ? "Saving the stair zone world map and RoomPlan stair links…"
             : "Saving ARWorldMap, RoomPlan scan, and building graph…"
-        let surfaces = BakeSurface.all(in: room)
+        let recoveredStairs = StairVolume.recovered(
+            roomKeptStairs: room.objects.contains { $0.category == .stairs },
+            seen: seenStairVolumes.values
+        )
+        let surfaces = BakeSurface.all(in: room, recoveredStairs: recoveredStairs)
         let keyframes = colorRecorder.keyframes
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         statusText = keyframes.isEmpty ? savingStatus : "Coloring the model from \(keyframes.count) scan photos…"
@@ -419,6 +431,7 @@ final class MapperViewModel: ObservableObject {
                             floorID: floorID,
                             map: map,
                             stairs: draft.stairs.isEmpty ? nil : draft,
+                            recoveredStairs: recoveredStairs,
                             surfaceColors: colors
                         )
                         try StairCatalogStore.save(draft)

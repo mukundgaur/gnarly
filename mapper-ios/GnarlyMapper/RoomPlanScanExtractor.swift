@@ -3,7 +3,12 @@ import RoomPlan
 import simd
 
 enum RoomPlanScanExtractor {
-    static func features(from room: CapturedRoom, zoneID: String, capturedAt: String) -> ScanFeatures {
+    static func features(
+        from room: CapturedRoom,
+        zoneID: String,
+        capturedAt: String,
+        recoveredStairs: [StairVolume] = []
+    ) -> ScanFeatures {
         ScanFeatures(
             schemaVersion: 1,
             zoneID: zoneID,
@@ -16,7 +21,7 @@ enum RoomPlanScanExtractor {
             openings: room.openings.map(surfaceFeature),
             windows: room.windows.map(surfaceFeature),
             floors: room.floors.map(surfaceFeature),
-            objects: room.objects.map(objectFeature),
+            objects: room.objects.map(objectFeature) + recoveredStairs.map(recoveredStair),
             sections: room.sections.map { section in
                 ScanFeatureSection(
                     label: section.label.rawValue,
@@ -25,6 +30,15 @@ enum RoomPlanScanExtractor {
                 )
             },
             notes: "Normalized RoomPlan surfaces and objects in the shared ARKit world. Use this file for graph work; scan.json is the raw CapturedRoom dump."
+        )
+    }
+
+    static func stairVolume(_ object: CapturedRoom.Object) -> StairVolume {
+        StairVolume(
+            identifier: object.identifier.uuidString,
+            transform: object.transform,
+            dimensions: object.dimensions,
+            story: object.story
         )
     }
 
@@ -54,6 +68,19 @@ enum RoomPlanScanExtractor {
             transformColumnMajor: columnMajor(surface.transform),
             polygonCorners: surface.polygonCorners.map(vector3),
             parentIdentifier: surface.parentIdentifier?.uuidString
+        )
+    }
+
+    private static func recoveredStair(_ stair: StairVolume) -> ScanFeatureObject {
+        ScanFeatureObject(
+            identifier: stair.identifier,
+            category: "stairs",
+            confidence: "low",
+            story: stair.story,
+            dimensions: [stair.dimensions.x, stair.dimensions.y, stair.dimensions.z],
+            position: [stair.transform.columns.3.x, stair.transform.columns.3.y, stair.transform.columns.3.z],
+            transformColumnMajor: columnMajor(stair.transform),
+            parentIdentifier: nil
         )
     }
 

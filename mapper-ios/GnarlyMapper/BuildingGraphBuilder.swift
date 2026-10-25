@@ -8,7 +8,8 @@ enum BuildingGraphBuilder {
         floorID: String,
         capturedAt: String,
         room: CapturedRoom,
-        recorded: [RecordedGraphNode]
+        recorded: [RecordedGraphNode],
+        recoveredStairs: [StairVolume] = []
     ) -> BuildingGraph {
         let story = room.story
         let elevation = room.floors.first.map { $0.transform.columns.3.y } ?? 0
@@ -76,6 +77,24 @@ enum BuildingGraphBuilder {
                     source: "roomplan-hint",
                     label: "stairs",
                     roomPlanIdentifier: object.identifier.uuidString
+                )
+            )
+        }
+
+        for stair in recoveredStairs {
+            let id = uniqueID(
+                preferred: StairZoneID.make(roomPlanIdentifier: stair.identifier),
+                used: &usedIDs
+            )
+            nodes.append(
+                BuildingNode(
+                    id: id,
+                    floor: floorID,
+                    type: GraphNodeType.stairs.rawValue,
+                    position: translation(stair.transform),
+                    source: "roomplan-hint",
+                    label: "stairs",
+                    roomPlanIdentifier: stair.identifier
                 )
             )
         }

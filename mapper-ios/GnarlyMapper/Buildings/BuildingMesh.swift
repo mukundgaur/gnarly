@@ -12,6 +12,7 @@ enum SurfacePalette {
         case .window: return UIColor(red: 0.62, green: 0.82, blue: 0.90, alpha: 1)
         case .opening: return UIColor(red: 0.20, green: 0.90, blue: 0.78, alpha: 1)
         case .object: return UIColor(red: 0.55, green: 0.50, blue: 0.62, alpha: 1)
+        case .stairs: return UIColor(red: 0.79, green: 0.64, blue: 0.42, alpha: 1)
         }
     }
 }
@@ -121,6 +122,8 @@ enum BuildingMesh {
                 root.addChildNode(slabNode(surface, colors: byID[surface.identifier], atlas: atlas, depth: max(abs(surface.dimensions.z), 0.05)))
             case .object:
                 root.addChildNode(objectNode(surface, colors: byID[surface.identifier], atlas: atlas))
+            case .stairs:
+                root.addChildNode(stairNode(surface))
             }
         }
         root.opacity = dimmed ? 0.3 : 1
@@ -305,6 +308,29 @@ enum BuildingMesh {
             face: back, atlas: atlas, fallback: uiColor(back, fallback: frontColor), transparency: transparency
         ))
         addRim(to: node, minX: -d.x / 2, maxX: d.x / 2, minY: -d.y / 2, maxY: d.y / 2, depth: depth, color: edge, holes: [], outward: true)
+        return node
+    }
+
+    /// SceneKit box materials are front, right, back, left, top, bottom. The riser is the -Z face.
+    private static func stairNode(_ surface: BakeSurface) -> SCNNode {
+        let node = SCNNode()
+        node.name = surface.identifier
+        node.simdTransform = surface.transform
+        let side = solidMaterial(SurfacePalette.color(for: .stairs))
+        let tread = solidMaterial(UIColor(red: 0.91, green: 0.78, blue: 0.55, alpha: 1))
+        let riser = solidMaterial(UIColor(red: 0.55, green: 0.42, blue: 0.26, alpha: 1))
+        for step in StairSteps.boxes(dimensions: surface.dimensions) {
+            let box = SCNBox(
+                width: CGFloat(step.size.x),
+                height: CGFloat(step.size.y),
+                length: CGFloat(step.size.z),
+                chamferRadius: 0
+            )
+            box.materials = [side, side, riser, side, tread, side]
+            let stepNode = SCNNode(geometry: box)
+            stepNode.simdPosition = step.center
+            node.addChildNode(stepNode)
+        }
         return node
     }
 
