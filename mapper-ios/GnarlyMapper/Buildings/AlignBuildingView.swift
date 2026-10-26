@@ -18,6 +18,8 @@ struct AlignBuildingView: View {
     @State private var saving = false
     @State private var error: String?
     @State private var camera: MapCameraPosition
+    @State private var applyNextFix = false
+    @StateObject private var location = DeviceLocation()
 
     init(library: BuildingLibrary, map: BuildingMap, onSaved: @escaping (OwnedBuilding) -> Void) {
         self.library = library
@@ -28,8 +30,12 @@ struct AlignBuildingView: View {
         _layout = State(initialValue: map.layout)
         let level = map.levels.first?.level ?? 0
         _selectedLevel = State(initialValue: level)
-        let center = CLLocationCoordinate2D(latitude: building.latitude ?? 42.4534, longitude: building.longitude ?? -76.4738)
-        _camera = State(initialValue: .region(MKCoordinateRegion(center: center, latitudinalMeters: 180, longitudinalMeters: 180)))
+        if let latitude = building.latitude, let longitude = building.longitude {
+            let center = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            _camera = State(initialValue: .region(MKCoordinateRegion(center: center, latitudinalMeters: 180, longitudinalMeters: 180)))
+        } else {
+            _camera = State(initialValue: .userLocation(fallback: .automatic))
+        }
     }
 
     var body: some View {
@@ -57,13 +63,21 @@ struct AlignBuildingView: View {
                         .disabled(saving)
                 }
             }
-            .task { await refreshPreview(reloadSatellite: true) }
+            .task {
+                if !building.hasLocation { location.request() }
+                await refreshPreview(reloadSatellite: true)
+            }
+            .onChange(of: location.fix) { _, fix in
+                guard let fix, applyNextFix || !building.hasLocation else { return }
+                adopt(fix)
+            }
         }
     }
 
     private var mapPicker: some View {
         MapReader { proxy in
             Map(position: $camera) {
+                UserAnnotation()
                 if let latitude = building.latitude, let longitude = building.longitude {
                     Marker(building.name, coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
                 }
@@ -71,6 +85,7 @@ struct AlignBuildingView: View {
             .mapStyle(.imagery(elevation: .realistic))
             .gesture(SpatialTapGesture().onEnded { event in
                 if let tapped = proxy.convert(event.location, from: .local) {
+                    applyNextFix = false
                     building.latitude = tapped.latitude
                     building.longitude = tapped.longitude
                     Task { await refreshPreview(reloadSatellite: true) }
@@ -78,12 +93,36 @@ struct AlignBuildingView: View {
             })
         }
         .overlay(alignment: .topLeading) {
-            Text("Tap to place the building")
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(8)
+            HStack(spacing: 6) {
+                Text("Tap to place")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                Button {
+                    applyNextFix = true
+                    location.request()
+                    if let fix = location.fix { adopt(fix) }
+                } label: {
+                    Label("My location", systemImage: "location.fill")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                if location.isDenied {
+                    Button("Settings") { location.openSettings() }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+            }
+            .padding(6)
         }
     }
 
@@ -198,11 +237,15 @@ struct AlignBuildingView: View {
         scene.show(map: preview, highlight: preview.zones.first { $0.level == selectedLevel }?.id, satellite: satellite)
     }
 
+    private func adopt(_ fix: DeviceFix) {
+        applyNextFix = false
+        building.latitude = fix.latitude
+        building.longitude = fix.longitude
+        camera = .region(MKCoordinateRegion(center: fix.coordinate, latitudinalMeters: 180, longitudinalMeters: 180))
+        Task { await refreshPreview(reloadSatellite: true) }
+    }
+
     private func refreshPreview(reloadSatellite: Bool) async {
-        var next = building
-        if next.latitude == nil { next.latitude = 42.4534 }
-        if next.longitude == nil { next.longitude = -76.4738 }
-        building = next
         if reloadSatellite {
             satellite = await library.satelliteImage(for: building, bounds: source.applying(building: building, layout: layout).bounds)
         }

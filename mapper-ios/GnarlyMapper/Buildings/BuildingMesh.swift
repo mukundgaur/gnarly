@@ -512,24 +512,145 @@ enum BuildingMesh {
     }
 }
 
-struct PreviewOrbit {
-    static let homeDirection = simd_normalize(SIMD3<Float>(0.7, 0.55, 1))
+/// Box the walk camera is allowed to occupy. The floor keeps the eye off the satellite plane.
+struct PreviewLimits: Equatable {
+    var minimum: SIMD3<Float>
+    var maximum: SIMD3<Float>
+    var groundY: Float
+    var eyeClearance: Float
 
-    static func direction(yaw: Float, pitch: Float) -> SIMD3<Float> {
+    static let clearance: Float = 0.45
+}
+
+/// Where the preview camera is, and which way it looks. The camera looks down its local -Z axis.
+struct PreviewRig: Equatable {
+    static let verticalFovDegrees: Float = 58
+    static let maxPitch: Float = 1.15
+    static let minPitch: Float = -1.05
+    /// Three-quarter establishing view, a little above the model.
+    static let homeDirection = simd_normalize(SIMD3<Float>(0.72, 0.42, 1))
+
+    var eye: SIMD3<Float>
+    var yaw: Float
+    var pitch: Float
+
+    var forward: SIMD3<Float> {
         let cp = cos(pitch)
-        return SIMD3(sin(yaw) * cp, sin(pitch), cos(yaw) * cp)
+        return SIMD3(sin(yaw) * cp, sin(pitch), -cos(yaw) * cp)
     }
 
-    static var homeYaw: Float { atan2(homeDirection.x, homeDirection.z) }
-    static var homePitch: Float { asin(max(-1, min(1, homeDirection.y))) }
+    var right: SIMD3<Float> {
+        let side = simd_cross(forward, SIMD3<Float>(0, 1, 0))
+        let length = simd_length(side)
+        if length < 1e-4 { return SIMD3(1, 0, 0) }
+        return side / length
+    }
+
+    /// Up on screen. Perpendicular to `forward`, so sliding along it cannot dive through the view ray.
+    var screenUp: SIMD3<Float> {
+        simd_normalize(simd_cross(right, forward))
+    }
+
+    var lookRotation: simd_quatf {
+        let zAxis = -forward
+        var xAxis = simd_cross(SIMD3<Float>(0, 1, 0), zAxis)
+        let length = simd_length(xAxis)
+        if length < 1e-4 {
+            xAxis = SIMD3(1, 0, 0)
+        } else {
+            xAxis /= length
+        }
+        let yAxis = simd_cross(zAxis, xAxis)
+        return simd_quatf(simd_float3x3(columns: (xAxis, yAxis, simd_normalize(zAxis))))
+    }
+
+    static func looking(from eye: SIMD3<Float>, at target: SIMD3<Float>) -> PreviewRig {
+        let direction = target - eye
+        let length = simd_length(direction)
+        let forward = length > 0.0001 ? direction / length : SIMD3<Float>(0, 0, -1)
+        let pitch = min(maxPitch, max(minPitch, asin(max(-1, min(1, forward.y)))))
+        let yaw = atan2(forward.x, -forward.z)
+        return PreviewRig(eye: eye, yaw: yaw, pitch: pitch)
+    }
+
+    /// Eye sits just outside a model whose center of mass is the origin, aimed back at that center.
+    static func framing(worldMin: SIMD3<Float>, worldMax: SIMD3<Float>, comOffset: Float, aspect: Float, groundY: Float) -> PreviewFrame {
+        let extent = simd_max(worldMax - worldMin, SIMD3(repeating: 1))
+        let fovY = verticalFovDegrees * .pi / 180
+        let fovX = 2 * atan(tan(fovY / 2) * max(aspect, 0.5))
+        let horizontal = hypot(extent.x, extent.z)
+        let distance = max(
+            (extent.y * 0.55 + comOffset) / tan(fovY / 2),
+            (horizontal * 0.55 + comOffset) / tan(fovX / 2),
+            2.5
+        ) * 1.2
+        var eye = homeDirection * distance
+        eye.y = max(eye.y, groundY + PreviewLimits.clearance + 0.35)
+        let rig = looking(from: eye, at: .zero)
+        let pad = SIMD3<Float>(
+            max(2, extent.x * 0.55),
+            max(1.8, extent.y * 0.6),
+            max(2, extent.z * 0.55)
+        )
+        var minimum = worldMin - pad
+        var maximum = worldMax + pad
+        // Keep the establishing viewpoint inside the box, plus a little room to back up, and no farther.
+        let retreat = eye + homeDirection * max(distance * 0.22, 1.5)
+        minimum = simd_min(minimum, simd_min(eye, retreat) - SIMD3(repeating: 0.8))
+        maximum = simd_max(maximum, simd_max(eye, retreat) + SIMD3(repeating: 0.8))
+        minimum.y = max(minimum.y, groundY + PreviewLimits.clearance)
+        if maximum.y < minimum.y + 1.2 { maximum.y = minimum.y + 1.2 }
+        let limits = PreviewLimits(
+            minimum: minimum,
+            maximum: maximum,
+            groundY: groundY,
+            eyeClearance: PreviewLimits.clearance
+        )
+        let span = max(horizontal, 4)
+        return PreviewFrame(
+            rig: rig,
+            limits: limits,
+            slideMetersPerPoint: span / 480,
+            dollyMetersPerLn: span * 0.65
+        )
+    }
+
+    mutating func look(deltaYaw: Float, deltaPitch: Float) {
+        yaw += deltaYaw
+        pitch = min(Self.maxPitch, max(Self.minPitch, pitch + deltaPitch))
+    }
+
+    /// Move across the screen. `horizontalPoints` is right, `verticalPoints` is down, matching UIKit.
+    /// The step stays on the view plane, so a drag cannot throw the camera out along its look direction.
+    mutating func slide(horizontalPoints: Float, verticalPoints: Float, metersPerPoint: Float, limits: PreviewLimits) {
+        eye -= right * horizontalPoints * metersPerPoint
+        eye += screenUp * verticalPoints * metersPerPoint
+        clamp(to: limits)
+    }
+
+    mutating func dolly(_ meters: Float, limits: PreviewLimits) {
+        eye += forward * meters
+        clamp(to: limits)
+    }
+
+    mutating func clamp(to limits: PreviewLimits) {
+        eye = simd_clamp(eye, limits.minimum, limits.maximum)
+        eye.y = max(eye.y, limits.groundY + limits.eyeClearance)
+        pitch = min(Self.maxPitch, max(Self.minPitch, pitch))
+    }
+}
+
+struct PreviewFrame: Equatable {
+    var rig: PreviewRig
+    var limits: PreviewLimits
+    var slideMetersPerPoint: Float
+    var dollyMetersPerLn: Float
 }
 
 final class BuildingSceneController: ObservableObject {
     struct SceneFrame: Equatable {
         var version: Int
-        var distance: Float
-        var minDistance: Float
-        var maxDistance: Float
+        var preview: PreviewFrame
     }
 
     let scene = SCNScene()
@@ -543,27 +664,41 @@ final class BuildingSceneController: ObservableObject {
     private var hasBounds = false
     private var massSum = SIMD3<Float>(repeating: 0)
     private var massWeight: Float = 0
-    private(set) var frame = SceneFrame(version: 0, distance: 8, minDistance: 0.35, maxDistance: 180)
+    /// Local Y of the satellite plane. The walk camera is kept above this so it cannot enter the photo.
+    static let mapPlaneLocalY: Float = -0.08
+    private var mapFloorLocalY: Float?
+    private(set) var frame = SceneFrame(version: 0, preview: PreviewRig.framing(
+        worldMin: SIMD3(-4, 0, -4),
+        worldMax: SIMD3(4, 3, 4),
+        comOffset: 0,
+        aspect: 0.6,
+        groundY: -0.2
+    ))
 
     init() {
         scene.background.contents = UIColor(red: 0.05, green: 0.07, blue: 0.10, alpha: 1)
         scene.rootNode.addChildNode(root)
         let camera = SCNCamera()
-        camera.fieldOfView = 36
-        camera.zNear = 0.05
-        camera.zFar = 4000
-        camera.automaticallyAdjustsZRange = true
+        camera.fieldOfView = CGFloat(PreviewRig.verticalFovDegrees)
+        // A fixed depth range. Auto range treats the big satellite plane as the scene and
+        // pushes the near plane out until the building disappears.
+        camera.zNear = 0.08
+        camera.zFar = 2500
+        camera.automaticallyAdjustsZRange = false
         camera.wantsHDR = false
         cameraNode.camera = camera
         scene.rootNode.addChildNode(cameraNode)
+        place(frame.preview.rig)
     }
 
     func show(map: BuildingMap, highlight zoneID: String?, satellite: UIImage?) {
         root.simdPosition = .zero
         root.childNodes.forEach { $0.removeFromParentNode() }
         resetBounds()
+        mapFloorLocalY = nil
         if let satellite, let bounds = map.bounds {
             root.addChildNode(satellitePlane(image: satellite, bounds: bounds, heading: map.building.mapHeadingDegrees))
+            mapFloorLocalY = Self.mapPlaneLocalY
         }
         for zone in map.zones {
             let node = BuildingMesh.node(
@@ -590,6 +725,7 @@ final class BuildingSceneController: ObservableObject {
         root.simdPosition = .zero
         root.childNodes.forEach { $0.removeFromParentNode() }
         resetBounds()
+        mapFloorLocalY = nil
         let node = BuildingMesh.node(surfaces: surfaces, colors: colors, atlas: atlas)
         root.addChildNode(node)
         for surface in surfaces where surface.kind != .opening {
@@ -649,36 +785,42 @@ final class BuildingSceneController: ObservableObject {
 
     private func applyFrame() {
         framedVersion = contentVersion
-        let extent: SIMD3<Float>
         let center: SIMD3<Float>
+        let worldMin: SIMD3<Float>
+        let worldMax: SIMD3<Float>
         if hasBounds {
             let aabbCenter = (boundsMin + boundsMax) * 0.5
-            extent = simd_max(boundsMax - boundsMin, SIMD3(repeating: 1))
             center = massWeight > 0.0001 ? massSum / massWeight : aabbCenter
+            worldMin = boundsMin - center
+            worldMax = boundsMax - center
         } else {
             center = .zero
-            extent = SIMD3(8, 3, 8)
+            worldMin = SIMD3(-4, 0, -4)
+            worldMax = SIMD3(4, 3, 4)
         }
-        // Orbit around the model's center of mass, not the ARKit scan origin.
+        // Shift the scan so gestures happen around the model, not the ARKit origin.
         root.simdPosition = -center
         let aabbCenter = hasBounds ? (boundsMin + boundsMax) * 0.5 : center
-        let offset = simd_length(aabbCenter - center)
-        let fovY = Float(36) * .pi / 180
-        let fovX = 2 * atan(tan(fovY / 2) * max(aspect, 0.45))
-        let horizontal = hypot(extent.x, extent.z)
-        let distance = max(
-            (extent.y * 0.62 + offset) / tan(fovY / 2),
-            (horizontal * 0.58 + offset) / tan(fovX / 2),
-            4
-        ) * 1.35
-        cameraNode.simdPosition = PreviewOrbit.homeDirection * distance
-        cameraNode.look(at: SCNVector3(0, 0, 0))
-        frame = SceneFrame(
-            version: contentVersion,
-            distance: distance,
-            minDistance: 0.35,
-            maxDistance: max(distance * 24, 180)
+        let groundY: Float
+        if let mapFloorLocalY {
+            groundY = -center.y + mapFloorLocalY
+        } else {
+            groundY = worldMin.y - 0.05
+        }
+        let preview = PreviewRig.framing(
+            worldMin: worldMin,
+            worldMax: worldMax,
+            comOffset: simd_length(aabbCenter - center),
+            aspect: aspect,
+            groundY: groundY
         )
+        place(preview.rig)
+        frame = SceneFrame(version: contentVersion, preview: preview)
+    }
+
+    private func place(_ rig: PreviewRig) {
+        cameraNode.simdPosition = rig.eye
+        cameraNode.simdOrientation = rig.lookRotation
     }
 
     private func satellitePlane(image: UIImage, bounds: FloorBounds, heading: Double) -> SCNNode {
@@ -686,17 +828,37 @@ final class BuildingSceneController: ObservableObject {
         let depth = CGFloat(max(bounds.depth, 8) + 24)
         let plane = SCNPlane(width: width, height: depth)
         plane.firstMaterial?.diffuse.contents = image
-        plane.firstMaterial?.isDoubleSided = true
+        // Front face points up after the pitch below. One side, so the camera cannot get "inside" the photo.
+        plane.firstMaterial?.isDoubleSided = false
         plane.firstMaterial?.lightingModel = .constant
         let node = SCNNode(geometry: plane)
         node.eulerAngles.x = -.pi / 2
         node.eulerAngles.y = Float(-heading * .pi / 180)
-        node.position = SCNVector3(bounds.center.x, -0.08, bounds.center.y)
+        node.position = SCNVector3(bounds.center.x, Self.mapPlaneLocalY, bounds.center.y)
         return node
     }
 }
 
-struct BuildingSceneView: UIViewRepresentable {
+struct BuildingSceneView: View {
+    @ObservedObject var controller: BuildingSceneController
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            BuildingSceneRepresentable(controller: controller)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Text("Drag to look  ·  two fingers to slide  ·  pinch to move")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.38), in: Capsule())
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+private struct BuildingSceneRepresentable: UIViewRepresentable {
     @ObservedObject var controller: BuildingSceneController
 
     func makeCoordinator() -> Coordinator {
@@ -708,6 +870,7 @@ struct BuildingSceneView: UIViewRepresentable {
         view.scene = controller.scene
         view.pointOfView = controller.scene.rootNode.childNodes.first { $0.camera != nil }
         view.allowsCameraControl = false
+        view.isMultipleTouchEnabled = true
         view.antialiasingMode = .multisampling4X
         view.backgroundColor = UIColor(red: 0.05, green: 0.07, blue: 0.10, alpha: 1)
         view.autoenablesDefaultLighting = false
@@ -727,44 +890,43 @@ struct BuildingSceneView: UIViewRepresentable {
         context.coordinator.sync(frame: controller.frame)
     }
 
-    /// One finger orbits the model center, two fingers pan, pinch zooms. Zoom-out reaches many times the fitted view.
+    /// One finger looks around, two fingers slide across the view, pinch steps along the look direction.
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var yaw = PreviewOrbit.homeYaw
-        var pitch = PreviewOrbit.homePitch
-        var distance: Float = 8
-        var minDistance: Float = 0.35
-        var maxDistance: Float = 180
-        var target = SIMD3<Float>(repeating: 0)
+        var rig = PreviewRig(eye: SIMD3(0, 2, 8), yaw: 0, pitch: -0.25)
+        var limits = PreviewLimits(minimum: SIMD3(repeating: -30), maximum: SIMD3(repeating: 30), groundY: -1, eyeClearance: PreviewLimits.clearance)
+        var slideMetersPerPoint: Float = 0.02
+        var dollyMetersPerLn: Float = 4
         var framedVersion = -1
         weak var cameraNode: SCNNode?
+        private var lookRecognizer: UIPanGestureRecognizer?
         private var attached = false
 
         func attach(to view: SCNView) {
             guard !attached else { return }
             attached = true
-            let orbit = UIPanGestureRecognizer(target: self, action: #selector(orbit(_:)))
-            orbit.maximumNumberOfTouches = 1
-            orbit.delegate = self
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
-            pan.minimumNumberOfTouches = 2
-            pan.maximumNumberOfTouches = 2
-            pan.delegate = self
+            let look = UIPanGestureRecognizer(target: self, action: #selector(look(_:)))
+            look.minimumNumberOfTouches = 1
+            look.maximumNumberOfTouches = 1
+            look.delegate = self
+            let slide = UIPanGestureRecognizer(target: self, action: #selector(slide(_:)))
+            slide.minimumNumberOfTouches = 2
+            slide.maximumNumberOfTouches = 2
+            slide.delegate = self
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:)))
             pinch.delegate = self
-            view.addGestureRecognizer(orbit)
-            view.addGestureRecognizer(pan)
+            lookRecognizer = look
+            view.addGestureRecognizer(look)
+            view.addGestureRecognizer(slide)
             view.addGestureRecognizer(pinch)
         }
 
         func sync(frame: BuildingSceneController.SceneFrame) {
             guard frame.version != framedVersion else { return }
             framedVersion = frame.version
-            distance = frame.distance
-            minDistance = frame.minDistance
-            maxDistance = frame.maxDistance
-            target = .zero
-            yaw = PreviewOrbit.homeYaw
-            pitch = PreviewOrbit.homePitch
+            rig = frame.preview.rig
+            limits = frame.preview.limits
+            slideMetersPerPoint = frame.preview.slideMetersPerPoint
+            dollyMetersPerLn = frame.preview.dollyMetersPerLn
             apply()
         }
 
@@ -772,41 +934,39 @@ struct BuildingSceneView: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
         ) -> Bool {
-            true
+            gestureRecognizer !== lookRecognizer && other !== lookRecognizer
         }
 
-        @objc func orbit(_ gesture: UIPanGestureRecognizer) {
+        @objc func look(_ gesture: UIPanGestureRecognizer) {
             let translation = gesture.translation(in: gesture.view)
             gesture.setTranslation(.zero, in: gesture.view)
-            yaw -= Float(translation.x) * 0.008
-            pitch = min(1.2, max(-1.2, pitch + Float(translation.y) * 0.008))
+            rig.look(deltaYaw: Float(translation.x) * 0.005, deltaPitch: Float(-translation.y) * 0.005)
             apply()
         }
 
-        @objc func pan(_ gesture: UIPanGestureRecognizer) {
-            guard let view = gesture.view, let cameraNode else { return }
-            let translation = gesture.translation(in: view)
-            gesture.setTranslation(.zero, in: view)
-            let fov = Float(cameraNode.camera?.fieldOfView ?? 36) * .pi / 180
-            let visibleHeight = 2 * distance * tan(fov / 2)
-            let scale = visibleHeight / Float(max(view.bounds.height, 1))
-            target -= cameraNode.simdWorldRight * Float(translation.x) * scale
-            target += cameraNode.simdWorldUp * Float(translation.y) * scale
+        @objc func slide(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            gesture.setTranslation(.zero, in: gesture.view)
+            rig.slide(
+                horizontalPoints: Float(translation.x),
+                verticalPoints: Float(translation.y),
+                metersPerPoint: slideMetersPerPoint,
+                limits: limits
+            )
             apply()
         }
 
         @objc func pinch(_ gesture: UIPinchGestureRecognizer) {
-            guard gesture.scale > 0 else { return }
-            distance /= Float(gesture.scale)
-            distance = min(maxDistance, max(minDistance, distance))
+            guard gesture.scale > 0.01 else { return }
+            rig.dolly(log(Float(gesture.scale)) * dollyMetersPerLn, limits: limits)
             gesture.scale = 1
             apply()
         }
 
         private func apply() {
             guard let cameraNode else { return }
-            cameraNode.simdPosition = target + PreviewOrbit.direction(yaw: yaw, pitch: pitch) * distance
-            cameraNode.look(at: SCNVector3(target.x, target.y, target.z))
+            cameraNode.simdPosition = rig.eye
+            cameraNode.simdOrientation = rig.lookRotation
         }
     }
 }

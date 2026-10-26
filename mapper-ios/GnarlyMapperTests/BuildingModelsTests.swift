@@ -219,6 +219,72 @@ final class BuildingModelsTests: XCTestCase {
         XCTAssertEqual(matrix.columns.3.y, buildingFloorGap, accuracy: 0.001)
         XCTAssertEqual(matrix.columns.3.z, -1, accuracy: 0.001)
     }
+
+    func testFramedCameraLooksAtTheModelAndStaysAboveTheMap() {
+        let groundY: Float = -0.2
+        let framed = PreviewRig.framing(
+            worldMin: SIMD3(-6, 0, -4),
+            worldMax: SIMD3(8, 3, 5),
+            comOffset: 1.2,
+            aspect: 0.62,
+            groundY: groundY
+        )
+        let toward = simd_normalize(-framed.rig.eye)
+        XCTAssertEqual(framed.rig.forward.x, toward.x, accuracy: 0.01)
+        XCTAssertEqual(framed.rig.forward.y, toward.y, accuracy: 0.01)
+        XCTAssertEqual(framed.rig.forward.z, toward.z, accuracy: 0.01)
+        XCTAssertGreaterThan(framed.rig.eye.y, groundY + PreviewLimits.clearance)
+        assertInside(framed.rig.eye, framed.limits)
+        let looked = framed.rig.lookRotation.act(SIMD3<Float>(0, 0, -1))
+        XCTAssertEqual(looked.x, framed.rig.forward.x, accuracy: 0.001)
+        XCTAssertEqual(looked.y, framed.rig.forward.y, accuracy: 0.001)
+        XCTAssertEqual(looked.z, framed.rig.forward.z, accuracy: 0.001)
+    }
+
+    func testSlideStaysOnTheViewPlaneInsideTheModel() {
+        var rig = PreviewRig.looking(from: SIMD3(4, 2.5, 6), at: .zero)
+        let forward = rig.forward
+        let start = rig.eye
+        let limits = PreviewLimits(
+            minimum: SIMD3(repeating: -12),
+            maximum: SIMD3(repeating: 12),
+            groundY: 0,
+            eyeClearance: PreviewLimits.clearance
+        )
+        rig.slide(horizontalPoints: 40, verticalPoints: -16, metersPerPoint: 0.04, limits: limits)
+        let delta = rig.eye - start
+        XCTAssertGreaterThan(simd_length(delta), 0.2)
+        XCTAssertEqual(simd_dot(delta, forward), 0, accuracy: 0.02)
+        assertInside(rig.eye, limits)
+    }
+
+    func testDollyStopsAtTheShellAndAboveTheMap() {
+        var rig = PreviewRig.looking(from: SIMD3(0, 4, 6), at: .zero)
+        let limits = PreviewLimits(
+            minimum: SIMD3(-2, 0.45, -2),
+            maximum: SIMD3(2, 4, 2),
+            groundY: 0,
+            eyeClearance: 0.45
+        )
+        for _ in 0..<40 { rig.dolly(3, limits: limits) }
+        assertInside(rig.eye, limits)
+        XCTAssertGreaterThanOrEqual(rig.eye.y, 0.45 - 0.001)
+        rig.look(deltaYaw: 0, deltaPitch: 5)
+        XCTAssertEqual(rig.pitch, PreviewRig.maxPitch, accuracy: 0.0001)
+        rig.look(deltaYaw: 0, deltaPitch: -8)
+        XCTAssertEqual(rig.pitch, PreviewRig.minPitch, accuracy: 0.0001)
+        XCTAssertGreaterThan(rig.lookRotation.act(SIMD3<Float>(0, 1, 0)).y, 0.15)
+    }
+}
+
+private func assertInside(_ eye: SIMD3<Float>, _ limits: PreviewLimits, file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertGreaterThanOrEqual(eye.x, limits.minimum.x - 0.001, file: file, line: line)
+    XCTAssertGreaterThanOrEqual(eye.y, limits.minimum.y - 0.001, file: file, line: line)
+    XCTAssertGreaterThanOrEqual(eye.z, limits.minimum.z - 0.001, file: file, line: line)
+    XCTAssertLessThanOrEqual(eye.x, limits.maximum.x + 0.001, file: file, line: line)
+    XCTAssertLessThanOrEqual(eye.y, limits.maximum.y + 0.001, file: file, line: line)
+    XCTAssertLessThanOrEqual(eye.z, limits.maximum.z + 0.001, file: file, line: line)
+    XCTAssertGreaterThanOrEqual(eye.y, limits.groundY + limits.eyeClearance - 0.001, file: file, line: line)
 }
 
 private func coverageCamera(eye: SIMD3<Float>, target: SIMD3<Float>) -> CoverageCamera {

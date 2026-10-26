@@ -23,7 +23,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Gnarly Mapper uses the camera and LiDAR scanner to capture indoor geometry and create an AR world map.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Gnarly Mapper uses your location so a building can sit on the map where it actually is.</string>
+	<string>Gnarly Mapper needs your location to pin a building where you actually are. You can still move the pin on the map.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
